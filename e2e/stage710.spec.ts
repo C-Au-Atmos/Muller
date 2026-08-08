@@ -878,25 +878,23 @@ test("Tab switches file focus between panes without a focus rectangle", async ({
 
 test("keyboard row navigation moves the focus surface with a spring", async ({ page }) => {
   await installDesktopMock(page, "classic", 0, "full");
+  await page.clock.install();
   await page.goto("/");
   const viewport = page.locator(".directory-list-viewport").first();
   const focusSurface = viewport.locator(".directory-list-selection");
   await viewport.focus();
+  await page.clock.pauseAt(Date.now() + 1_000);
   const start = await focusSurface.boundingBox();
   if (!start) throw new Error("List focus spring start geometry is unavailable");
-  await startVerticalMotionSampling(
-    page,
-    ".directory-list-viewport .directory-list-selection",
-    "__mullerKeyboardFocusSamples",
-  );
   await page.keyboard.press("ArrowDown");
-  await expect.poll(async () => (
-    Math.round(((await focusSurface.boundingBox())?.y ?? start.y) - start.y)
-  )).toBe(32);
+  await page.clock.runFor(32);
+  const middle = await focusSurface.boundingBox();
+  if (!middle) throw new Error("List focus spring middle geometry is unavailable");
+  expect(middle.y).toBeGreaterThan(start.y + 1);
+  expect(middle.y).toBeLessThan(start.y + 31);
+  await page.clock.runFor(500);
   const end = await focusSurface.boundingBox();
   if (!end) throw new Error("List focus spring end geometry is unavailable");
-  const samples = await verticalMotionSamples(page, "__mullerKeyboardFocusSamples");
-  expect(samples.some((y) => y > start.y + 1 && y < end.y - 1)).toBe(true);
   expect(Math.round(end.y - start.y)).toBe(32);
 });
 
