@@ -10,7 +10,7 @@ default-members = ["crates/muller-core"]
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.87"
+rust-version = "1.89"
 license = "GPL-3.0-only"
 
 [profile.release]

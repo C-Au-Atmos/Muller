@@ -277,10 +277,11 @@ fn load_preview(
         .and_then(|value| u64::try_from(value.as_millis()).ok());
     let created_unix_ms = unix_ms(metadata.created().ok());
     let accessed_unix_ms = unix_ms(metadata.accessed().ok());
-    if let Some(cached) = lock_unpoisoned(&manager.inner.cache).get(&canonical) {
-        if cached.file_size == metadata.len() && cached.modified_unix_ms == modified_unix_ms {
-            return Ok(cached);
-        }
+    if let Some(cached) = lock_unpoisoned(&manager.inner.cache).get(&canonical)
+        && cached.file_size == metadata.len()
+        && cached.modified_unix_ms == modified_unix_ms
+    {
+        return Ok(cached);
     }
 
     let extension = requested

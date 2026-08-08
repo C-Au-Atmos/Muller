@@ -31,7 +31,7 @@ Muller 是一款面向开发者与重度文件管理用户的桌面工具，核�
 | 层 | 技术 | 锁定版本 | 说明 |
 |---|---|---|---|
 | 外壳 | Tauri | 2.x（≥2.6） | 使用 `ipc::Channel`、多 webview、webview 挂起能力 |
-| 后端 | Rust | 2024 Edition（工具链 ≥1.87） | 所有权驱动的确定性内存释放 |
+| 后端 | Rust | 2024 Edition（工具链 ≥1.89） | 所有权驱动的确定性内存释放 |
 | 异步 | Tokio | 1.52.x | 目录遍历与 I/O 事件调度 |
 | 并行 | Rayon | 最新稳定 | CPU 密集哈希的多核并行 |
 | 前端 | React | 19.1.x | 启用 **React Compiler v1.0**（自动记忆化，免手写 memo） |
@@ -866,7 +866,6 @@ fn delete_files(paths: Vec<PathBuf>, to_recycle: bool) -> Result<DeleteReport, S
 - **数据边界**：索引仅含文件名/大小/时间戳等元数据（同 Everything），不读文件内容。
 
 ---
-
 
 
 

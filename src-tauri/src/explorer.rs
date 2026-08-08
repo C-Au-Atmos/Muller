@@ -1197,12 +1197,12 @@ fn matches_directory_filter(
         return false;
     }
     if let Some(before) = filter.modified_before_unix_ms
-        && !modified_unix_ms.is_some_and(|value| value <= before)
+        && modified_unix_ms.is_none_or(|value| value > before)
     {
         return false;
     }
     if let Some(after) = filter.modified_after_unix_ms
-        && !modified_unix_ms.is_some_and(|value| value >= after)
+        && modified_unix_ms.is_none_or(|value| value < after)
     {
         return false;
     }

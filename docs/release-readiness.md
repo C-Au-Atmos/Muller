@@ -54,8 +54,8 @@ Stage 8 is a separate performance milestone and does not block this preview.
 
 Local candidate SHA-256 values:
 
-- setup: `227CFF9195C97D0F387DD85F59E3AF1C8216EC67B0D5B889A289F080E8E8240E`
-- portable: `B8DFB356A7F4655FB328CEB8C7435DA8F88F79DD9A194C10A631B8CBA0B15661`
+- setup: `148E28C5275758BEC3B695433793821E5ADBE5143E365696DAEEA2736308E1DF`
+- portable: `C3A38FBCC266B0CCD0A1BB47937B67D825C8217B867D61263B700697B7E1B152`
 
 The GitHub release workflow rebuilds these assets on its Windows runner and
 publishes the runner-specific hashes in `SHA256SUMS.txt`.

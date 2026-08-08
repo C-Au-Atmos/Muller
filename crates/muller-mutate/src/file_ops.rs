@@ -234,13 +234,13 @@ fn transfer_entry_with_recycler(
     let mut warning = commit_staged(&staged, &destination, replaced)?;
 
     let mut source_retained = mode == TransferMode::Copy;
-    if mode == TransferMode::Move {
-        if let Err(message) = recycler.recycle(&source) {
-            source_retained = true;
-            warning = Some(format!(
-                "destination was verified, but the source could not be recycled: {message}"
-            ));
-        }
+    if mode == TransferMode::Move
+        && let Err(message) = recycler.recycle(&source)
+    {
+        source_retained = true;
+        warning = Some(format!(
+            "destination was verified, but the source could not be recycled: {message}"
+        ));
     }
     Ok(TransferReport {
         source,
@@ -277,12 +277,11 @@ fn recycle_entry_with(
     {
         return Err(MutationError::ExternalChange(path));
     }
-    if let Some(expected) = &expectation.expected_blake3 {
-        if actual_kind != EntryKind::File
-            || fingerprint_file(&path, cancellation)?.blake3 != parse_hash_hex(expected)?
-        {
-            return Err(MutationError::ExternalChange(path));
-        }
+    if let Some(expected) = &expectation.expected_blake3
+        && (actual_kind != EntryKind::File
+            || fingerprint_file(&path, cancellation)?.blake3 != parse_hash_hex(expected)?)
+    {
+        return Err(MutationError::ExternalChange(path));
     }
     if cancellation.is_cancelled() {
         return Err(MutationError::Cancelled);

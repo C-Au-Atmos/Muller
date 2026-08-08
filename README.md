@@ -85,7 +85,7 @@ WebView2 Runtime。
 
 - Windows 11 x64
 - Node.js 24+ 与 npm 11+
-- Rust 1.87+，MSVC toolchain
+- Rust 1.89+，MSVC toolchain
 - Microsoft C++ Build Tools 与 WebView2
 
 ```powershell
