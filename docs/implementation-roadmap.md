@@ -1,6 +1,6 @@
 # Muller implementation roadmap
 
-This roadmap converts `Muller-设计文档.md` into independently verifiable
+This roadmap converts [`product-design.md`](product-design.md) into independently verifiable
 delivery stages. A stage is complete only when its exit criteria are measured;
 code presence alone is not completion.
 

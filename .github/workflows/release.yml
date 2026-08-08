@@ -1,4 +1,4 @@
-name: Draft Windows release
+name: Publish Windows prerelease
 
 on:
   push:
@@ -36,15 +36,42 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Muller ${{ github.ref_name }}"
-          releaseBody: "See CHANGELOG.md and docs/release-readiness.md for changes and known limits."
+          releaseBody: |
+            Muller ${{ github.ref_name }} is a public Windows preview.
+
+            **Downloads**
+            - `*-setup.exe` - recommended Windows installer
+            - `*-portable.exe` - standalone portable executable
+            - `SHA256SUMS.txt` - SHA-256 checksums for both executables
+
+            This preview is unsigned, so Windows SmartScreen may show an unknown-publisher warning. See [CHANGELOG.md](https://github.com/AuAtmos/Muller/blob/${{ github.ref_name }}/CHANGELOG.md) and [release readiness](https://github.com/AuAtmos/Muller/blob/${{ github.ref_name }}/docs/release-readiness.md) for features and known limits.
           releaseDraft: true
           prerelease: true
           args: --bundles nsis
-      - name: Upload portable executable
+      - name: Upload portable executable and checksums
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $asset = "Muller_${{ github.ref_name }}_x64_portable.exe"
-          Copy-Item -LiteralPath ".cargo-target/release/muller.exe" -Destination $asset
-          gh release upload "${{ github.ref_name }}" $asset --clobber
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $portable = "Muller_${version}_x64-portable.exe"
+          Copy-Item -LiteralPath ".cargo-target/release/muller.exe" -Destination $portable
+
+          $setups = @(Get-ChildItem -LiteralPath ".cargo-target/release/bundle/nsis" -Filter "*setup.exe")
+          if ($setups.Count -ne 1) {
+            throw "Expected exactly one NSIS installer, found $($setups.Count)"
+          }
+
+          $checksums = @(
+            "$((Get-FileHash -LiteralPath $setups[0].FullName -Algorithm SHA256).Hash) *$($setups[0].Name)"
+            "$((Get-FileHash -LiteralPath $portable -Algorithm SHA256).Hash) *$portable"
+          )
+          $checksums | Set-Content -LiteralPath "SHA256SUMS.txt" -Encoding ascii
+
+          gh release upload "${{ github.ref_name }}" $portable "SHA256SUMS.txt" --clobber
+      - name: Publish prerelease
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "${{ github.ref_name }}" --draft=false --prerelease

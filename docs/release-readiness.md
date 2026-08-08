@@ -41,20 +41,24 @@ Stage 8 is a separate performance milestone and does not block this preview.
   `AuAtmos/Muller`.
 - The existing GPLv3 `LICENSE` commit is retained as the base of `main`.
 - The current source tree is committed and pushed separately from any release.
-- Pushing `v0.1.0` and publishing a GitHub Release still require separate,
-  explicit authorization.
+- Publishing `v0.1.0` is authorized. The tag workflow creates a draft, uploads
+  and hashes both Windows executables, then publishes the completed prerelease.
 - The preview is unsigned. A code-signing certificate is recommended before a
   stable release but is not technically required for a preview.
 
 ## Intended assets
 
-- `Muller_0.1.0_x64_glass-capsule-preview-setup.exe`
-- `Muller_0.1.0_x64_glass-capsule-preview-portable.exe`
+- `Muller_0.1.0_x64-setup.exe`
+- `Muller_0.1.0_x64-portable.exe`
+- `SHA256SUMS.txt`
 
 Local candidate SHA-256 values:
 
-- setup: `1BDAAAEB49188036DE64169AC23DF4E332CA6BF380000CE3A1857ED4190A5374`
-- portable: `F908BFE462A50CFD4D40E8220E5472BB4AAF1331E53F1A0359A30ABC8C0A5A8B`
+- setup: `227CFF9195C97D0F387DD85F59E3AF1C8216EC67B0D5B889A289F080E8E8240E`
+- portable: `B8DFB356A7F4655FB328CEB8C7435DA8F88F79DD9A194C10A631B8CBA0B15661`
+
+The GitHub release workflow rebuilds these assets on its Windows runner and
+publishes the runner-specific hashes in `SHA256SUMS.txt`.
 
 The setup executable is the normal end-user path. The portable executable runs
 without Node.js, Rust, Visual Studio, or source-code dependencies. Windows 11
@@ -66,7 +70,8 @@ Evergreen WebView2 Runtime installed once.
 1. The repository, `origin`, author metadata, and GPLv3 licensing are configured.
 2. The current source tree is committed and pushed to `main`.
 3. Confirm the Windows CI workflow passes.
-4. With separate authorization, push tag `v0.1.0`; the release workflow then
-   creates a draft prerelease.
-5. Download and smoke-test both assets on a clean Windows account or machine.
-6. Add screenshots and known limits, then explicitly publish the draft.
+4. Push tag `v0.1.0`; the release workflow creates a draft, rebuilds the Windows
+   assets, uploads their checksums, and then publishes the prerelease.
+5. Download and smoke-test both published executables on a clean Windows account
+   or machine; withdraw the prerelease if a blocking issue is found.
+6. Add final screenshots and keep the known limits synchronized with test evidence.

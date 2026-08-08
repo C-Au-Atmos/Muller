@@ -4,7 +4,7 @@ All notable changes to Muller are documented in this file.
 
 ## [0.1.0] - 2026-08-08
 
-First public preview candidate.
+First public Windows preview.
 
 ### Added
 
