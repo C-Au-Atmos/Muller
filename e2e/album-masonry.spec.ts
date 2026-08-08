@@ -224,14 +224,26 @@ test("Album selection moves with a spring without scrolling visible tiles", asyn
   if (!start || !target) throw new Error("Album selection geometry is unavailable");
   const scrollBefore = await viewport.evaluate((element) => element.scrollTop);
 
+  await page.evaluate(() => {
+    const samples: number[] = [];
+    Reflect.set(window, "__mullerAlbumSelectionSamples", samples);
+    const deadline = performance.now() + 600;
+    const capture = () => {
+      const element = document.querySelector(".directory-grid-viewport.is-album .directory-grid-selection");
+      if (element) samples.push(element.getBoundingClientRect().x);
+      if (performance.now() < deadline) requestAnimationFrame(capture);
+    };
+    requestAnimationFrame(capture);
+  });
   await tiles.nth(1).click();
-  await page.waitForTimeout(50);
-  const middle = await selection.boundingBox();
-  if (!middle) throw new Error("Album selection disappeared during its transition");
-  expect(middle.x).toBeGreaterThan(start.x + 1);
-  expect(middle.x).toBeLessThan(target.x - 1);
-
   await page.waitForTimeout(350);
+  const samples = await page.evaluate(
+    () => Reflect.get(window, "__mullerAlbumSelectionSamples") as number[],
+  );
+  const lowerBound = Math.min(start.x, target.x) + 1;
+  const upperBound = Math.max(start.x, target.x) - 1;
+  expect(samples.some((x) => x > lowerBound && x < upperBound)).toBe(true);
+
   const end = await selection.boundingBox();
   if (!end) throw new Error("Album selection disappeared after its transition");
   expect(end.x).toBeCloseTo(target.x, 0);
