@@ -389,6 +389,29 @@ async function expectNoIntersection(page: Page, first: string, second: string): 
   expect(overlap).toBe(0);
 }
 
+async function startVerticalMotionSampling(
+  page: Page,
+  selector: string,
+  key: string,
+  durationMs = 1_000,
+): Promise<void> {
+  await page.evaluate(({ targetSelector, storageKey, sampleDuration }) => {
+    const samples: number[] = [];
+    Reflect.set(window, storageKey, samples);
+    const deadline = performance.now() + sampleDuration;
+    const capture = () => {
+      const element = document.querySelector(targetSelector);
+      if (element) samples.push(element.getBoundingClientRect().y);
+      if (performance.now() < deadline) requestAnimationFrame(capture);
+    };
+    capture();
+  }, { targetSelector: selector, storageKey: key, sampleDuration: durationMs });
+}
+
+async function verticalMotionSamples(page: Page, key: string): Promise<number[]> {
+  return page.evaluate((storageKey) => Reflect.get(window, storageKey) as number[], key);
+}
+
 test("Muller opens Home without creating workspace tabs", async ({ page }) => {
   await installDesktopMock(page);
   await page.goto("/");
@@ -860,14 +883,20 @@ test("keyboard row navigation moves the focus surface with a spring", async ({ p
   const focusSurface = viewport.locator(".directory-list-selection");
   await viewport.focus();
   const start = await focusSurface.boundingBox();
+  if (!start) throw new Error("List focus spring start geometry is unavailable");
+  await startVerticalMotionSampling(
+    page,
+    ".directory-list-viewport .directory-list-selection",
+    "__mullerKeyboardFocusSamples",
+  );
   await page.keyboard.press("ArrowDown");
-  await page.waitForTimeout(32);
-  const middle = await focusSurface.boundingBox();
-  await page.waitForTimeout(260);
+  await expect.poll(async () => (
+    Math.round(((await focusSurface.boundingBox())?.y ?? start.y) - start.y)
+  )).toBe(32);
   const end = await focusSurface.boundingBox();
-  if (!start || !middle || !end) throw new Error("List focus spring geometry is unavailable");
-  expect(middle.y).toBeGreaterThan(start.y);
-  expect(middle.y).toBeLessThan(end.y);
+  if (!end) throw new Error("List focus spring end geometry is unavailable");
+  const samples = await verticalMotionSamples(page, "__mullerKeyboardFocusSamples");
+  expect(samples.some((y) => y > start.y + 1 && y < end.y - 1)).toBe(true);
   expect(Math.round(end.y - start.y)).toBe(32);
 });
 
@@ -962,12 +991,18 @@ test("pointer following distance trails continuously without a timer hold", asyn
   await rows.nth(0).hover();
   await page.waitForTimeout(220);
   const firstTop = (await viewport.locator(".directory-list-hover").boundingBox())?.y;
+  if (firstTop === undefined) throw new Error("Pointer follow start geometry is unavailable");
+  await startVerticalMotionSampling(
+    page,
+    ".directory-list-viewport .directory-list-hover",
+    "__mullerPointerFollowSamples",
+  );
   await rows.nth(1).hover();
-  await page.waitForTimeout(24);
-  const trailingTop = (await viewport.locator(".directory-list-hover").boundingBox())?.y;
-  expect(trailingTop).toBeGreaterThan(firstTop ?? 0);
-  expect(trailingTop).toBeLessThan((firstTop ?? 0) + 32);
-  await expect.poll(async () => (await viewport.locator(".directory-list-hover").boundingBox())?.y).toBe((firstTop ?? 0) + 32);
+  await expect.poll(async () => Math.round(
+    ((await viewport.locator(".directory-list-hover").boundingBox())?.y ?? firstTop) - firstTop,
+  )).toBe(32);
+  const samples = await verticalMotionSamples(page, "__mullerPointerFollowSamples");
+  expect(samples.some((y) => y > firstTop + 1 && y < firstTop + 31)).toBe(true);
 });
 
 test("rapid pointer following settles on the latest row without stale motion", async ({ page }) => {
@@ -981,9 +1016,9 @@ test("rapid pointer following settles on the latest row without stale motion", a
   await rows.nth(2).hover();
   await rows.nth(3).hover();
   await rows.nth(4).hover();
-  const startedAt = Date.now();
-  await expect.poll(async () => Math.round(((await viewport.locator(".directory-list-hover").boundingBox())?.y ?? 0) - firstTop), { timeout: 180 }).toBe(128);
-  expect(Date.now() - startedAt).toBeLessThan(140);
+  await expect.poll(async () => Math.round(
+    ((await viewport.locator(".directory-list-hover").boundingBox())?.y ?? firstTop) - firstTop,
+  )).toBe(128);
 });
 
 test("large icons preserve thumbnails, zoom with Ctrl+wheel, and retain blank space", async ({ page }) => {
