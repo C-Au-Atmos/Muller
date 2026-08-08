@@ -47,4 +47,24 @@ jobs:
           }
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - run: npx playwright install msedge
-      - run: npm run test:e2e
+      - name: Run Playwright E2E
+        shell: pwsh
+        run: |
+          $env:FORCE_COLOR = "0"
+          npm run test:e2e 2>&1 | Tee-Object -Variable output
+          $exitCode = $LASTEXITCODE
+          if ($exitCode -ne 0) {
+            $tail = (($output | Select-Object -Last 60) -join " | ").Replace("%", "%25")
+            Write-Output "::error title=Playwright E2E failed::$tail"
+            exit $exitCode
+          }
+      - name: Upload E2E failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-diagnostics-${{ github.run_id }}
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
