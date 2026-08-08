@@ -18,7 +18,7 @@
   </p>
 </div>
 
-![Muller workspace](docs/assets/muller-workspace.png)
+![Muller Monochrome Platinum workspace](docs/assets/muller-platinum-workspace.png)
 
 ## 为什么是 Muller
 
