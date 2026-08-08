@@ -1,0 +1,21 @@
+[workspace]
+resolver = "3"
+members = [
+  "crates/muller-core",
+  "crates/muller-diff",
+  "crates/muller-mutate",
+  "src-tauri",
+]
+default-members = ["crates/muller-core"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.87"
+license = "GPL-3.0-only"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = "s"
+panic = "abort"
+strip = true

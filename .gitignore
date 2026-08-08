@@ -1,0 +1,21 @@
+node_modules/
+dist/
+coverage/
+playwright-report/
+test-results/
+blob-report/
+release/
+*.log
+
+# Rust / Tauri
+target/
+src-tauri/target/
+.cargo-target/
+src-tauri/gen/schemas/
+
+# Editors and local settings
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db

@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Muller Stage 7 Workspace Concept V2</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --base: #06080b;
+      --glass: rgba(10, 13, 18, 0.82);
+      --surface: rgba(13, 17, 23, 0.94);
+      --surface-hi: rgba(19, 24, 33, 0.96);
+      --line: rgba(102, 119, 143, 0.22);
+      --line-hi: rgba(143, 166, 197, 0.42);
+      --text: #f0f4fa;
+      --mid: #a1acbc;
+      --low: #626f82;
+      --ice: #80d9e5;
+      --green: #69d6aa;
+      --rose: #e488ae;
+      --gold: #e3bd6f;
+      --violet: #9c85e8;
+      font-family: Inter, "Segoe UI", Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #030507; }
+    body { display: grid; place-items: center; color: var(--text); }
+    button, input { font: inherit; letter-spacing: 0; }
+    button { cursor: default; }
+
+    .app {
+      position: relative;
+      display: grid;
+      grid-template-rows: 150px 74px minmax(0, 1fr) 28px;
+      width: 1560px;
+      height: 960px;
+      overflow: hidden;
+      border: 1px solid rgba(128, 217, 229, 0.34);
+      background: transparent;
+      box-shadow: 0 28px 100px rgba(0, 0, 0, 0.78);
+      isolation: isolate;
+    }
+
+    .color-bends {
+      position: absolute;
+      z-index: 0;
+      inset: -20%;
+      overflow: hidden;
+      background:
+        linear-gradient(118deg, transparent 0 21%, rgba(62, 158, 177, 0.72) 29%, transparent 37% 58%, rgba(120, 83, 193, 0.64) 66%, transparent 74%),
+        linear-gradient(63deg, transparent 0 32%, rgba(64, 145, 106, 0.66) 40%, transparent 49% 68%, rgba(175, 91, 127, 0.58) 75%, transparent 82%),
+        #07090d;
+    }
+    .color-bends i { position: absolute; display: block; width: 130%; height: 170px; border: 2px solid currentColor; border-radius: 48%; opacity: 0.38; filter: blur(34px); animation: bend-drift 12s ease-in-out infinite alternate; }
+    .color-bends i:nth-child(1) { top: 8%; left: -20%; color: #58bfce; transform: rotate(-12deg); }
+    .color-bends i:nth-child(2) { top: 32%; left: -8%; color: #785dcc; transform: rotate(10deg); animation-delay: -4s; }
+    .color-bends i:nth-child(3) { top: 58%; left: -18%; color: #4b9d79; transform: rotate(-8deg); animation-delay: -7s; }
+    .color-bends i:nth-child(4) { top: 78%; left: -5%; color: #b56888; transform: rotate(13deg); animation-delay: -9s; }
+    @keyframes bend-drift { to { translate: 7% -4%; scale: 1.06; rotate: 3deg; } }
+
+    .veil { position: absolute; z-index: 1; inset: 0; background: rgba(5, 8, 12, 0.46); backdrop-filter: blur(14px); pointer-events: none; }
+
+    .edge-runner { position: absolute; z-index: 40; pointer-events: none; filter: drop-shadow(0 0 5px currentColor) drop-shadow(0 0 11px currentColor); }
+    .edge-runner.top, .edge-runner.bottom { width: 430px; height: 2px; background: linear-gradient(90deg, transparent, color-mix(in srgb, currentColor 16%, transparent) 24%, color-mix(in srgb, currentColor 60%, transparent) 72%, #fff 100%); animation: run-x 1.15s linear infinite; }
+    .edge-runner.left, .edge-runner.right { width: 2px; height: 360px; background: linear-gradient(180deg, transparent, color-mix(in srgb, currentColor 16%, transparent) 24%, color-mix(in srgb, currentColor 60%, transparent) 72%, #fff 100%); animation: run-y 1.15s linear infinite; }
+    .edge-runner.top { top: 1px; left: -430px; color: var(--ice); }
+    .edge-runner.right { top: -360px; right: 1px; color: var(--rose); animation-delay: -0.28s; }
+    .edge-runner.bottom { right: -430px; bottom: 1px; color: var(--green); transform: rotate(180deg); animation-delay: -0.56s; }
+    .edge-runner.left { bottom: -360px; left: 1px; color: var(--gold); transform: rotate(180deg); animation-delay: -0.84s; }
+    @keyframes run-x { to { translate: 1990px 0; } }
+    @keyframes run-y { to { translate: 0 1320px; } }
+
+    .specular {
+      --spec: rgba(128, 217, 229, 0.72);
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(108, 125, 149, 0.32);
+      border-radius: 6px;
+      color: var(--mid);
+      background: linear-gradient(180deg, rgba(28, 34, 45, 0.92), rgba(13, 17, 23, 0.94));
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.055), 0 5px 15px rgba(0, 0, 0, 0.16);
+    }
+
+    .specular::before {
+      position: absolute;
+      top: -1px;
+      left: 13%;
+      width: 74%;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--spec), #fff, var(--spec), transparent);
+      opacity: 0.72;
+      content: "";
+    }
+
+    .specular.is-active { border-color: rgba(128, 217, 229, 0.52); color: #fff; background: linear-gradient(180deg, rgba(31, 67, 77, 0.94), rgba(15, 31, 38, 0.96)); }
+    .specular.filter-active { --spec: rgba(105, 214, 170, 0.92); border-color: rgba(105, 214, 170, 0.52); color: #d6f8ea; background: linear-gradient(180deg, #1d4839, #10271f); }
+
+    .header { position: relative; z-index: 2; display: grid; grid-template-rows: 58px 92px; min-width: 0; border-bottom: 1px solid var(--line); background: rgba(7, 10, 14, 0.78); backdrop-filter: blur(24px); }
+    .topline { display: grid; grid-template-columns: 220px minmax(0, 1fr) 142px; align-items: center; min-width: 0; border-bottom: 1px solid var(--line); }
+    .brand { display: flex; align-items: center; padding-left: 20px; gap: 11px; }
+    .brand img { width: 38px; height: 38px; filter: drop-shadow(0 0 12px rgba(128, 217, 229, 0.12)); }
+    .brand-copy { display: grid; line-height: 1.05; }
+    .brand-copy strong { font-size: 17px; }
+    .brand-copy small { margin-top: 5px; color: var(--low); font-size: 8px; }
+
+    .pill-nav { display: flex; min-width: 0; align-items: center; justify-content: center; gap: 7px; }
+    .pill { --spec: rgba(156, 133, 232, 0.7); display: grid; grid-template-columns: 16px minmax(0, 1fr) 18px; min-width: 112px; max-width: 220px; height: 34px; align-items: center; padding: 0 10px; gap: 7px; border-radius: 18px; font-size: 10px; }
+    .pill span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pill b { color: var(--ice); font-size: 9px; }
+    .pill i { color: var(--low); font-size: 12px; font-style: normal; }
+    .pill.is-active { border-color: rgba(156, 133, 232, 0.54); color: #fff; background: linear-gradient(180deg, rgba(57, 46, 92, 0.96), rgba(27, 23, 43, 0.96)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 0 18px rgba(156, 133, 232, 0.12); }
+    .pill.add { min-width: 34px; width: 34px; padding: 0; grid-template-columns: 1fr; place-items: center; color: var(--mid); font-size: 17px; }
+    .window-actions { display: flex; justify-content: flex-end; padding-right: 11px; gap: 2px; }
+    .window-actions span { display: grid; width: 34px; height: 28px; place-items: center; color: var(--low); font-size: 10px; }
+
+    .navline { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; padding: 0 21px; gap: 14px; }
+    .nav-buttons, .layout-buttons, .toolbar-group { display: flex; align-items: center; gap: 6px; }
+    .icon-button { display: grid; width: 36px; height: 36px; place-items: center; padding: 0; font-size: 16px; }
+    .address { display: grid; grid-template-columns: auto auto minmax(0, 1fr); height: 54px; align-items: center; padding: 0 5px; gap: 10px; border-bottom: 1px solid rgba(128, 217, 229, 0.45); }
+    .address small { color: var(--low); font-size: 9px; }
+    .address b { color: #fff; font: 16px "Cascadia Mono", Consolas, monospace; }
+    .address span { color: var(--mid); font: 16px "Cascadia Mono", Consolas, monospace; }
+    .scale { display: grid; grid-template-columns: 28px 45px 28px; height: 36px; align-items: center; text-align: center; font-size: 9px; }
+    .scale b { color: #fff; font-weight: 600; }
+
+    .toolbar { position: relative; z-index: 2; display: grid; grid-template-columns: auto 1px auto 1px minmax(0, 1fr) auto; align-items: center; min-width: 0; padding: 0 18px; gap: 13px; border-bottom: 1px solid var(--line); background: rgba(10, 13, 18, 0.84); backdrop-filter: blur(20px); }
+    .divider { width: 1px; height: 28px; background: var(--line); }
+    .tool-button { display: flex; height: 37px; align-items: center; padding: 0 12px; gap: 8px; font-size: 10px; font-weight: 620; }
+    .tool-button .icon { color: currentColor; font-size: 14px; }
+    .view-buttons { display: grid; grid-template-columns: repeat(3, 36px); gap: 4px; }
+    .toolbar-search { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; width: min(100%, 282px); height: 36px; align-items: center; justify-self: end; padding: 0 10px; gap: 8px; border-bottom: 1px solid rgba(108,125,149,0.38); color: var(--low); font-size: 10px; }
+    .toolbar-search kbd { color: #536074; font: 8px "Cascadia Mono", Consolas, monospace; }
+
+    .content { position: relative; z-index: 2; display: grid; grid-template-columns: 56px minmax(0, 1fr); min-width: 0; min-height: 0; background: rgba(6, 8, 12, 0.56); backdrop-filter: blur(14px); }
+    .line-rail { position: relative; z-index: 15; display: grid; grid-template-rows: repeat(4, 48px) 1fr 48px; justify-items: center; padding-top: 16px; border-right: 1px solid var(--line); background: rgba(8, 11, 15, 0.9); }
+    .rail-button { display: grid; width: 34px; height: 34px; place-items: center; font-size: 13px; }
+    .rail-line { position: absolute; top: 210px; bottom: 72px; left: 27px; width: 1px; background: linear-gradient(transparent, rgba(128,217,229,0.42) 18% 82%, transparent); }
+    .dial-origin { position: absolute; z-index: 3; top: 330px; left: 18px; width: 20px; height: 20px; border: 1px solid rgba(128,217,229,0.72); border-radius: 50%; background: #0b1720; box-shadow: 0 0 0 5px rgba(128,217,229,0.06), 0 0 18px rgba(128,217,229,0.32); }
+    .dial-origin::before, .dial-origin::after { position: absolute; top: 50%; left: 50%; border: 1px solid rgba(128,217,229,0.28); border-radius: 50%; content: ""; translate: -50% -50%; animation: pulse-ring 1.8s ease-out infinite; }
+    .dial-origin::before { width: 34px; height: 34px; }
+    .dial-origin::after { width: 48px; height: 48px; animation-delay: -0.9s; }
+    @keyframes pulse-ring { from { opacity: 0.75; scale: 0.66; } to { opacity: 0; scale: 1.08; } }
+    .audio-bars { position: absolute; top: 358px; left: 18px; display: flex; height: 12px; align-items: end; gap: 2px; }
+    .audio-bars i { width: 2px; border-radius: 1px; background: var(--ice); opacity: 0.68; animation: audio-meter 0.72s ease-in-out infinite alternate; }
+    .audio-bars i:nth-child(1) { height: 4px; }.audio-bars i:nth-child(2) { height: 9px; animation-delay: -0.2s; }.audio-bars i:nth-child(3) { height: 6px; animation-delay: -0.4s; }
+    @keyframes audio-meter { to { height: 11px; opacity: 1; } }
+
+    .option-dial { position: absolute; z-index: 14; top: 230px; left: -64px; width: 248px; height: 248px; border: 1px solid rgba(128,217,229,0.32); border-radius: 50%; opacity: 0; background: repeating-conic-gradient(from -1deg, rgba(128,217,229,0.32) 0 0.7deg, transparent 0.7deg 10deg), radial-gradient(circle, rgba(14,22,29,0.97) 0 47%, rgba(10,16,22,0.94) 48% 68%, rgba(8,12,17,0.76) 69%); box-shadow: inset 0 0 42px rgba(128,217,229,0.06), 0 18px 60px rgba(0,0,0,0.62); transform: translateX(-36px) scale(0.86); transform-origin: 25% 50%; transition: opacity 220ms ease, transform 360ms cubic-bezier(.2,.9,.2,1); pointer-events: none; }
+    .option-dial.is-open, .line-rail:hover ~ .option-dial { opacity: 1; transform: translateX(0) scale(1); pointer-events: auto; }
+    .option-dial::before { position: absolute; inset: 37px; border: 1px solid rgba(156,133,232,0.24); border-radius: 50%; content: ""; }
+    .option-dial::after { position: absolute; top: 116px; left: 70px; width: 82px; height: 1px; background: linear-gradient(90deg, var(--ice), transparent); box-shadow: 0 0 8px var(--ice); content: ""; transform: rotate(-8deg); transform-origin: left; }
+    .dial-hub { position: absolute; top: 111px; left: 54px; width: 26px; height: 26px; border: 1px solid var(--ice); border-radius: 50%; background: #0c1820; box-shadow: 0 0 20px rgba(128,217,229,0.32); }
+    .dial-item { --spec: rgba(128,217,229,0.78); position: absolute; display: grid; width: 68px; height: 30px; place-items: center; border-radius: 16px; font-size: 8px; white-space: nowrap; }
+    .dial-item:nth-of-type(2) { top: 27px; left: 89px; }
+    .dial-item:nth-of-type(3) { top: 70px; left: 155px; }
+    .dial-item:nth-of-type(4) { top: 128px; left: 166px; }
+    .dial-item:nth-of-type(5) { top: 184px; left: 116px; }
+    .dial-item:nth-of-type(6) { top: 178px; left: 38px; }
+    .dial-item.is-current { border-color: rgba(105,214,170,0.62); color: #e2fff4; background: #17352b; }
+    .dial-caption { position: absolute; top: 104px; left: 87px; width: 70px; color: #6d7a8d; text-align: center; font-size: 7px; }
+
+    .pane-stage { display: grid; grid-template-columns: minmax(0, 0.95fr) 7px minmax(0, 1.05fr); min-width: 0; min-height: 0; }
+    .resize-bar { position: relative; background: rgba(17,22,30,0.96); }
+    .resize-bar::after { position: absolute; top: 50%; left: 2px; width: 3px; height: 50px; border-radius: 2px; background: #45526a; content: ""; translate: 0 -50%; }
+    .pane { display: grid; grid-template-rows: 43px 30px minmax(0,1fr); min-width: 0; min-height: 0; background: rgba(8,11,15,0.75); }
+    .pane.active { box-shadow: inset 0 2px 0 var(--ice); }
+    .pane-head { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; padding: 0 12px; gap: 9px; border-bottom: 1px solid var(--line); color: var(--low); font-size: 8px; }
+    .pane-head b { color: var(--ice); }
+    .pane-head span:nth-child(2) { overflow: hidden; color: var(--mid); text-overflow: ellipsis; white-space: nowrap; font: 9px "Cascadia Mono", Consolas, monospace; }
+    .columns, .row { display: grid; grid-template-columns: minmax(140px,1fr) 72px 110px; align-items: center; min-width: 0; }
+    .columns { padding: 0 11px 0 14px; border-bottom: 1px solid var(--line); color: #536075; font-size: 7px; }
+    .file-list { min-height: 0; overflow: hidden; }
+    .row { height: 39px; padding: 0 11px; border-bottom: 1px solid rgba(102,119,143,0.12); color: #788497; font-size: 8px; }
+    .row.selected { color: #d8e0eb; background: linear-gradient(90deg, rgba(40,85,94,0.76), rgba(25,47,62,0.72)); box-shadow: inset 3px 0 0 var(--ice); }
+    .name { display: grid; grid-template-columns: 24px minmax(0,1fr); align-items: center; gap: 7px; min-width: 0; }
+    .name b { overflow: hidden; color: var(--mid); text-overflow: ellipsis; white-space: nowrap; font-size: 9px; font-weight: 560; }
+    .selected .name b { color: #fff; }
+    .folder { position: relative; width: 18px; height: 13px; border: 1px solid #7592b7; border-radius: 2px; background: linear-gradient(145deg,#26384e,#182538); box-shadow: inset 0 1px 0 rgba(255,255,255,.08); }
+    .folder::before { position: absolute; top: -4px; left: 1px; width: 8px; height: 4px; border: 1px solid #7592b7; border-bottom: 0; border-radius: 2px 2px 0 0; background: #26384e; content: ""; }
+    .file { display: grid; width: 18px; height: 20px; place-items: center; border: 1px solid #66748b; border-radius: 2px; color: #9aacc3; background: #151c26; font: 5px "Cascadia Mono", Consolas, monospace; }
+    .file.code { border-color: #806ac1; color: #b7a8e6; }
+
+    .stagger-menu { position: absolute; z-index: 25; top: 0; right: 0; bottom: 0; display: grid; grid-template-rows: 54px auto auto minmax(0,1fr); width: 324px; border-left: 1px solid rgba(105,214,170,0.36); opacity: 0; background: rgba(9,13,17,0.96); box-shadow: -28px 0 70px rgba(0,0,0,0.58); backdrop-filter: blur(28px); transform: translateX(105%); transition: opacity 180ms ease, transform 420ms cubic-bezier(.2,.9,.2,1); pointer-events: none; }
+    .stagger-menu.is-open { opacity: 1; transform: translateX(0); pointer-events: auto; }
+    .menu-row { opacity: 0; transform: translateX(34px); transition: opacity 220ms ease, transform 380ms cubic-bezier(.2,.9,.2,1); }
+    .stagger-menu.is-open .menu-row { opacity: 1; transform: translateX(0); }
+    .stagger-menu.is-open .menu-row:nth-child(2) { transition-delay: 70ms; }
+    .stagger-menu.is-open .menu-row:nth-child(3) { transition-delay: 130ms; }
+    .stagger-menu.is-open .menu-row:nth-child(4) { transition-delay: 190ms; }
+    .menu-head { display: flex; align-items: center; justify-content: space-between; padding: 0 14px; border-bottom: 1px solid var(--line); color: #d9f5e9; font-size: 10px; font-weight: 700; }
+    .menu-head button { width: 30px; height: 30px; padding: 0; }
+    .filter-section { padding: 15px; border-bottom: 1px solid var(--line); }
+    .section-label { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; color: #6b778a; font-size: 8px; font-weight: 700; }
+    .section-label button { border: 0; color: var(--green); background: transparent; font-size: 8px; }
+    .mini-wheel { position: relative; display: grid; align-content: center; height: 132px; overflow: hidden; border-block: 1px solid rgba(102,119,143,0.14); }
+    .mini-wheel::before, .mini-wheel::after { position: absolute; z-index: 2; right: 0; left: 0; height: 32px; content: ""; pointer-events: none; }
+    .mini-wheel::before { top: 0; background: linear-gradient(#090d11,transparent); }.mini-wheel::after { bottom: 0; background: linear-gradient(transparent,#090d11); }
+    .ext { display: grid; grid-template-columns: 25px minmax(0,1fr) 25px; height: 26px; align-items: center; padding: 0 35px; color: #5c687a; font: 8px "Cascadia Mono", Consolas, monospace; transform-origin: center; }
+    .ext:nth-child(1), .ext:nth-child(5) { opacity: .38; transform: scale(.86); }.ext:nth-child(2), .ext:nth-child(4) { opacity: .68; transform: scale(.94); }
+    .ext.current { color: #e3fff5; background: linear-gradient(90deg,transparent,#17342a,transparent); font-size: 10px; }
+    .ext .check { color: var(--green); }.ext .count { color: var(--low); text-align: right; }
+    .date-mode { display: grid; grid-template-columns: 1fr 1fr; height: 29px; margin-bottom: 11px; overflow: hidden; border: 1px solid var(--line); border-radius: 5px; }
+    .date-mode span { display: grid; place-items: center; color: var(--low); font-size: 8px; }.date-mode .active { color: #fff; background: #263449; }
+    .counter-row { display: grid; grid-template-columns: 1.35fr 1fr 1fr; gap: 6px; }
+    .counter { display: grid; grid-template-rows: 15px 30px 15px; place-items: center; border: 1px solid var(--line); border-radius: 5px; color: #596678; background: #0c1117; font-size: 8px; }
+    .counter b { color: #fff; font: 12px "Cascadia Mono", Consolas, monospace; font-weight: 560; }
+    .filter-summary { padding: 15px; color: #6f7c8e; font-size: 8px; line-height: 1.8; }
+    .filter-summary b { color: var(--green); font-weight: 600; }
+
+    .status { position: relative; z-index: 2; display: grid; grid-template-columns: 160px minmax(0,1fr) auto; align-items: center; padding: 0 14px; gap: 12px; border-top: 1px solid var(--line); color: #657185; background: rgba(7,10,14,0.95); font: 8px "Cascadia Mono", Consolas, monospace; }
+    .status b { color: var(--green); }.status span:last-child { display: flex; gap: 18px; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .color-bends i, .edge-runner, .dial-origin::before, .dial-origin::after, .audio-bars i { animation: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <div class="color-bends"><i></i><i></i><i></i><i></i></div>
+    <div class="veil"></div>
+    <i class="edge-runner top"></i><i class="edge-runner right"></i><i class="edge-runner bottom"></i><i class="edge-runner left"></i>
+
+    <header class="header">
+      <div class="topline">
+        <div class="brand"><img src="../../public/muller-icon.png" alt="Muller" /><span class="brand-copy"><strong>Muller</strong><small>FILE INTELLIGENCE</small></span></div>
+        <nav class="pill-nav" aria-label="Workspace tabs">
+          <button class="pill specular"><b>H</b><span>Home</span><i></i></button>
+          <button class="pill specular is-active"><b>D:</b><span>D:\Muller</span><i>&times;</i></button>
+          <button class="pill specular"><b>P</b><span>Pictures</span><i>&times;</i></button>
+          <button class="pill specular"><b>C</b><span>Archive compare</span><i>&times;</i></button>
+          <button class="pill add specular" title="New workspace">+</button>
+        </nav>
+        <div class="window-actions"><span>&minus;</span><span>&square;</span><span>&times;</span></div>
+      </div>
+      <div class="navline">
+        <div class="nav-buttons">
+          <button class="icon-button specular" title="Back">&larr;</button>
+          <button class="icon-button specular" title="Forward">&rarr;</button>
+          <button class="icon-button specular" title="Parent">&uarr;</button>
+        </div>
+        <div class="address"><small>LOCAL</small><span>/</span><b>D:\Muller</b></div>
+        <div class="layout-buttons">
+          <button class="icon-button specular is-active" title="Two panes">&#9646;&#9646;</button>
+          <div class="scale specular"><span>&minus;</span><b>100%</b><span>+</span></div>
+          <button class="icon-button specular" title="More">&hellip;</button>
+        </div>
+      </div>
+    </header>
+
+    <section class="toolbar">
+      <div class="toolbar-group">
+        <button class="tool-button specular is-active"><span class="icon">&#9638;</span>Browse</button>
+        <button class="tool-button specular"><span class="icon">&#9636;</span>Duplicates</button>
+        <button class="tool-button specular"><span class="icon">&#8644;</span>Compare</button>
+        <button class="tool-button specular"><span class="icon">&#9707;</span>Album</button>
+      </div>
+      <i class="divider"></i>
+      <div class="toolbar-group view-buttons">
+        <button class="icon-button specular is-active" title="List view">&#9776;</button>
+        <button class="icon-button specular" title="Horizontal cubes">&#9644;</button>
+        <button class="icon-button specular" title="Cube grid">&#8862;</button>
+      </div>
+      <i class="divider"></i>
+      <div class="toolbar-search"><span>&#9906;</span><span>Search current folder</span><kbd>Ctrl F</kbd></div>
+      <button id="filter-toggle" class="tool-button specular filter-active" aria-pressed="true"><span class="icon">&#9661;</span>Filters <b>4</b></button>
+    </section>
+
+    <section class="content" id="content">
+      <aside class="line-rail" aria-label="Line Sidebar">
+        <button class="rail-button specular is-active" title="Browse">&#9638;</button>
+        <button class="rail-button specular" title="Duplicates">&#9636;</button>
+        <button class="rail-button specular" title="Compare">&#8644;</button>
+        <button class="rail-button specular" title="Album">&#9707;</button>
+        <i class="rail-line"></i>
+        <button class="dial-origin" id="dial-origin" title="Locations"></button>
+        <span class="audio-bars"><i></i><i></i><i></i></span>
+        <button class="rail-button specular" title="Settings">&#9881;</button>
+      </aside>
+
+      <div class="option-dial is-open" id="option-dial" aria-label="Location wheel">
+        <span class="dial-hub"></span><span class="dial-caption">LOCATIONS</span>
+        <button class="dial-item specular" data-tone="440">Home</button>
+        <button class="dial-item specular" data-tone="500">This PC</button>
+        <button class="dial-item specular is-current" data-tone="560">D:\Muller</button>
+        <button class="dial-item specular" data-tone="620">Pictures</button>
+        <button class="dial-item specular" data-tone="680">Archive</button>
+      </div>
+
+      <div class="pane-stage">
+        <section class="pane active">
+          <div class="pane-head"><b>LEFT</b><span>D:\Muller</span><span>18 items</span></div>
+          <div class="columns"><span>Name</span><span>Size</span><span>Modified</span></div>
+          <div class="file-list">
+            <div class="row"><span class="name"><i class="folder"></i><b>crates</b></span><span>&mdash;</span><span>Today 19:42</span></div>
+            <div class="row"><span class="name"><i class="folder"></i><b>docs</b></span><span>&mdash;</span><span>Today 23:05</span></div>
+            <div class="row"><span class="name"><i class="folder"></i><b>e2e</b></span><span>&mdash;</span><span>Today 22:57</span></div>
+            <div class="row"><span class="name"><i class="folder"></i><b>public</b></span><span>&mdash;</span><span>Today 18:03</span></div>
+            <div class="row selected"><span class="name"><i class="folder"></i><b>src</b></span><span>&mdash;</span><span>Today 22:51</span></div>
+            <div class="row"><span class="name"><i class="folder"></i><b>src-tauri</b></span><span>&mdash;</span><span>Today 22:54</span></div>
+            <div class="row"><span class="name"><i class="file code">RS</i><b>Cargo.toml</b></span><span>1.1 KB</span><span>Today 16:21</span></div>
+            <div class="row"><span class="name"><i class="file">MD</i><b>README.md</b></span><span>6.4 KB</span><span>Today 22:55</span></div>
+            <div class="row"><span class="name"><i class="file">JSON</i><b>package.json</b></span><span>1.2 KB</span><span>Today 20:12</span></div>
+          </div>
+        </section>
+        <i class="resize-bar"></i>
+        <section class="pane">
+          <div class="pane-head"><b>RIGHT</b><span>D:\Muller\src</span><span>12 items</span></div>
+          <div class="columns"><span>Name</span><span>Size</span><span>Modified</span></div>
+          <div class="file-list">
+            <div class="row"><span class="name"><i class="folder"></i><b>animation</b></span><span>&mdash;</span><span>Today 17:28</span></div>
+            <div class="row"><span class="name"><i class="folder"></i><b>commands</b></span><span>&mdash;</span><span>Today 22:13</span></div>
+            <div class="row"><span class="name"><i class="folder"></i><b>features</b></span><span>&mdash;</span><span>Today 22:50</span></div>
+            <div class="row"><span class="name"><i class="folder"></i><b>styles</b></span><span>&mdash;</span><span>Today 22:51</span></div>
+            <div class="row selected"><span class="name"><i class="file code">TSX</i><b>App.tsx</b></span><span>41.2 KB</span><span>Today 22:51</span></div>
+            <div class="row"><span class="name"><i class="file code">TSX</i><b>main.tsx</b></span><span>0.4 KB</span><span>Today 15:01</span></div>
+            <div class="row"><span class="name"><i class="file">CSS</i><b>index.css</b></span><span>1.8 KB</span><span>Today 19:31</span></div>
+            <div class="row"><span class="name"><i class="file">PNG</i><b>workspace-preview.png</b></span><span>1.6 MB</span><span>Yesterday</span></div>
+          </div>
+        </section>
+      </div>
+
+      <aside class="stagger-menu is-open" id="filter-menu" aria-label="Filters">
+        <div class="menu-head menu-row"><span>FILTERS</span><button id="filter-close" class="icon-button specular" title="Close">&times;</button></div>
+        <section class="filter-section menu-row">
+          <div class="section-label"><span>EXTENSION WHEEL</span><button>Clear</button></div>
+          <div class="mini-wheel">
+            <div class="ext"><span></span><span>.rs</span><span class="count">12</span></div>
+            <div class="ext"><span class="check">&#10003;</span><span>.ts</span><span class="count">8</span></div>
+            <div class="ext current"><span class="check">&#10003;</span><span>.tsx</span><span class="count">14</span></div>
+            <div class="ext"><span class="check">&#10003;</span><span>.md</span><span class="count">6</span></div>
+            <div class="ext"><span></span><span>.json</span><span class="count">4</span></div>
+          </div>
+        </section>
+        <section class="filter-section menu-row">
+          <div class="section-label"><span>DATE COUNTER</span><button>Reset</button></div>
+          <div class="date-mode"><span>Before</span><span class="active">After</span></div>
+          <div class="counter-row">
+            <span class="counter"><i>&and;</i><b>2026</b><i>&or;</i></span>
+            <span class="counter"><i>&and;</i><b>07</b><i>&or;</i></span>
+            <span class="counter"><i>&and;</i><b>01</b><i>&or;</i></span>
+          </div>
+        </section>
+        <div class="filter-summary menu-row"><b>4 filters active</b><br />18 of 30 items in the current workspace</div>
+      </aside>
+    </section>
+
+    <footer class="status"><b>BROWSE</b><span>D:\Muller\src\App.tsx</span><span><i>2 panes</i><i>30 items</i><i>4 filters</i></span></footer>
+  </main>
+
+  <script>
+    const filterButton = document.querySelector("#filter-toggle");
+    const filterMenu = document.querySelector("#filter-menu");
+    const filterClose = document.querySelector("#filter-close");
+    const dial = document.querySelector("#option-dial");
+    const origin = document.querySelector("#dial-origin");
+    let audioContext;
+
+    function setFilters(open) {
+      filterMenu.classList.toggle("is-open", open);
+      filterButton.classList.toggle("filter-active", open);
+      filterButton.setAttribute("aria-pressed", String(open));
+    }
+
+    function tone(frequency) {
+      if (!audioContext) return;
+      const oscillator = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.value = frequency;
+      gain.gain.setValueAtTime(0.018, audioContext.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.055);
+      oscillator.connect(gain).connect(audioContext.destination);
+      oscillator.start();
+      oscillator.stop(audioContext.currentTime + 0.06);
+    }
+
+    filterButton.addEventListener("click", () => setFilters(!filterMenu.classList.contains("is-open")));
+    filterClose.addEventListener("click", () => setFilters(false));
+    origin.addEventListener("pointerenter", () => dial.classList.add("is-open"));
+    origin.addEventListener("pointerdown", () => {
+      audioContext ??= new AudioContext();
+      audioContext.resume();
+      tone(520);
+      dial.classList.add("is-open");
+    });
+    dial.addEventListener("pointerleave", () => dial.classList.remove("is-open"));
+    document.querySelectorAll("[data-tone]").forEach((item) => {
+      item.addEventListener("pointerenter", () => tone(Number(item.dataset.tone)));
+    });
+    if (new URLSearchParams(location.search).get("filters") === "off") {
+      setFilters(false);
+    }
+  </script>
+</body>
+</html>

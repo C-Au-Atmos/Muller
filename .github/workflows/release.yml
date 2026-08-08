@@ -1,0 +1,50 @@
+name: Draft Windows release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-release:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@1.87
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> .cargo-target
+      - run: npm ci
+      - name: Verify tag matches package version
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          if ($env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag $env:GITHUB_REF_NAME does not match package version $version"
+          }
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Muller ${{ github.ref_name }}"
+          releaseBody: "See CHANGELOG.md and docs/release-readiness.md for changes and known limits."
+          releaseDraft: true
+          prerelease: true
+          args: --bundles nsis
+      - name: Upload portable executable
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $asset = "Muller_${{ github.ref_name }}_x64_portable.exe"
+          Copy-Item -LiteralPath ".cargo-target/release/muller.exe" -Destination $asset
+          gh release upload "${{ github.ref_name }}" $asset --clobber

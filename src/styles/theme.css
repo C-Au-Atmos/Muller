@@ -1,0 +1,208 @@
+@font-face {
+  font-family: "Muller UI";
+  src: local("Segoe UI Variable Text"), local("Segoe UI");
+  font-weight: 100 900;
+  unicode-range: U+0000-024F, U+1E00-1EFF, U+2000-206F;
+}
+
+@font-face {
+  font-family: "Muller UI";
+  src: local("Microsoft YaHei UI"), local("Microsoft YaHei");
+  font-weight: 100 900;
+  unicode-range: U+2E80-2FFF, U+3000-303F, U+31C0-31EF, U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+FF00-FFEF;
+}
+
+@font-face {
+  font-family: "Muller Mono";
+  src: local("Cascadia Mono"), local("Cascadia Code"), local("Consolas");
+  font-weight: 100 900;
+  unicode-range: U+0000-024F, U+1E00-1EFF, U+2000-206F;
+}
+
+@font-face {
+  font-family: "Muller Mono";
+  src: local("Microsoft YaHei UI"), local("Microsoft YaHei");
+  font-weight: 100 900;
+  unicode-range: U+2E80-2FFF, U+3000-303F, U+31C0-31EF, U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+FF00-FFEF;
+}
+
+:root {
+  color-scheme: dark;
+  --font-ui: "Muller UI", "Segoe UI Variable Text", "Microsoft YaHei UI", system-ui, sans-serif;
+  --font-mono: "Muller Mono", "Cascadia Mono", "Microsoft YaHei UI", Consolas, monospace;
+  font-family: var(--font-ui);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+
+  --surface-0: #100c17;
+  --surface-1: #171020;
+  --surface-2: #21172d;
+  --surface-overlay: rgb(23 16 32 / 97%);
+  --surface-chrome: rgb(27 23 34 / 94%);
+  --surface-toolbar: rgb(27 23 34 / 94%);
+  --surface-sidebar: rgb(27 23 34 / 84%);
+  --surface-workspace: rgb(27 23 34 / 78%);
+  --surface-row: rgb(23 16 32 / 72%);
+  --surface-row-hover: #21172d;
+  --text-primary: #f7f4fa;
+  --text-secondary: #d2cadb;
+  --text-muted: #9b91a5;
+  --border: #473b52;
+  --border-subtle: rgb(120 108 132 / 32%);
+  --border-strong: rgb(141 128 153 / 62%);
+  --accent: #b978f2;
+  --accent-soft: rgb(185 120 242 / 14%);
+  --success: #55b87a;
+  --success-soft: rgb(85 184 122 / 14%);
+  --warning: #d7aa58;
+  --warning-soft: rgb(215 170 88 / 14%);
+  --danger: #e16b78;
+  --danger-soft: rgb(225 107 120 / 14%);
+  --info: #6da8e8;
+  --info-soft: rgb(109 168 232 / 14%);
+  --scrollbar-thumb: #473b52;
+  --scrollbar-track: #100c17;
+  --folder-color: #e6b85c;
+  --duplicate-group-background: #171020;
+  --duplicate-group-hover: #21172d;
+  --duplicate-row-background: #100c17;
+  --duplicate-row-hover: #21172d;
+  --diff-add-bg: rgb(54 128 79 / 19%);
+  --diff-add-mark: rgb(74 171 107 / 36%);
+  --diff-delete-bg: rgb(157 60 71 / 19%);
+  --diff-delete-mark: rgb(204 82 95 / 38%);
+  --diff-change-bg: rgb(183 130 43 / 18%);
+  --diff-change-mark: rgb(215 170 88 / 36%);
+  --flow-border-enabled: 1;
+  --flow-border-visibility: visible;
+  --flow-border-width: 3px;
+  --flow-border-opacity: 0.82;
+  --flow-border-background: #171020;
+  --flow-border-highlight: #f7f4fa;
+  --flow-border-idle: #b978f2;
+  --flow-border-scanning: #6da8e8;
+  --flow-border-success: #55b87a;
+  --flow-border-danger: #e16b78;
+
+  --bg-base: var(--surface-0);
+  --bg-workspace: color-mix(in srgb, var(--surface-1) 92%, transparent);
+  --bg-elevated: var(--surface-2);
+  --bg-active: var(--surface-2);
+  --violet-core: var(--surface-2);
+  --violet-glow: var(--accent);
+  --blue-accent: var(--accent);
+  --cyan-signal: var(--info);
+  --gold-signal: var(--warning);
+  --text-hi: var(--text-primary);
+  --text-mid: var(--text-secondary);
+  --text-lo: var(--text-muted);
+  --text-faint: var(--text-muted);
+
+  color: var(--text-primary);
+  background: var(--surface-0);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --surface-0: #dfe3e8;
+  --surface-1: #f4f6f8;
+  --surface-2: #e5e9ef;
+  --surface-overlay: rgb(250 251 252 / 98%);
+  --surface-chrome: #e4e7ec;
+  --surface-toolbar: #edf0f4;
+  --surface-sidebar: #e8ebef;
+  --surface-workspace: #eef1f4;
+  --surface-row: #f6f7f9;
+  --surface-row-hover: #e5eaf0;
+  --text-primary: #20242a;
+  --text-secondary: #4c535d;
+  --text-muted: #737b86;
+  --border: #bcc3cc;
+  --border-subtle: rgb(82 92 104 / 22%);
+  --border-strong: rgb(66 76 88 / 48%);
+  --accent: #6f4a91;
+  --accent-soft: rgb(111 74 145 / 12%);
+  --success: #277a46;
+  --success-soft: rgb(39 122 70 / 12%);
+  --warning: #875a08;
+  --warning-soft: rgb(135 90 8 / 12%);
+  --danger: #a52e3b;
+  --danger-soft: rgb(165 46 59 / 12%);
+  --info: #2468a2;
+  --info-soft: rgb(36 104 162 / 12%);
+  --scrollbar-thumb: #89919c;
+  --scrollbar-track: #dfe3e8;
+  --folder-color: #a66c00;
+  --duplicate-group-background: #e4e8ed;
+  --duplicate-group-hover: #d8dee6;
+  --duplicate-row-background: #f4f6f8;
+  --duplicate-row-hover: #e5eaf0;
+  --diff-add-bg: rgb(46 139 77 / 13%);
+  --diff-add-mark: rgb(46 139 77 / 27%);
+  --diff-delete-bg: rgb(181 57 71 / 12%);
+  --diff-delete-mark: rgb(181 57 71 / 26%);
+  --diff-change-bg: rgb(159 105 15 / 13%);
+  --diff-change-mark: rgb(159 105 15 / 27%);
+  --flow-border-enabled: 1;
+  --flow-border-visibility: visible;
+  --flow-border-width: 3px;
+  --flow-border-opacity: 0.68;
+  --flow-border-background: #dfe3e8;
+  --flow-border-highlight: #ffffff;
+  --flow-border-idle: #6f4a91;
+  --flow-border-scanning: #2468a2;
+  --flow-border-success: #277a46;
+  --flow-border-danger: #a52e3b;
+}
+
+* { box-sizing: border-box; }
+
+* {
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+*::-webkit-scrollbar-thumb {
+  border: 2px solid var(--scrollbar-track);
+  border-radius: 5px;
+  background: var(--scrollbar-thumb);
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+button,
+input,
+select { font: inherit; }
+
+button { color: inherit; }
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--info);
+  outline-offset: 1px;
+}
+
+::selection {
+  color: var(--text-primary);
+  background: var(--accent-soft);
+}
+
+[data-motion="reduced"] *,
+[data-motion="reduced"] *::before,
+[data-motion="reduced"] *::after {
+  scroll-behavior: auto !important;
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}

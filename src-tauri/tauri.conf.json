@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Muller",
+  "version": "0.1.0",
+  "identifier": "app.muller.desktop",
+  "build": {
+    "beforeDevCommand": "npm.cmd run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm.cmd run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Muller",
+        "width": 1360,
+        "height": 840,
+        "minWidth": 760,
+        "minHeight": 520,
+        "center": true,
+        "resizable": true,
+        "decorations": false,
+        "shadow": false,
+        "fullscreen": false,
+        "dragDropEnabled": false,
+        "backgroundColor": "#1B1722"
+      }
+    ],
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.png", "icons/icon.ico"]
+  }
+}

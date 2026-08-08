@@ -1,0 +1,24 @@
+[package]
+name = "muller-mutate"
+version = "0.1.0"
+description = "Protected file mutation and rollback primitives for Muller"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+encoding_rs = "0.8"
+muller-core = { path = "../muller-core", default-features = false }
+muller-diff = { path = "../muller-diff" }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+trash = "5.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Storage_FileSystem",
+] }
+
+[dev-dependencies]
+tempfile = "3.20"
