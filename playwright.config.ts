@@ -14,6 +14,10 @@ export default defineConfig({
   },
   webServer: {
     command: "npm.cmd run dev",
+    env: {
+      ...process.env,
+      VITE_MULLER_TEST_INITIAL_PATH: "D:\\Muller",
+    },
     url: "http://127.0.0.1:1420",
     reuseExistingServer: process.env.PLAYWRIGHT_REUSE_SERVER === "1",
     timeout: 120_000,

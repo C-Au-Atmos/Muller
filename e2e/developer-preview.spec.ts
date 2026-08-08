@@ -73,7 +73,9 @@ async function installPreviewMock(page: Page): Promise<void> {
       invoke(command, payload) {
         if (command === "plugin:window|is_maximized") return false;
         if (command.startsWith("plugin:window|")) return null;
-        if (command === "get_shell_locations") return [];
+        if (command === "get_shell_locations") {
+          return [{ id: "profile", label: "Profile", path: "D:\\Dev" }];
+        }
         if (command === "list_logical_drives") return [{
           path: "D:\\",
           label: "Local Disk",

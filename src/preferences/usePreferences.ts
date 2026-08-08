@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 
 import {
   DEFAULT_PREFERENCES,
@@ -33,7 +33,7 @@ export function usePreferences() {
     window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(preferences));
   }, [preferences]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const root = document.documentElement;
     const media = window.matchMedia("(prefers-color-scheme: light)");
     const apply = () => {
@@ -57,6 +57,7 @@ export function usePreferences() {
       root.dataset.motion = preferences.motion;
       root.lang = resolveLocale(preferences.locale);
       root.style.setProperty("--ui-scale", String(preferences.uiScale / 100));
+      document.body.style.removeProperty("background");
     };
     apply();
     media.addEventListener("change", apply);

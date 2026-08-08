@@ -80,7 +80,9 @@ async function installDesktopMock(page: Page, options: DesktopMockOptions = {}):
       invoke(command, payload) {
         if (command === "plugin:window|is_maximized") return false;
         if (command.startsWith("plugin:window|")) return null;
-        if (command === "get_shell_locations") return [];
+        if (command === "get_shell_locations") {
+          return [{ id: "profile", label: "Profile", path: "D:\\Muller" }];
+        }
         if (command === "list_directory_extensions") {
           return withDirectoryEntries ? [
             { extension: "png", count: 1 },

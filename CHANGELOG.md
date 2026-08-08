@@ -2,6 +2,20 @@
 
 All notable changes to Muller are documented in this file.
 
+## [0.1.1] - 2026-08-08
+
+First public preview hotfix.
+
+### Fixed
+
+- Fresh installations now open the current Windows user profile instead of the
+  build machine's `D:\\Muller` path. If known folders are unavailable, Muller
+  falls back to a local drive and then the virtual This PC workspace.
+- Fresh installations and preference resets now start with Muller Monochrome
+  Platinum. Existing saved theme choices remain unchanged.
+- The native window and HTML startup surfaces now use the Platinum canvas color
+  to prevent an obsolete dark-purple flash before the interface is ready.
+
 ## [0.1.0] - 2026-08-08
 
 First public Windows preview.

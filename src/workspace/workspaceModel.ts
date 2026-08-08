@@ -93,8 +93,12 @@ export function createWorkspaceTab(
   };
 }
 
-export function createInitialWorkspaceState(path = "D:\\Muller"): WorkspaceState {
+export function createInitialWorkspaceState(path = ""): WorkspaceState {
   const browse = createWorkspaceTab("browse-1", path, "browse");
+  if (!path.trim()) {
+    browse.title = "This PC";
+    browse.virtualLocation = "this-pc";
+  }
   return {
     version: WORKSPACE_SCHEMA_VERSION,
     tabs: [browse],
@@ -181,7 +185,7 @@ function sanitizeTab(value: unknown, fallbackPath: string): WorkspaceTab | null 
 
 export function parseWorkspaceState(
   serialized: string | null,
-  fallbackPath = "D:\\Muller",
+  fallbackPath = "",
 ): WorkspaceState {
   if (!serialized) return createInitialWorkspaceState(fallbackPath);
   try {
@@ -223,7 +227,7 @@ export function parseWorkspaceState(
 
 export function activeWorkspaceTab(state: WorkspaceState): WorkspaceTab {
   return state.tabs.find((tab) => tab.id === state.activeTabId) ?? state.tabs[0] ??
-    createWorkspaceTab("browse-1", "D:\\Muller");
+    createInitialWorkspaceState().tabs[0]!;
 }
 
 export function workspaceReducer(

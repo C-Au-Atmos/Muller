@@ -28,7 +28,7 @@ export interface AppPreferencesV1 {
 export const DEFAULT_PREFERENCES: AppPreferencesV1 = {
   version: PREFERENCES_VERSION,
   locale: "system",
-  theme: "system",
+  theme: "platinum",
   customTheme: null,
   glassBackground: false,
   density: "compact",
@@ -65,11 +65,17 @@ export function parsePreferences(serialized: string | null, legacyWorkspace?: st
   const audioVolume = clamp(Number(raw.audioVolume ?? DEFAULT_PREFERENCES.audioVolume) || 0, 0, 100);
   const legacySidebar = legacy.sidebarMode === "line" ? "line" : legacy.sidebarMode === "option" ? "option" : undefined;
   const customTheme = parseThemeColorScheme(raw.customTheme);
-  const requestedTheme = member(raw.theme, ["system", "dark", "light", "platinum", "custom"], "system");
+  const requestedTheme = member(
+    raw.theme,
+    ["system", "dark", "light", "platinum", "custom"],
+    DEFAULT_PREFERENCES.theme,
+  );
   return {
     version: PREFERENCES_VERSION,
     locale: member(raw.locale, ["system", "zh-CN", "en-US"], "system"),
-    theme: requestedTheme === "custom" && customTheme === null ? "system" : requestedTheme,
+    theme: requestedTheme === "custom" && customTheme === null
+      ? DEFAULT_PREFERENCES.theme
+      : requestedTheme,
     customTheme,
     glassBackground: typeof raw.glassBackground === "boolean" ? raw.glassBackground : false,
     density: member(raw.density, ["compact", "standard"], "compact"),

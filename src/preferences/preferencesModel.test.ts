@@ -24,7 +24,12 @@ describe("Stage 7.10 preferences", () => {
   });
 
   it("keeps the Monochrome Platinum built-in theme preference", () => {
+    expect(parsePreferences(null).theme).toBe("platinum");
+    expect(parsePreferences(JSON.stringify({ theme: "invalid" })).theme).toBe("platinum");
     expect(parsePreferences(JSON.stringify({ theme: "platinum" })).theme).toBe("platinum");
+    expect(parsePreferences(JSON.stringify({ theme: "system" })).theme).toBe("system");
+    expect(parsePreferences(JSON.stringify({ theme: "dark" })).theme).toBe("dark");
+    expect(parsePreferences(JSON.stringify({ theme: "light" })).theme).toBe("light");
   });
 
   it("persists the optional frosted-glass appearance", () => {

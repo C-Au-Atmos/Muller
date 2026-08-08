@@ -4,7 +4,7 @@
   <p><strong>面向 Windows 11 的文件智能工作台</strong></p>
   <p>浏览、检索、查重、差异比对与安全文件操作，统一在一个安静而高效的桌面界面中。</p>
   <p>
-    <a href="https://github.com/AuAtmos/Muller/releases/tag/v0.1.0"><strong>下载 0.1.0</strong></a>
+    <a href="https://github.com/AuAtmos/Muller/releases/tag/v0.1.1"><strong>下载 0.1.1</strong></a>
     ·
     <a href="CHANGELOG.md">更新记录</a>
     ·
@@ -83,21 +83,22 @@ Rust 命令。最终的 Rust 后端编译为 Windows PE 机器码，而不是 `w
 
 ## 下载与运行
 
-前往 [Muller 0.1.0 Release](https://github.com/AuAtmos/Muller/releases/tag/v0.1.0)
+前往 [Muller 0.1.1 Release](https://github.com/AuAtmos/Muller/releases/tag/v0.1.1)
 下载 Windows x64 版本：
 
 | 文件 | 用途 |
 |---|---|
-| `Muller_0.1.0_x64-setup.exe` | 推荐。安装到 Windows，并创建正常的应用入口 |
-| `Muller_0.1.0_x64-portable.exe` | 免安装，适合移动磁盘或临时使用 |
+| `Muller_0.1.1_x64-setup.exe` | 推荐。安装到 Windows，并创建正常的应用入口 |
+| `Muller_0.1.1_x64-portable.exe` | 免安装，适合移动磁盘或临时使用 |
 | `SHA256SUMS.txt` | 两个可执行文件的 SHA-256 校验值 |
 
 目标电脑不需要 Node.js、Rust、Visual Studio 或源码。Windows 11 通常已经包含
 Microsoft Edge WebView2 Runtime；精简系统如缺少它，只需安装一次 Evergreen
-WebView2 Runtime。
+WebView2 Runtime。全新安装会从当前 Windows 用户目录打开，并默认使用 Muller
+Monochrome Platinum；已有用户保存的工作区和主题不会被覆盖。
 
 > [!WARNING]
-> 0.1.0 是未签名的公开预览版，Windows SmartScreen 可能显示“未知发布者”。
+> 0.1.1 是未签名的公开预览版，Windows SmartScreen 可能显示“未知发布者”。
 > 请只从本仓库 Releases 下载，并使用 `SHA256SUMS.txt` 核对文件。
 
 ## 快速上手
@@ -154,13 +155,13 @@ npm run test:e2e
 | `themes/` | 可导入主题示例 |
 | `docs/` | 产品设计、阶段报告、发布检查与路线图 |
 
-详细设计与实现证据见 [文档索引](docs/README.md)。当前 0.1.0 已通过
-55 个前端单元测试、100 个 Rust 测试和 74 个 Edge 端到端场景；物理多屏、
+详细设计与实现证据见 [文档索引](docs/README.md)。当前 0.1.1 已通过
+57 个前端单元测试、100 个 Rust 测试和 74 个 Edge 端到端场景；物理多屏、
 高 DPI、144Hz、慢盘、OneDrive 与复杂 UNC 环境仍属于预览版人工验证范围。
 
 ## 路线图
 
-0.1.0 覆盖当前非特权桌面工作流。下一阶段计划将 MFT/USN 全盘索引拆成
+0.1.1 覆盖当前非特权桌面工作流。下一阶段计划将 MFT/USN 全盘索引拆成
 独立、只读、可选安装的 Windows 服务；没有该服务时仍保留普通遍历搜索。
 完整阶段状态见 [implementation roadmap](docs/implementation-roadmap.md)。
 

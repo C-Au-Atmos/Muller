@@ -11,7 +11,10 @@ import {
 
 describe("Stage 7 workspace model", () => {
   it("falls back cleanly for corrupt data and migrates schema v1", () => {
-    expect(activeWorkspaceTab(parseWorkspaceState("not-json")).mode).toBe("browse");
+    const emptyFallback = activeWorkspaceTab(parseWorkspaceState("not-json"));
+    expect(emptyFallback.mode).toBe("browse");
+    expect(emptyFallback.path).toBe("");
+    expect(emptyFallback.virtualLocation).toBe("this-pc");
     expect(activeWorkspaceTab(parseWorkspaceState(JSON.stringify({ version: 0 }))).mode)
       .toBe("browse");
     const legacy = createInitialWorkspaceState();

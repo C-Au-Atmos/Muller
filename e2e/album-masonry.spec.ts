@@ -62,6 +62,10 @@ async function installAlbumDirectoryMock(page: Page, entryCount: number): Promis
       invoke(command, payload) {
         if (command === "plugin:window|is_maximized") return false;
         if (command.startsWith("plugin:window|")) return null;
+        if (command === "get_shell_locations") {
+          return [{ id: "profile", label: "Profile", path: "D:\\Pictures" }];
+        }
+        if (command === "list_logical_drives") return [];
         if (command === "start_directory_query") {
           const nextTask = ++taskId;
           const nextSession = ++sessionId;

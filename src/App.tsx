@@ -186,9 +186,13 @@ function scanStatusKey(status: string): TranslationKey {
   }
 }
 
-export function App() {
+interface AppProps {
+  initialPath: string;
+}
+
+export function App({ initialPath }: AppProps) {
   const { state: workspaceState, activeTab, dispatch: dispatchWorkspace } =
-    useWorkspaceState("D:\\Muller");
+    useWorkspaceState(initialPath);
   const { preferences, updatePreferences, resetPreferences } = usePreferences();
   const { t, formatNumber, formatDate } = useI18n(preferences.locale);
   const [systemRoute, setSystemRoute] = useState<"workspace" | "home" | "settings">("workspace");
@@ -232,7 +236,7 @@ export function App() {
   const [searchModeMenuOpen, setSearchModeMenuOpen] = useState(false);
   const [duplicateQuery, setDuplicateQuery] = useState("");
   const [visualState, setVisualState] = useState<FlowVisualState>("idle");
-  const [scanRoot, setScanRoot] = useState("D:\\Muller");
+  const [scanRoot, setScanRoot] = useState(initialPath);
   const [scanRoots, setScanRoots] = useState<string[]>([]);
   const [shellLocations, setShellLocations] = useState<ShellLocation[]>([]);
   const [logicalDrives, setLogicalDrives] = useState<LogicalDrive[]>([]);
@@ -240,18 +244,18 @@ export function App() {
   const [extensionsLoading, setExtensionsLoading] = useState(false);
   const [compareNavigation, setCompareNavigation] = useState<CompareNavigationState>({
     activePane: "left",
-    path: "D:\\Muller",
+    path: initialPath,
     split: true,
     canBack: false,
     canForward: false,
     canUp: false,
     editing: false,
   });
-  const [compareAddress, setCompareAddress] = useState("D:\\Muller");
+  const [compareAddress, setCompareAddress] = useState(initialPath);
   const [compareLaunchRequest, setCompareLaunchRequest] = useState<(BrowseComparisonRequest & { token: number }) | null>(null);
   const [browseNavigation, setBrowseNavigation] = useState<BrowseNavigationState>({
     activePane: "left",
-    path: "D:\\Muller",
+    path: initialPath,
     split: true,
     canBack: false,
     canForward: false,
@@ -264,7 +268,7 @@ export function App() {
     searchBoth: false,
     canSearchBoth: false,
   });
-  const [browseAddress, setBrowseAddress] = useState("D:\\Muller");
+  const [browseAddress, setBrowseAddress] = useState(initialPath);
   const [minSize, setMinSize] = useState("1024");
   const [depth, setDepth] = useState(3);
   const [stats, setStats] = useState(INITIAL_STATS);
