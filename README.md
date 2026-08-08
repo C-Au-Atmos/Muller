@@ -34,6 +34,36 @@ Muller 为开发者、摄影工作流和重度文件管理用户设计。它保�
 | **Preview** | 图片、RAW、GIF、音视频、PPTX 封面、代码、配置与文本型 BLOB |
 | **Workspace** | 深色、浅色、Monochrome Platinum、JSON 主题、可选毛玻璃与流光外框 |
 
+## 技术架构
+
+Muller 是“Web 技术构建界面 + Rust 原生后端 + Windows WebView2 宿主”的
+桌面应用，不是 WebAssembly 应用，也不随程序打包 Chromium 或 Node.js。
+
+```text
+React / TypeScript / Motion / CodeMirror / Three.js
+                         │
+                    Tauri IPC
+                         │
+       Rust workspace + Tauri commands
+                         │
+       Windows Shell / COM / GDI / File System
+```
+
+| 层级 | 当前技术 |
+|---|---|
+| **界面** | React 19、TypeScript 5.9、Vite 7、Motion、Lucide React |
+| **编辑与视觉** | CodeMirror 6、Three.js、WebGL |
+| **桌面宿主** | Tauri 2、Microsoft Edge WebView2 |
+| **原生后端** | Rust 1.89、Edition 2024、Serde、ZIP、图片与媒体元数据解析 |
+| **Windows 集成** | `windows` / `windows-sys`，连接 Shell、COM、GDI、托盘、快捷键和文件系统 |
+| **质量与交付** | Vitest、Playwright、Cargo Test、Clippy、rustfmt、NSIS |
+
+Vite 在构建阶段将前端编译成普通 HTML、CSS 和 JavaScript，由 WebView2
+负责渲染；搜索、查重、预览、差异计算和文件操作通过 Tauri IPC 调用原生
+Rust 命令。最终的 Rust 后端编译为 Windows PE 机器码，而不是 `wasm32`
+目标。`Cargo.lock` 中出现的 `wasm-bindgen`、`web-sys` 来自部分跨平台依赖的
+条件性传递依赖，并不表示 Muller 正在使用 WebAssembly。
+
 ### 为真实文件准备
 
 - 复制、剪切、粘贴、重命名、压缩、解压和属性查看均连接 Windows 原生文件系统。
