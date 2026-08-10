@@ -18,7 +18,7 @@
   </p>
 </div>
 
-![Muller Monochrome Platinum workspace](https://raw.githubusercontent.com/AuAtmos/Muller/req/docs/assets/muller-platinum-workspace.png)
+![Muller Monochrome Platinum workspace](public/muller-platinum-workspace.png)
 
 ## 为什么是 Muller
 
