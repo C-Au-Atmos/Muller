@@ -8,7 +8,7 @@
     ·
     <a href="CHANGELOG.md">更新记录</a>
     ·
-    <a href="docs/README.md">项目文档</a>
+    <a href="https://github.com/AuAtmos/Muller/blob/req/docs/README.md">项目文档</a>
   </p>
   <p>
     <a href="https://github.com/AuAtmos/Muller/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/AuAtmos/Muller/ci.yml?branch=main&style=flat-square&label=CI" alt="CI status"></a>
@@ -18,7 +18,7 @@
   </p>
 </div>
 
-![Muller Monochrome Platinum workspace](docs/assets/muller-platinum-workspace.png)
+![Muller Monochrome Platinum workspace](https://raw.githubusercontent.com/AuAtmos/Muller/req/docs/assets/muller-platinum-workspace.png)
 
 ## 为什么是 Muller
 
@@ -153,9 +153,9 @@ npm run test:e2e
 | `crates/muller-mutate/` | 原子写入、安全复制、回收站与路径策略 |
 | `e2e/` | Windows Edge 端到端验收 |
 | `themes/` | 可导入主题示例 |
-| `docs/` | 产品设计、阶段报告、发布检查与路线图 |
+| `req/docs/` | 产品设计、阶段报告、发布检查与路线图（独立文档分支） |
 
-详细设计与实现证据见 [文档索引](docs/README.md)。当前 0.1.1 已通过
+详细设计与实现证据见 [文档索引](https://github.com/AuAtmos/Muller/blob/req/docs/README.md)。当前 0.1.1 已通过
 57 个前端单元测试、100 个 Rust 测试和 74 个 Edge 端到端场景；物理多屏、
 高 DPI、144Hz、慢盘、OneDrive 与复杂 UNC 环境仍属于预览版人工验证范围。
 
@@ -163,7 +163,7 @@ npm run test:e2e
 
 0.1.1 覆盖当前非特权桌面工作流。下一阶段计划将 MFT/USN 全盘索引拆成
 独立、只读、可选安装的 Windows 服务；没有该服务时仍保留普通遍历搜索。
-完整阶段状态见 [implementation roadmap](docs/implementation-roadmap.md)。
+完整阶段状态见 [implementation roadmap](https://github.com/AuAtmos/Muller/blob/req/docs/implementation-roadmap.md)。
 
 ## License
 
