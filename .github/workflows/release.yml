@@ -44,7 +44,7 @@ jobs:
             - `*-portable.exe` - standalone portable executable
             - `SHA256SUMS.txt` - SHA-256 checksums for both executables
 
-            This preview is unsigned, so Windows SmartScreen may show an unknown-publisher warning. See [CHANGELOG.md](https://github.com/AuAtmos/Muller/blob/${{ github.ref_name }}/CHANGELOG.md) and [release readiness](https://github.com/AuAtmos/Muller/blob/${{ github.ref_name }}/docs/release-readiness.md) for features and known limits.
+            This preview is unsigned, so Windows SmartScreen may show an unknown-publisher warning. See [CHANGELOG.md](https://github.com/AuAtmos/Muller/blob/${{ github.ref_name }}/CHANGELOG.md) and the [documentation index](https://github.com/AuAtmos/Muller/blob/${{ github.ref_name }}/docs/README.md) for features and known limits.
           releaseDraft: true
           prerelease: true
           args: --bundles nsis
