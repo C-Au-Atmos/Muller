@@ -163,7 +163,7 @@ npm run test:e2e
 
 0.1.1 覆盖当前非特权桌面工作流。下一阶段计划将 MFT/USN 全盘索引拆成
 独立、只读、可选安装的 Windows 服务；没有该服务时仍保留普通遍历搜索。
-完整阶段状态见 [implementation roadmap](docs/implementation-roadmap.md)。
+完整阶段状态见[起始开发归档](docs/archive/initial-development/implementation-roadmap.md)。
 
 ## License
 
