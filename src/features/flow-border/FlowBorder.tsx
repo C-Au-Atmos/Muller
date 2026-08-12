@@ -42,6 +42,7 @@ const FALLBACK_STATS: FlowBorderStats = {
 const DEFAULT_APPEARANCE: FlowBorderAppearance = {
   enabled: true,
   width: 3,
+  radius: 12,
   opacity: 0.82,
   background: [23 / 255, 16 / 255, 32 / 255],
   highlight: [247 / 255, 244 / 255, 250 / 255],
@@ -72,10 +73,12 @@ function cssColorToRgb(variable: string, fallback: FlowBorderAppearance["backgro
 function readFlowBorderAppearance(): FlowBorderAppearance {
   const style = window.getComputedStyle(document.documentElement);
   const width = Number.parseFloat(style.getPropertyValue("--flow-border-width"));
+  const radius = Number.parseFloat(style.getPropertyValue("--flow-border-radius"));
   const opacity = Number.parseFloat(style.getPropertyValue("--flow-border-opacity"));
   return {
     enabled: Number.parseFloat(style.getPropertyValue("--flow-border-enabled")) !== 0,
     width: Number.isFinite(width) ? Math.min(Math.max(width, 1), 8) : DEFAULT_APPEARANCE.width,
+    radius: Number.isFinite(radius) ? Math.min(Math.max(radius, 0), 32) : DEFAULT_APPEARANCE.radius,
     opacity: Number.isFinite(opacity) ? Math.min(Math.max(opacity, 0), 1) : DEFAULT_APPEARANCE.opacity,
     background: cssColorToRgb("--flow-border-background", DEFAULT_APPEARANCE.background),
     highlight: cssColorToRgb("--flow-border-highlight", DEFAULT_APPEARANCE.highlight),

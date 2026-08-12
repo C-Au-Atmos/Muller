@@ -16,5 +16,6 @@ describe("album image formats", () => {
     expect(isRawImageExtension("CR2")).toBe(true);
     expect(isAlbumImageExtension("RAF")).toBe(true);
     expect(isRawImageExtension("jpg")).toBe(false);
+    expect(isAlbumImageExtension("HDR")).toBe(true);
   });
 });

@@ -76,6 +76,7 @@
   --flow-border-enabled: 1;
   --flow-border-visibility: visible;
   --flow-border-width: 3px;
+  --flow-border-radius: 12px;
   --flow-border-opacity: 0.82;
   --flow-border-background: #171020;
   --flow-border-highlight: #f7f4fa;
@@ -99,7 +100,7 @@
   --text-faint: var(--text-muted);
 
   color: var(--text-primary);
-  background: var(--surface-0);
+  background: transparent;
 }
 
 :root[data-theme="light"] {
@@ -146,6 +147,7 @@
   --flow-border-enabled: 1;
   --flow-border-visibility: visible;
   --flow-border-width: 3px;
+  --flow-border-radius: 12px;
   --flow-border-opacity: 0.68;
   --flow-border-background: #dfe3e8;
   --flow-border-highlight: #ffffff;
@@ -177,6 +179,7 @@ body,
   height: 100%;
   margin: 0;
   overflow: hidden;
+  background: transparent;
 }
 
 button,

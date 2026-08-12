@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type WheelEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, type WheelEvent } from "react";
 
 import { useAppI18n } from "../../../i18n/i18n";
 
 interface OptionWheelProps {
   items: readonly string[];
+  icons?: readonly ReactNode[];
   selected: number;
   onChange: (index: number, item: string) => void;
   onTick?: () => void;
@@ -11,7 +12,7 @@ interface OptionWheelProps {
   disabled?: boolean;
 }
 
-export function OptionWheel({ items, selected, onChange, onTick, className = "", disabled = false }: OptionWheelProps) {
+export function OptionWheel({ items, icons, selected, onChange, onTick, className = "", disabled = false }: OptionWheelProps) {
   const { t } = useAppI18n();
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const initialPosition = Math.max(selected, 0);
@@ -176,7 +177,8 @@ export function OptionWheel({ items, selected, onChange, onTick, className = "",
           }}
           style={{ "--wheel-y": `${(index - Math.max(selected, 0)) * 49}px` } as CSSProperties}
         >
-          {item}
+          {icons?.[index] ? <span className="option-wheel__icon">{icons[index]}</span> : null}
+          <span className="option-wheel__label">{item}</span>
         </button>
       ))}
     </div>

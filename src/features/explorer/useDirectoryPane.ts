@@ -59,6 +59,7 @@ export function useDirectoryPane(
   initialPath: string,
   filter?: DirectoryQueryFilter,
   globalSearchRoots: readonly string[] = [],
+  enabled = true,
 ) {
   const [state, setState] = useState<DirectoryPaneState>(() => INITIAL_STATE(initialPath));
   const [search, setSearch] = useState<DirectorySearchState>(INITIAL_SEARCH_STATE);
@@ -421,26 +422,29 @@ export function useDirectoryPane(
   }, [search.query]);
 
   useEffect(() => {
+    if (!enabled) return;
     void openPath(initialPath, "replace");
-  }, []);
+  }, [enabled]);
 
   const filterSignature = JSON.stringify(filter ?? null);
   const previousFilterSignature = useRef(filterSignature);
   useEffect(() => {
+    if (!enabled) return;
     if (previousFilterSignature.current === filterSignature) return;
     previousFilterSignature.current = filterSignature;
     if (state.path) void openPath(state.path, "replace");
-  }, [filterSignature, openPath, state.path]);
+  }, [enabled, filterSignature, openPath, state.path]);
 
   const globalRootsSignature = JSON.stringify(globalSearchRoots);
   const previousGlobalRootsSignature = useRef(globalRootsSignature);
   useEffect(() => {
+    if (!enabled) return;
     if (previousGlobalRootsSignature.current === globalRootsSignature) return;
     previousGlobalRootsSignature.current = globalRootsSignature;
     if (searchModeRef.current === "global" && searchQueryRef.current.trim()) {
       scheduleSearch(searchQueryRef.current, "global");
     }
-  }, [globalRootsSignature, scheduleSearch]);
+  }, [enabled, globalRootsSignature, scheduleSearch]);
 
   useEffect(
     () => () => {

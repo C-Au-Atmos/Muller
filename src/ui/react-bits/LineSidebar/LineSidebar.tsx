@@ -1,16 +1,17 @@
-import { useCallback, useEffect, useRef, type CSSProperties, type PointerEvent } from "react";
+import { useCallback, useEffect, useRef, type CSSProperties, type PointerEvent, type ReactNode } from "react";
 
 import { useAppI18n } from "../../../i18n/i18n";
 
 interface LineSidebarProps {
   items: readonly string[];
+  icons?: readonly ReactNode[];
   selected: number;
   onChange: (index: number, item: string) => void;
   onTick?: () => void;
   className?: string;
 }
 
-export function LineSidebar({ items, selected, onChange, onTick, className = "" }: LineSidebarProps) {
+export function LineSidebar({ items, icons, selected, onChange, onTick, className = "" }: LineSidebarProps) {
   const { t } = useAppI18n();
   const listRef = useRef<HTMLUListElement>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -97,7 +98,8 @@ export function LineSidebar({ items, selected, onChange, onTick, className = "" 
             >
               <span className="line-sidebar__marker" aria-hidden="true" />
               <span className="line-sidebar__index">{String(index + 1).padStart(2, "0")}</span>
-              <span>{item}</span>
+              {icons?.[index] ? <span className="line-sidebar__icon">{icons[index]}</span> : null}
+              <span className="line-sidebar__label">{item}</span>
             </button>
           </li>
         ))}

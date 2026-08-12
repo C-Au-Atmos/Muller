@@ -72,6 +72,12 @@ test("worker border survives list pressure and paints only the edge ribbon", asy
   await expect(page.getByText("Muller", { exact: true }).first()).toBeVisible();
   await waitForWorkerFrames(page);
   await expect(page.locator(".worker-warning")).toHaveCount(0);
+  await expect(page.locator(".stage7-shell")).toHaveCSS("padding", "0px");
+  await expect(page.locator(".stage7-shell")).toHaveCSS("border-radius", "12px");
+  await expect(page.locator(".flow-border")).toHaveCSS("padding", "3px");
+  await expect(page.locator("html")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  await expect(page.locator("#root")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 
   await page.keyboard.press("Control+l");
   await expect(page.getByRole("combobox", { name: "Current directory" })).toHaveValue("D:\\Muller");
@@ -91,11 +97,7 @@ test("worker border survives list pressure and paints only the edge ribbon", asy
   });
 
   await page.evaluate(() => {
-    document.documentElement.style.background = "transparent";
-    document.body.style.background = "transparent";
-    const root = document.querySelector<HTMLElement>("#root");
     const shell = document.querySelector<HTMLElement>(".app-shell");
-    if (root) root.style.background = "transparent";
     if (!shell) throw new Error("App shell not found");
     shell.style.background = "transparent";
     for (const child of Array.from(shell.children)) {
@@ -133,6 +135,10 @@ test("worker border survives list pressure and paints only the edge ribbon", asy
   expect(opaqueRatio).toBeGreaterThan(0.01);
   expect(opaqueRatio).toBeLessThan(0.12);
   expect(centerOpaquePixels / centerPixels).toBeLessThan(0.001);
+  const cornerAlpha = png.data[3] ?? 255;
+  const topCenterAlpha = png.data[(Math.floor(png.width / 2) * 4) + 3] ?? 0;
+  expect(cornerAlpha).toBeLessThan(16);
+  expect(topCenterAlpha).toBeGreaterThan(16);
   expect(errors).toEqual([]);
 });
 
@@ -219,15 +225,38 @@ test("CSS fallback keeps the center transparent and preserves direction", async 
 
   const fallbackPaint = await page.locator(".flow-css-fallback").evaluate((element) => {
     const style = window.getComputedStyle(element);
+    const borderStyle = window.getComputedStyle(element.parentElement as HTMLElement);
     return {
       backgroundColor: style.backgroundColor,
       backgroundImage: style.backgroundImage,
+      borderRadius: style.borderRadius,
+      maskImage: borderStyle.maskImage || borderStyle.webkitMaskImage,
     };
   });
-  expect(fallbackPaint).toEqual({
-    backgroundColor: "rgba(0, 0, 0, 0)",
-    backgroundImage: "none",
+  expect(fallbackPaint.backgroundColor).toBe("rgba(0, 0, 0, 0)");
+  expect(fallbackPaint.backgroundImage).toContain("conic-gradient");
+  expect(fallbackPaint.borderRadius).toBe("12px");
+  expect(fallbackPaint.maskImage).toContain("linear-gradient");
+
+  await page.evaluate(() => {
+    document.documentElement.style.background = "transparent";
+    document.body.style.background = "transparent";
+    const root = document.querySelector<HTMLElement>("#root");
+    const shell = document.querySelector<HTMLElement>(".app-shell");
+    if (root) root.style.background = "transparent";
+    if (!shell) throw new Error("App shell not found");
+    shell.style.background = "transparent";
+    for (const child of Array.from(shell.children)) {
+      if (!child.classList.contains("flow-border")) {
+        (child as HTMLElement).style.visibility = "hidden";
+      }
+    }
   });
+  const fallbackOnly = PNG.sync.read(await page.screenshot({ omitBackground: true }));
+  const centerAlpha = fallbackOnly.data[((Math.floor(fallbackOnly.height / 2) * fallbackOnly.width + Math.floor(fallbackOnly.width / 2)) * 4) + 3] ?? 255;
+  const topCenterAlpha = fallbackOnly.data[(Math.floor(fallbackOnly.width / 2) * 4) + 3] ?? 0;
+  expect(centerAlpha).toBeLessThan(16);
+  expect(topCenterAlpha).toBeGreaterThan(16);
   expect(errors).toEqual([]);
   await context.close();
 });
@@ -259,14 +288,12 @@ test("custom light theme has no large dark control surfaces", async ({ page }) =
   await page.keyboard.press("Control+3");
   await expect(page.locator(".compare-root-notice")).toBeVisible();
   expect(await findLargeDarkSurfaces(page)).toEqual([]);
-  const buttonFinish = await page.locator(".compare-toolbar .icon-button:enabled").first().evaluate((button) => ({
+  const buttonFinish = await page.locator(".compare-toolbar .compare-view-tabs button:enabled").first().evaluate((button) => ({
     borderRadius: window.getComputedStyle(button).borderRadius,
     boxShadow: window.getComputedStyle(button).boxShadow,
-    pseudoDisplay: window.getComputedStyle(button, "::before").display,
   }));
   expect(buttonFinish.borderRadius).toBe("6px");
   expect(buttonFinish.boxShadow).not.toBe("none");
-  expect(buttonFinish.pseudoDisplay).toBe("none");
   await page.screenshot({ path: path.join(artifactDirectory, "theme-light-compare.png"), fullPage: true });
   expect(errors).toEqual([]);
 });
@@ -417,9 +444,12 @@ test("Stage 6.1 pane arrows and Ctrl+F stay inside Muller", async ({ page }) => 
 
   await page.keyboard.press("Control+3");
   await page.keyboard.press("Control+f");
-  const compareSearch = page.getByRole("textbox", { name: "Search the current directory in the left pane" });
+  const compareSearch = page.getByRole("textbox", { name: "Search current directory" });
   await expect(compareSearch).toBeFocused();
+  await compareSearch.fill("src");
+  await expect(compareSearch).toHaveValue("src");
   await compareSearch.press("Escape");
+  await expect(compareSearch).toHaveValue("");
 
   await page.keyboard.press("Control+2");
   await page.keyboard.press("Control+f");
