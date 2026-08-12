@@ -11,7 +11,7 @@
     <a href="docs/README.md">项目文档</a>
   </p>
   <p>
-    <a href="https://github.com/AuAtmos/Muller/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/AuAtmos/Muller/ci.yml?branch=main&style=flat-square&label=CI" alt="CI status"></a>
+    <a href="https://github.com/AuAtmos/Muller/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/AuAtmos/Muller/ci.yml?branch=master&style=flat-square&label=CI" alt="CI status"></a>
     <a href="https://github.com/AuAtmos/Muller/releases"><img src="https://img.shields.io/github/v/release/AuAtmos/Muller?include_prereleases&sort=semver&style=flat-square" alt="GitHub release"></a>
     <img src="https://img.shields.io/badge/Windows-11-0078D4?style=flat-square&logo=windows11&logoColor=white" alt="Windows 11">
     <a href="LICENSE"><img src="https://img.shields.io/github/license/AuAtmos/Muller?style=flat-square" alt="GPL-3.0 license"></a>
