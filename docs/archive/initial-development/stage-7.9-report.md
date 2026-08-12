@@ -45,7 +45,7 @@
   只移入回收站，并保留逐项失败信息。
 
 46,000 文件基准由
-[`stage79_benchmark.rs`](../crates/muller-core/examples/stage79_benchmark.rs) 生成 1 KiB
+[`stage79_benchmark.rs`](../../../crates/muller-core/examples/stage79_benchmark.rs) 生成 1 KiB
 同尺寸临时文件并在结束后清理。2026-07-25 本机结果：
 
 | 场景 | 发现 | 快速指纹 | 总计 |
