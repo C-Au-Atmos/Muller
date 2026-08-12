@@ -27,14 +27,17 @@ For a version `X.Y.Z`, development must move in this order:
    version before editing. Preserve unrelated user changes.
 2. Read the target version's requirements on `req/X.Y.Z` before planning or
    implementing work.
-3. Make product changes on `feat/X.Y.Z`, with tests that cover the changed
+3. Use the same item ID across `docs/VX.Y.Z/01-original-input.md`,
+   `02-review.md`, and `03-execution.md`. Only reviewed and accepted items may
+   enter implementation.
+4. Make product changes on `feat/X.Y.Z`, with tests that cover the changed
    behavior. Keep requirement documents synchronized through `req/X.Y.Z`.
-4. Before promotion to `release/X.Y.Z`, run the repository's relevant quality
+5. Before promotion to `release/X.Y.Z`, run the repository's relevant quality
    gates. For a full milestone, run lint, frontend tests, production build,
    Rust formatting/tests/clippy, and Edge E2E tests.
-5. Stabilize on `release/X.Y.Z`. Any release-only code fix must be merged back
+6. Stabilize on `release/X.Y.Z`. Any release-only code fix must be merged back
    into `feat/X.Y.Z` before further feature development.
-6. Merge `release/X.Y.Z` into `master` only when the milestone is coherent,
+7. Merge `release/X.Y.Z` into `master` only when the milestone is coherent,
    documented, and verified. Push each updated long-lived branch so the remote
    branch topology reflects the local promotion path.
 

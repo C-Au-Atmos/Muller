@@ -1,37 +1,26 @@
-# Muller documentation
+# Muller 文档中心
 
-This directory records the product contract, implementation evidence, release
-boundary, and future engineering work for Muller.
+当前研发资料按小版本组织。需求、评审和执行文档使用稳定条目 ID 串联，历史
+Stage 资料已经归档，不再与活动版本混放。
 
-## Product and release
+## 研发规范
 
-- [Development workflow](development-workflow.md) - required version-branch
-  responsibilities, promotion sequence, and quality gates.
-- [Product design](product-design.md) - original product principles, performance
-  priorities, interaction model, and engine boundaries.
-- [Implementation roadmap](implementation-roadmap.md) - current stage status and
-  acceptance criteria.
-- [0.1.0 release readiness](release-readiness.md) - automated evidence, physical
-  test gaps, assets, and publication sequence.
-- [Changelog](../CHANGELOG.md) - user-visible changes by version.
+- [Muller 研发规范](development-workflow.md)：分支职责、三文档体系、评审规则、
+  优先级、质量门禁和晋级命令。
+- [版本文档模板](templates/)：新建小版本时使用的原始输入、评审和执行模板。
+- [更新记录](../CHANGELOG.md)：已经交付的用户可见变化。
 
-## Current delivery reports
+## 活动版本
 
-- [Stage 7.10 requirements](stage-7.10-ux-requirements.md)
-- [Stage 7.10 delivery plan](stage-7.10-design-and-delivery-plan.md)
-- [Stage 7.9 report](stage-7.9-report.md)
-- [Stage 7 design guidance](stage-7-design-guidance.md)
-- [UI rearchitecture roadmap](ui-rearchitecture-roadmap.md)
+- [V0.1.3](V0.1.3/01-original-input.md)
+  - [原始输入](V0.1.3/01-original-input.md)
+  - [评审记录](V0.1.3/02-review.md)
+  - [执行计划](V0.1.3/03-execution.md)
 
-## Engine and workflow reports
+## 历史归档
 
-- [Duplicate discovery core](stage-2-report.md)
-- [Desktop scan bridge](stage-3-report.md)
-- [Read-only comparison](stage-4-report.md)
-- [Safe mutation](stage-5-report.md)
-- [Browse foundation](stage-5.1-report.md)
-- [Operating model and preview](stage-6-report.md)
-- [Desktop interaction corrections](stage-6.1-report.md)
+- [起始开发归档](archive/initial-development/)：起始产品设计、Stage 计划与报告、
+  历史设计稿、技术路线图及首次发布资料。
 
-The `design/` directory contains versioned UI studies and acceptance references.
-The `assets/` directory contains stable media used by repository-facing docs.
+`assets/` 保存 README 等仓库入口仍在引用的稳定媒体资源。归档文件只用于追踪
+历史，不作为新版本的需求或执行依据。
