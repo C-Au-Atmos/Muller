@@ -5,6 +5,8 @@ boundary, and future engineering work for Muller.
 
 ## Product and release
 
+- [Development workflow](development-workflow.md) - required version-branch
+  responsibilities, promotion sequence, and quality gates.
 - [Product design](product-design.md) - original product principles, performance
   priorities, interaction model, and engine boundaries.
 - [Implementation roadmap](implementation-roadmap.md) - current stage status and
