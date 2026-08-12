@@ -5,6 +5,7 @@ export type FlowRgb = readonly [number, number, number];
 export interface FlowBorderAppearance {
   enabled: boolean;
   width: number;
+  radius: number;
   opacity: number;
   background: FlowRgb;
   highlight: FlowRgb;

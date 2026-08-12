@@ -40,6 +40,7 @@ export const ALBUM_IMAGE_EXTENSIONS = [
   "avif",
   "bmp",
   "gif",
+  "hdr",
   "heic",
   "ico",
   "jpeg",

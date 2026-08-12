@@ -34,6 +34,7 @@ uniform float u_segmentLength;
 uniform float u_intensity;
 uniform float u_directionPulse;
 uniform float u_borderWidth;
+uniform float u_borderRadius;
 uniform float u_opacity;
 uniform vec3 u_color;
 uniform vec3 u_backgroundColor;
@@ -45,11 +46,16 @@ void main() {
   vec2 p = gl_FragCoord.xy;
   float width = u_resolution.x;
   float height = u_resolution.y;
+  vec2 center = u_resolution * 0.5;
+  vec2 halfSize = max(center - vec2(0.5), vec2(0.5));
+  float radius = min(u_borderRadius, min(halfSize.x, halfSize.y));
+  vec2 rounded = abs(p - center) - (halfSize - vec2(radius));
+  float outerDistance = length(max(rounded, vec2(0.0))) + min(max(rounded.x, rounded.y), 0.0) - radius;
   float topDistance = height - p.y;
   float rightDistance = width - p.x;
   float bottomDistance = p.y;
   float leftDistance = p.x;
-  float edgeDistance = min(min(topDistance, rightDistance), min(bottomDistance, leftDistance));
+  float edgeDistance = max(0.0, -outerDistance);
   float perimeter = 2.0 * (width + height);
   float along;
 
@@ -68,7 +74,8 @@ void main() {
   float centerDistance = abs(cell - 0.5) * 2.0;
   float segment = 1.0 - smoothstep(u_segmentLength * 0.45, u_segmentLength, centerDistance);
   float core = pow(segment, 2.4);
-  float innerFade = 1.0 - smoothstep(u_borderWidth * 0.35, u_borderWidth, edgeDistance);
+  float outerCoverage = 1.0 - smoothstep(-0.75, 0.75, outerDistance);
+  float innerFade = (1.0 - smoothstep(u_borderWidth * 0.35, u_borderWidth, edgeDistance)) * outerCoverage;
   float outerLine = 1.0 - smoothstep(0.0, 1.5, edgeDistance);
   float pulse = u_directionPulse * (0.32 + 0.68 * segment);
   vec3 signalColor = mix(u_color, u_highlightColor, core * 0.38 + pulse * 0.34);
@@ -122,6 +129,7 @@ interface RendererState {
     intensity: WebGLUniformLocation;
     directionPulse: WebGLUniformLocation;
     borderWidth: WebGLUniformLocation;
+    borderRadius: WebGLUniformLocation;
     opacity: WebGLUniformLocation;
     color: WebGLUniformLocation;
     backgroundColor: WebGLUniformLocation;
@@ -281,6 +289,7 @@ function initialize(message: Extract<FlowWorkerInbound, { type: "init" }>): void
       intensity: uniform(gl, program, "u_intensity"),
       directionPulse: uniform(gl, program, "u_directionPulse"),
       borderWidth: uniform(gl, program, "u_borderWidth"),
+      borderRadius: uniform(gl, program, "u_borderRadius"),
       opacity: uniform(gl, program, "u_opacity"),
       color: uniform(gl, program, "u_color"),
       backgroundColor: uniform(gl, program, "u_backgroundColor"),
@@ -398,6 +407,7 @@ function draw(state: RendererState): void {
   gl.uniform1f(uniforms.intensity, state.intensity.value);
   gl.uniform1f(uniforms.directionPulse, state.pulse);
   gl.uniform1f(uniforms.borderWidth, ribbonWidth);
+  gl.uniform1f(uniforms.borderRadius, state.appearance.radius * state.dpr);
   gl.uniform1f(uniforms.opacity, state.appearance.opacity);
   gl.uniform3f(
     uniforms.color,
@@ -418,16 +428,14 @@ function draw(state: RendererState): void {
     state.appearance.highlight[2],
   );
 
-  drawEdge(gl, 0, 0, width, ribbonWidth);
-  drawEdge(gl, 0, height - ribbonWidth, width, ribbonWidth);
-  drawEdge(gl, 0, ribbonWidth, ribbonWidth, height - ribbonWidth * 2);
-  drawEdge(
-    gl,
-    width - ribbonWidth,
-    ribbonWidth,
-    ribbonWidth,
-    height - ribbonWidth * 2,
+  const cornerExtent = Math.min(
+    Math.ceil((state.appearance.radius + state.appearance.width + 2) * state.dpr),
+    Math.floor(Math.min(width, height) / 2),
   );
+  drawEdge(gl, 0, 0, width, cornerExtent);
+  drawEdge(gl, 0, height - cornerExtent, width, cornerExtent);
+  drawEdge(gl, 0, cornerExtent, cornerExtent, height - cornerExtent * 2);
+  drawEdge(gl, width - cornerExtent, cornerExtent, cornerExtent, height - cornerExtent * 2);
 }
 
 function publishStats(state: RendererState, now: number): void {

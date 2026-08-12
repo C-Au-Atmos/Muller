@@ -4,16 +4,27 @@ import {
   ArrowRight,
   ArrowUp,
   Binary,
+  ClipboardCopy,
+  ClipboardPaste,
   Columns2,
+  Copy,
+  ExternalLink,
   FileDiff,
+  FilePenLine,
   FolderGit2,
+  Info,
   ListTree,
   Pencil,
   Play,
+  RefreshCw,
   RotateCcw,
-  Search,
+  Scissors,
   Square,
+  SquareTerminal,
+  Trash2,
 } from "lucide-react";
+import { isTauri } from "@tauri-apps/api/core";
+import { startDrag } from "@crabnebula/tauri-plugin-drag";
 import {
   forwardRef,
   lazy,
@@ -23,18 +34,37 @@ import {
   useImperativeHandle,
   useRef,
   useState,
+  type CSSProperties,
+  type DragEvent as ReactDragEvent,
+  type MouseEvent as ReactMouseEvent,
 } from "react";
+import { createPortal } from "react-dom";
 
 import { formatBytes } from "../dedup/duplicateListModel";
 import { useAppI18n } from "../../i18n/i18n";
 import { DirectorySearchBar } from "../explorer/DirectorySearchBar";
 import {
+  BrowseWorkspace,
+  type BrowseComparisonRequest,
+  type BrowseNavigationState,
+  type BrowseWorkspaceHandle,
+} from "../explorer/BrowseWorkspace";
+import { DialogShell, EntryPropertiesDialog, MenuButton } from "../explorer/ExplorerOverlays";
+import {
+  openNativePath,
+  openTerminal,
+  recycleEntry,
+  renameEntry,
+  transferEntry,
+} from "../explorer/fileOperationsClient";
+import {
   VirtualDirectoryList,
   type VirtualDirectoryListHandle,
 } from "../explorer/VirtualDirectoryList";
-import type { DirectoryEntry } from "../explorer/types";
-import { sameWindowsPath } from "../explorer/pathDisplay";
+import type { DirectoryEntry, FileClipboardState, TransferMode } from "../explorer/types";
+import { displayPath, sameWindowsPath } from "../explorer/pathDisplay";
 import { useDirectoryPane } from "../explorer/useDirectoryPane";
+import { PreviewPanel } from "../preview/PreviewPanel";
 import {
   VirtualFolderDiffList,
   type VirtualFolderDiffListHandle,
@@ -50,6 +80,7 @@ import { useFolderDiff } from "./useFolderDiff";
 
 type PaneId = "left" | "right";
 type CompareView = "browse" | "folder" | "file";
+const NATIVE_DRAG_ICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAANElEQVRYR+3OMQ0AAAjEMMC/5yFjRxMFfXpm5g5gACN2gAE7wIAdYMAOMGAHGLADfKwBfgGShwM9EKgB0QAAAABJRU5ErkJggg==";
 
 const EditableMergeView = lazy(() => import("./EditableMergeView"));
 
@@ -60,6 +91,12 @@ export interface CompareNavigationState {
   canBack: boolean;
   canForward: boolean;
   canUp: boolean;
+  searchQuery: string;
+  searchMode: BrowseNavigationState["searchMode"];
+  searchResultCount: number;
+  totalEntries: number;
+  searchBoth: boolean;
+  canSearchBoth: boolean;
   editing: boolean;
 }
 
@@ -75,6 +112,17 @@ export interface CompareWorkspaceHandle {
   toggleSplit: () => void;
   activatePane: (pane: PaneId) => void;
   findInDirectory: () => void;
+  setSearchQuery: (query: string) => void;
+  setSearchMode: (mode: BrowseNavigationState["searchMode"]) => void;
+  setSearchBoth: (enabled: boolean) => void;
+  commitSearch: () => void;
+  copySelection: () => void;
+  cutSelection: () => void;
+  paste: () => void;
+  renameSelection: () => void;
+  recycleSelection: () => void;
+  refresh: () => void;
+  togglePreview: () => void;
 }
 
 interface CompareWorkspaceProps {
@@ -82,6 +130,16 @@ interface CompareWorkspaceProps {
   onNavigationChange: (state: CompareNavigationState) => void;
   onScrollVelocity: (velocity: number) => void;
   onSuccess: (message: string) => void;
+  clipboard?: FileClipboardState | null;
+  onClipboardChange?: (clipboard: FileClipboardState | null) => void;
+  mediaAutoplay?: boolean;
+  onMediaAutoplayChange?: (enabled: boolean) => void;
+  paneRatio?: number;
+  previewWidth?: number;
+  globalSearchRoots?: readonly string[];
+  hoverDelayMs?: number;
+  onPaneRatioChange?: (ratio: number) => void;
+  onPreviewWidthChange?: (width: number) => void;
   launchRequest?: {
     token: number;
     leftPath: string;
@@ -89,6 +147,25 @@ interface CompareWorkspaceProps {
     kind: "file" | "directory";
   } | null;
   onLaunchConsumed?: (token: number) => void;
+}
+
+interface ContextMenuState {
+  x: number;
+  y: number;
+  pane: PaneId;
+  entry: DirectoryEntry | null;
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : typeof error === "string" ? error : fallback;
+}
+
+function initialPreviewPinned(): boolean {
+  try {
+    return window.localStorage.getItem("muller:preview-pinned") === "true";
+  } catch {
+    return false;
+  }
 }
 
 function parentDirectory(path: string): string {
@@ -166,12 +243,30 @@ function BinaryDiffView({
 
 export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorkspaceProps>(
   function CompareWorkspace(
-    { initialRoot, onNavigationChange, onScrollVelocity, onSuccess, launchRequest, onLaunchConsumed },
+    {
+      initialRoot,
+      onNavigationChange,
+      onScrollVelocity,
+      onSuccess,
+      clipboard = null,
+      onClipboardChange,
+      mediaAutoplay = false,
+      onMediaAutoplayChange,
+      paneRatio = 50,
+      previewWidth = 320,
+      globalSearchRoots = [],
+      hoverDelayMs = 40,
+      onPaneRatioChange,
+      onPreviewWidthChange,
+      launchRequest,
+      onLaunchConsumed,
+    },
     ref,
   ) {
     const { t, formatNumber } = useAppI18n();
-    const left = useDirectoryPane(initialRoot);
-    const right = useDirectoryPane(initialRoot);
+    const left = useDirectoryPane(initialRoot, undefined, [], false);
+    const right = useDirectoryPane(initialRoot, undefined, [], false);
+    const browserRef = useRef<BrowseWorkspaceHandle>(null);
     const folderDiff = useFolderDiff();
     const fileDiff = useFileDiff();
     const leftListRef = useRef<VirtualDirectoryListHandle>(null);
@@ -189,6 +284,34 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
     const [strictMtime, setStrictMtime] = useState(false);
     const [split, setSplit] = useState(true);
     const [searchOpen, setSearchOpen] = useState({ left: false, right: false });
+    const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+    const [busy, setBusy] = useState(false);
+    const [notice, setNotice] = useState<string | null>(null);
+    const [operationError, setOperationError] = useState<string | null>(null);
+    const [renameTarget, setRenameTarget] = useState<DirectoryEntry | null>(null);
+    const [renameValue, setRenameValue] = useState("");
+    const [recycleTarget, setRecycleTarget] = useState<DirectoryEntry | null>(null);
+    const [propertiesTarget, setPropertiesTarget] = useState<DirectoryEntry | null>(null);
+    const [previewOpen, setPreviewOpen] = useState(false);
+    const [previewPinned, setPreviewPinned] = useState(initialPreviewPinned);
+    const [browserNavigation, setBrowserNavigation] = useState<BrowseNavigationState>({
+      activePane: "left",
+      path: initialRoot,
+      leftPath: initialRoot,
+      rightPath: initialRoot,
+      split: true,
+      canBack: false,
+      canForward: false,
+      canUp: false,
+      selectedName: null,
+      searchQuery: "",
+      searchMode: "current",
+      searchResultCount: 0,
+      totalEntries: 0,
+      searchBoth: false,
+      canSearchBoth: true,
+    });
+    const [browserComparisonSelection, setBrowserComparisonSelection] = useState<BrowseComparisonRequest | null>(null);
     const previousFolderStatus = useRef(folderDiff.state.status);
     const consumedLaunchToken = useRef<number | null>(null);
     const {
@@ -202,7 +325,13 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
 
     const active = activePane === "left" ? left : right;
     const activeSelected = activePane === "left" ? selectedLeft : selectedRight;
-    const comparingSameFolder = sameWindowsPath(left.state.path, right.state.path);
+    const selectedEntry = active.entryAt(activeSelected) ?? null;
+    const comparingSameFolder = sameWindowsPath(browserNavigation.leftPath, browserNavigation.rightPath);
+
+    useEffect(() => {
+      setActivePane(browserNavigation.activePane);
+      setSplit(browserNavigation.split);
+    }, [browserNavigation.activePane, browserNavigation.split]);
 
     const activatePaneWithFocus = useCallback(
       (pane: PaneId) => {
@@ -213,19 +342,6 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
         );
       },
       [split, view],
-    );
-
-    const openSearch = useCallback(
-      (pane: PaneId) => {
-        if (view !== "browse") return;
-        setSearchOpen((current) => ({ ...current, [pane]: true }));
-        window.requestAnimationFrame(() => {
-          const input = (pane === "left" ? leftSearchRef : rightSearchRef).current;
-          input?.focus();
-          input?.select();
-        });
-      },
-      [view],
     );
 
     const closeSearch = useCallback(
@@ -241,25 +357,40 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
     );
 
     useEffect(() => {
+      const switchPaneWithTab = (event: KeyboardEvent) => {
+        if (event.key !== "Tab" || event.ctrlKey || event.altKey || view !== "browse" || !split) return;
+        const target = event.target;
+        if (target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable='true']")) return;
+        if (!(target instanceof HTMLElement) || !target.closest(".compare-browser-legacy")) return;
+        event.preventDefault();
+        activatePaneWithFocus(event.shiftKey
+          ? (activePane === "left" ? "right" : "left")
+          : (activePane === "left" ? "right" : "left"));
+      };
+      window.addEventListener("keydown", switchPaneWithTab);
+      return () => window.removeEventListener("keydown", switchPaneWithTab);
+    }, [activePane, activatePaneWithFocus, split, view]);
+
+    useEffect(() => {
       onNavigationChange({
-        activePane,
-        path: active.state.requestedPath || active.state.path,
-        split,
-        canBack: active.canBack,
-        canForward: active.canForward,
-        canUp: active.state.parent !== null,
+        activePane: browserNavigation.activePane,
+        path: browserNavigation.path,
+        split: browserNavigation.split,
+        canBack: browserNavigation.canBack,
+        canForward: browserNavigation.canForward,
+        canUp: browserNavigation.canUp,
+        searchQuery: browserNavigation.searchQuery,
+        searchMode: browserNavigation.searchMode,
+        searchResultCount: browserNavigation.searchResultCount,
+        totalEntries: browserNavigation.totalEntries,
+        searchBoth: browserNavigation.searchBoth,
+        canSearchBoth: browserNavigation.canSearchBoth,
         editing: editState.phase === "ready",
       });
     }, [
-      active.canBack,
-      active.canForward,
-      active.state.parent,
-      active.state.path,
-      active.state.requestedPath,
-      activePane,
+      browserNavigation,
       editState.phase,
       onNavigationChange,
-      split,
     ]);
 
     const openDirectoryEntry = useCallback(
@@ -267,9 +398,13 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
         setActivePane(pane);
         if (entry.kind === "directory") {
           void (pane === "left" ? left.openPath(entry.path) : right.openPath(entry.path));
+          return;
         }
+        void openNativePath(entry.path).then((outcome) => {
+          if (outcome === "opened") onSuccess(t("openedEntry", { name: entry.name }));
+        }).catch((error) => setOperationError(errorMessage(error, t("unableOpenEntry"))));
       },
-      [left, right],
+      [left, onSuccess, right, t],
     );
 
     const startFolderComparison = useCallback(() => {
@@ -278,27 +413,152 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
       setView("folder");
       fileDiff.reset();
       setSelectedFolderRow(0);
-      void folderDiff.start(left.state.path, right.state.path, strictMtime);
+      void folderDiff.start(browserNavigation.leftPath, browserNavigation.rightPath, strictMtime);
     }, [
+      browserNavigation.leftPath,
+      browserNavigation.rightPath,
       closeEdit,
       comparingSameFolder,
       fileDiff,
       folderDiff,
-      left.state.path,
-      right.state.path,
       strictMtime,
     ]);
 
     const selectedLeftEntry = left.entryAt(selectedLeft);
     const selectedRightEntry = right.entryAt(selectedRight);
 
+    const refreshBoth = useCallback(() => {
+      left.refresh();
+      right.refresh();
+    }, [left, right]);
+
+    const copyOrCut = useCallback((mode: TransferMode, entry = selectedEntry) => {
+      if (!entry || (entry.kind !== "file" && entry.kind !== "directory")) return;
+      onClipboardChange?.({ mode, entries: [entry] });
+      setContextMenu(null);
+      setOperationError(null);
+    }, [onClipboardChange, selectedEntry]);
+
+    const pasteTo = useCallback(async (destinationDirectory = active.state.path) => {
+      if (!clipboard || !destinationDirectory || busy) return;
+      setBusy(true);
+      setOperationError(null);
+      let completed = 0;
+      try {
+        for (const entry of clipboard.entries) {
+          await transferEntry(entry.path, destinationDirectory, clipboard.mode, "keep_both");
+          completed += 1;
+        }
+        if (clipboard.mode === "move") onClipboardChange?.(null);
+        refreshBoth();
+        onSuccess(t("transferredItems", {
+          operation: t(clipboard.mode === "copy" ? "copied" : "moved"),
+          count: completed,
+        }));
+      } catch (error) {
+        setOperationError(errorMessage(error, t("unableTransfer")));
+      } finally {
+        setBusy(false);
+        setContextMenu(null);
+      }
+    }, [active.state.path, busy, clipboard, onClipboardChange, onSuccess, refreshBoth, t]);
+
+    const beginRename = useCallback((entry = selectedEntry) => {
+      if (!entry || (entry.kind !== "file" && entry.kind !== "directory")) return;
+      setRenameTarget(entry);
+      setRenameValue(entry.name);
+      setOperationError(null);
+      setContextMenu(null);
+    }, [selectedEntry]);
+
+    const performRename = useCallback(async () => {
+      if (!renameTarget || !renameValue.trim() || busy) return;
+      setBusy(true);
+      setOperationError(null);
+      try {
+        await renameEntry(renameTarget.path, renameValue.trim(), "fail");
+        setRenameTarget(null);
+        refreshBoth();
+        onSuccess(t("renamedEntry", { name: renameValue.trim() }));
+      } catch (error) {
+        setOperationError(errorMessage(error, t("unableRename")));
+      } finally {
+        setBusy(false);
+      }
+    }, [busy, onSuccess, refreshBoth, renameTarget, renameValue, t]);
+
+    const confirmRecycle = useCallback(async () => {
+      if (!recycleTarget || busy) return;
+      setBusy(true);
+      setOperationError(null);
+      try {
+        await recycleEntry(recycleTarget);
+        setRecycleTarget(null);
+        refreshBoth();
+        onSuccess(t("recycledItems", { count: 1 }));
+      } catch (error) {
+        setOperationError(errorMessage(error, t("unableRecycleEntry")));
+      } finally {
+        setBusy(false);
+      }
+    }, [busy, onSuccess, recycleTarget, refreshBoth, t]);
+
+    const copyText = useCallback(async (value: string, message: string) => {
+      setContextMenu(null);
+      try {
+        await navigator.clipboard.writeText(value);
+        setNotice(message);
+      } catch (error) {
+        setOperationError(errorMessage(error, t("unableClipboard")));
+      }
+    }, [t]);
+
+    const handleContextMenu = useCallback((
+      pane: PaneId,
+      event: ReactMouseEvent<HTMLElement>,
+      entry: DirectoryEntry | null,
+      position: number | null,
+    ) => {
+      event.preventDefault();
+      setActivePane(pane);
+      if (position !== null) {
+        if (pane === "left") setSelectedLeft(position);
+        else setSelectedRight(position);
+      }
+      setContextMenu({ x: event.clientX, y: event.clientY, pane, entry });
+    }, []);
+
+    const fileDragStart = useCallback((event: ReactDragEvent<HTMLElement>, entry: DirectoryEntry) => {
+      if (!isTauri() || (entry.kind !== "file" && entry.kind !== "directory")) return;
+      event.preventDefault();
+      void startDrag({
+        item: [entry.path],
+        icon: NATIVE_DRAG_ICON,
+        mode: event.ctrlKey ? "copy" : "move",
+      }).catch((error) => setOperationError(errorMessage(error, t("unableTransfer"))));
+    }, [t]);
+
     const startSelectedFileComparison = useCallback(() => {
-      if (selectedLeftEntry?.kind !== "file" || selectedRightEntry?.kind !== "file") return;
+      if (!browserComparisonSelection || browserComparisonSelection.kind !== "file") return;
       closeEdit();
       setView("file");
       setSelectedTextRow(0);
-      void fileDiff.start(selectedLeftEntry.path, selectedRightEntry.path);
-    }, [closeEdit, fileDiff, selectedLeftEntry, selectedRightEntry]);
+      void fileDiff.start(browserComparisonSelection.leftPath, browserComparisonSelection.rightPath);
+    }, [browserComparisonSelection, closeEdit, fileDiff]);
+
+    const startBrowseComparison = useCallback((request: BrowseComparisonRequest) => {
+      closeEdit();
+      if (request.kind === "file") {
+        setView("file");
+        setSelectedTextRow(0);
+        void fileDiff.start(request.leftPath, request.rightPath);
+        return;
+      }
+      setView("folder");
+      fileDiff.reset();
+      setSelectedFolderRow(0);
+      void folderDiff.start(request.leftPath, request.rightPath, strictMtime);
+    }, [closeEdit, fileDiff, folderDiff, strictMtime]);
 
     useEffect(() => {
       if (!launchRequest || consumedLaunchToken.current === launchRequest.token) return;
@@ -307,13 +567,15 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
       setSelectedFolderRow(0);
       setSelectedTextRow(0);
       if (launchRequest.kind === "file") {
-        void left.openPath(parentDirectory(launchRequest.leftPath));
-        void right.openPath(parentDirectory(launchRequest.rightPath));
+        const leftDirectory = parentDirectory(launchRequest.leftPath);
+        const rightDirectory = parentDirectory(launchRequest.rightPath);
+        browserRef.current?.navigatePane("left", leftDirectory);
+        browserRef.current?.navigatePane("right", rightDirectory);
         setView("file");
         void fileDiff.start(launchRequest.leftPath, launchRequest.rightPath);
       } else {
-        void left.openPath(launchRequest.leftPath);
-        void right.openPath(launchRequest.rightPath);
+        browserRef.current?.navigatePane("left", launchRequest.leftPath);
+        browserRef.current?.navigatePane("right", launchRequest.rightPath);
         setView("folder");
         fileDiff.reset();
         void folderDiff.start(launchRequest.leftPath, launchRequest.rightPath, strictMtime);
@@ -441,25 +703,34 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
       navigateActive(path) {
         closeEdit();
         setView("browse");
-        void active.openPath(path);
+        browserRef.current?.navigateActive(path);
       },
       back() {
         closeEdit();
         setView("browse");
-        active.back();
+        browserRef.current?.back();
       },
       forward() {
         closeEdit();
         setView("browse");
-        active.forward();
+        browserRef.current?.forward();
       },
       up() {
         closeEdit();
         setView("browse");
-        active.up();
+        browserRef.current?.up();
       },
-      moveSelection,
-      openSelection,
+      moveSelection(delta) {
+        if (view === "browse") {
+          browserRef.current?.moveSelection(delta < 0 ? "up" : "down");
+          return;
+        }
+        moveSelection(delta);
+      },
+      openSelection() {
+        if (view === "browse") browserRef.current?.openSelection();
+        else openSelection();
+      },
       nextDifference() {
         void jumpDifference(1);
       },
@@ -467,16 +738,64 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
         void jumpDifference(-1);
       },
       toggleSplit() {
-        setSplit((current) => !current);
+        setView("browse");
+        browserRef.current?.toggleSplit();
       },
-      activatePane: activatePaneWithFocus,
+      activatePane(pane) {
+        browserRef.current?.activatePane(pane);
+      },
       findInDirectory() {
-        openSearch(activePane);
+        setView("browse");
+        window.requestAnimationFrame(() => browserRef.current?.findInDirectory());
+      },
+      setSearchQuery(query) {
+        browserRef.current?.setSearchQuery(query);
+      },
+      setSearchMode(mode) {
+        browserRef.current?.setSearchMode(mode);
+      },
+      setSearchBoth(enabled) {
+        browserRef.current?.setSearchBoth(enabled);
+      },
+      commitSearch() {
+        browserRef.current?.commitSearch();
+      },
+      copySelection() {
+        if (view === "browse") browserRef.current?.copySelection();
+        else copyOrCut("copy");
+      },
+      cutSelection() {
+        if (view === "browse") browserRef.current?.cutSelection();
+        else copyOrCut("move");
+      },
+      paste() {
+        if (view === "browse") browserRef.current?.paste();
+        else void pasteTo();
+      },
+      renameSelection() {
+        if (view === "browse") browserRef.current?.renameSelection();
+        else beginRename();
+      },
+      recycleSelection() {
+        if (view === "browse") browserRef.current?.recycleSelection();
+        else if (selectedEntry?.kind === "file" || selectedEntry?.kind === "directory") {
+          setRecycleTarget(selectedEntry);
+        }
+      },
+      refresh() {
+        if (view === "browse") browserRef.current?.refresh();
+        else active.refresh();
+      },
+      togglePreview() {
+        if (view === "browse") browserRef.current?.togglePreview();
       },
     }));
 
     const folderBusy = folderDiff.state.status === "loading";
     const binaryOffset = fileDiff.state.binary?.offset ?? 0;
+    const contextPane = contextMenu?.pane === "right" ? right : left;
+    const contextEntry = contextMenu?.entry ?? null;
+    const renderLegacyBrowser: boolean = false;
 
     return (
       <section className="compare-workspace" aria-label={t("compareWorkspace")}>
@@ -515,18 +834,6 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
           </div>
 
           <div className="compare-actions">
-            {view === "browse" ? (
-              <button
-                className={searchOpen[activePane] ? "icon-button is-active" : "icon-button"}
-                type="button"
-                title={t("searchDirectoryShortcut")}
-                aria-label={t("searchDirectory")}
-                aria-pressed={searchOpen[activePane]}
-                onClick={() => openSearch(activePane)}
-              >
-                <Search size={14} />
-              </button>
-            ) : null}
             <label className="mtime-toggle">
               <input
                 type="checkbox"
@@ -538,7 +845,7 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
             <button
               className="command-button"
               type="button"
-              disabled={selectedLeftEntry?.kind !== "file" || selectedRightEntry?.kind !== "file"}
+              disabled={browserComparisonSelection?.kind !== "file"}
               onClick={startSelectedFileComparison}
             >
               <FileDiff size={15} /> {t("files")}
@@ -547,9 +854,9 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
               className="command-button is-primary"
               type="button"
               disabled={
-                !split ||
-                !left.state.path ||
-                !right.state.path ||
+                !browserNavigation.split ||
+                !browserNavigation.leftPath ||
+                !browserNavigation.rightPath ||
                 comparingSameFolder
               }
               onClick={startFolderComparison}
@@ -574,13 +881,41 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
           </div>
         </div>
 
-        {view === "browse" ? (
-          <div className="compare-browser-surface">
-            {comparingSameFolder ? (
-              <div className="compare-root-notice" role="status">
-                {t("sameFoldersHint")}
+        <div className={`compare-browser-surface compare-browser-shared${view === "browse" ? "" : " is-hidden"}`}>
+          {comparingSameFolder ? <div className="compare-root-notice" role="status">{t("sameFoldersHint")}</div> : null}
+          <BrowseWorkspace
+            ref={browserRef}
+            initialRoot={initialRoot}
+            routeVisible={view === "browse"}
+            presentation="list"
+            paneRatio={paneRatio}
+            previewWidth={previewWidth}
+            globalSearchRoots={globalSearchRoots}
+            onPaneRatioChange={onPaneRatioChange}
+            onPreviewWidthChange={onPreviewWidthChange}
+            onNavigationChange={setBrowserNavigation}
+            onScrollVelocity={onScrollVelocity}
+            onSuccess={onSuccess}
+            hoverDelayMs={hoverDelayMs}
+            onCompareSelection={startBrowseComparison}
+            onComparisonSelectionChange={setBrowserComparisonSelection}
+            mediaAutoplay={mediaAutoplay}
+            onMediaAutoplayChange={onMediaAutoplayChange}
+            clipboard={clipboard}
+            onClipboardChange={onClipboardChange}
+          />
+        </div>
+
+        {renderLegacyBrowser ? (
+          <div className="compare-browser-surface compare-browser-legacy" aria-hidden="true">
+            {comparingSameFolder || notice || operationError ? (
+              <div className="compare-browser-notices">
+                {comparingSameFolder ? <div className="compare-root-notice" role="status">{t("sameFoldersHint")}</div> : null}
+                {notice ? <div className="compare-operation-status" role="status">{notice}</div> : null}
+                {operationError ? <div className="compare-operation-status is-error" role="alert">{operationError}</div> : null}
               </div>
             ) : null}
+          <div className={previewOpen ? `browse-content has-preview${previewPinned ? " is-preview-pinned" : ""}` : "browse-content"} style={{ "--preview-width": "320px" } as CSSProperties}>
           <div className={split ? "directory-panes" : `directory-panes is-single is-${activePane}`}>
             <section className={`${activePane === "left" ? "directory-pane is-active" : "directory-pane"}${searchOpen.left ? " has-search" : ""}`}>
               <div className="directory-pane-heading">
@@ -613,6 +948,8 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
                 onOpen={(entry) => openDirectoryEntry("left", entry)}
                 onActivate={() => setActivePane("left")}
                 onScrollVelocity={onScrollVelocity}
+                onContextMenu={(event, entry, position) => handleContextMenu("left", event, entry, position)}
+                onFileDragStart={(event, entry) => fileDragStart(event, entry)}
                 emptyLabel={left.search.query.trim() ? t("noMatchingItems") : undefined}
               />
               {left.visibleError ? <div className="pane-error">{left.visibleError}</div> : null}
@@ -648,10 +985,30 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
                 onOpen={(entry) => openDirectoryEntry("right", entry)}
                 onActivate={() => setActivePane("right")}
                 onScrollVelocity={onScrollVelocity}
+                onContextMenu={(event, entry, position) => handleContextMenu("right", event, entry, position)}
+                onFileDragStart={(event, entry) => fileDragStart(event, entry)}
                 emptyLabel={right.search.query.trim() ? t("noMatchingItems") : undefined}
               />
               {right.visibleError ? <div className="pane-error">{right.visibleError}</div> : null}
             </section>
+          </div>
+          {previewOpen ? (
+            <PreviewPanel
+              entry={selectedEntry}
+              pinned={previewPinned}
+              mediaAutoplay={mediaAutoplay}
+              onMediaAutoplayChange={(enabled) => onMediaAutoplayChange?.(enabled)}
+              onPinnedChange={(pinned) => {
+                setPreviewPinned(pinned);
+                try {
+                  window.localStorage.setItem("muller:preview-pinned", String(pinned));
+                } catch {
+                  // Pinning still works for the current session.
+                }
+              }}
+              onClose={() => setPreviewOpen(false)}
+            />
+          ) : null}
           </div>
           </div>
         ) : view === "folder" ? (
@@ -689,7 +1046,7 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
               onScrollVelocity={onScrollVelocity}
             />
           </div>
-        ) : (
+        ) : view === "file" ? (
           <div className={editState.phase === "ready" ? "file-diff-pane is-editing" : "file-diff-pane"}>
             <div className="file-diff-summary">
               <button
@@ -765,7 +1122,64 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
               </>
             )}
           </div>
-        )}
+        ) : null}
+
+        {contextMenu ? createPortal((
+          <div className="explorer-context-menu" role="menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
+            {contextEntry ? <MenuButton icon={<ExternalLink size={14} />} onClick={() => { openDirectoryEntry(contextMenu.pane, contextEntry); setContextMenu(null); }}>{t("open")}</MenuButton> : null}
+            {contextEntry?.kind === "file" ? <MenuButton icon={<ExternalLink size={14} />} onClick={() => {
+              setContextMenu(null);
+              void openNativePath(contextEntry.path, true).catch((error) => setOperationError(errorMessage(error, t("unableOpenWith"))));
+            }}>{t("openWith")}</MenuButton> : null}
+            {contextEntry?.kind === "directory" ? (
+              <>
+                <MenuButton icon={<ArrowLeft size={14} />} onClick={() => { void left.openPath(contextEntry.path); setActivePane("left"); setContextMenu(null); }}>{t("openLeftPane")}</MenuButton>
+                <MenuButton icon={<ArrowRight size={14} />} onClick={() => { void right.openPath(contextEntry.path); setActivePane("right"); setSplit(true); setContextMenu(null); }}>{t("openRightPane")}</MenuButton>
+              </>
+            ) : null}
+            <span className="menu-separator" />
+            <MenuButton icon={<Copy size={14} />} disabled={!contextEntry} onClick={() => copyOrCut("copy", contextEntry)}>{t("copy")}</MenuButton>
+            <MenuButton icon={<Scissors size={14} />} disabled={!contextEntry} onClick={() => copyOrCut("move", contextEntry)}>{t("cut")}</MenuButton>
+            <MenuButton icon={<ClipboardPaste size={14} />} disabled={!clipboard} onClick={() => void pasteTo(contextEntry?.kind === "directory" ? contextEntry.path : contextPane.state.path)}>{t("paste")}</MenuButton>
+            {contextEntry ? <MenuButton icon={<ClipboardCopy size={14} />} onClick={() => void copyText(contextEntry.name, t("copiedName", { name: contextEntry.name }))}>{t("copyFileName")}</MenuButton> : null}
+            {contextEntry ? <MenuButton icon={<ClipboardCopy size={14} />} onClick={() => void copyText(displayPath(contextEntry.path), t("copiedPath"))}>{t("copyFullPath")}</MenuButton> : null}
+            <span className="menu-separator" />
+            <MenuButton icon={<SquareTerminal size={14} />} onClick={() => {
+              setContextMenu(null);
+              void openTerminal(contextEntry?.path ?? contextPane.state.path).catch((error) => setOperationError(errorMessage(error, t("unableOpenTerminal"))));
+            }}>{t("openTerminal")}</MenuButton>
+            {contextEntry ? <MenuButton icon={<FilePenLine size={14} />} onClick={() => beginRename(contextEntry)}>{t("rename")}</MenuButton> : null}
+            {contextEntry ? <MenuButton icon={<Trash2 size={14} />} onClick={() => { setRecycleTarget(contextEntry); setContextMenu(null); }}>{t("recycleSelected")}</MenuButton> : null}
+            {contextEntry ? <MenuButton icon={<Info size={14} />} onClick={() => { setPropertiesTarget(contextEntry); setContextMenu(null); }}>{t("properties")}</MenuButton> : null}
+            {!contextEntry ? <MenuButton icon={<RefreshCw size={14} />} onClick={() => { contextPane.refresh(); setContextMenu(null); }}>{t("refresh")}</MenuButton> : null}
+          </div>
+        ), document.body) : null}
+
+        {renameTarget ? (
+          <DialogShell title={t("renameDialog")} icon={<FilePenLine size={17} />} onClose={() => setRenameTarget(null)}>
+            <form className="rename-form" onSubmit={(event) => { event.preventDefault(); void performRename(); }}>
+              <input autoFocus aria-label={t("newName")} value={renameValue} onChange={(event) => setRenameValue(event.target.value)} />
+              {operationError ? <div className="dialog-error" role="alert">{operationError}</div> : null}
+              <div className="explorer-dialog-actions">
+                <button className="command-button" type="button" onClick={() => setRenameTarget(null)}>{t("cancel")}</button>
+                <button className="command-button is-primary" type="submit" disabled={busy || !renameValue.trim()}>{t("rename")}</button>
+              </div>
+            </form>
+          </DialogShell>
+        ) : null}
+
+        {recycleTarget ? (
+          <DialogShell title={t("recycleDialog")} icon={<Trash2 size={17} />} onClose={() => setRecycleTarget(null)}>
+            <p className="dialog-path">{displayPath(recycleTarget.path)}</p>
+            {operationError ? <div className="dialog-error" role="alert">{operationError}</div> : null}
+            <div className="explorer-dialog-actions">
+              <button className="command-button" type="button" onClick={() => setRecycleTarget(null)}>{t("cancel")}</button>
+              <button className="command-button is-danger" type="button" disabled={busy} onClick={() => void confirmRecycle()}><Trash2 size={14} /> {t("moveToRecycleBin", { count: 1 })}</button>
+            </div>
+          </DialogShell>
+        ) : null}
+
+        {propertiesTarget ? <EntryPropertiesDialog entry={propertiesTarget} onClose={() => setPropertiesTarget(null)} /> : null}
       </section>
     );
   },

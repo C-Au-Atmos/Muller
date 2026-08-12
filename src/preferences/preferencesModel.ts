@@ -21,6 +21,7 @@ export interface AppPreferencesV1 {
   audioEnabled: boolean;
   audioVolume: number;
   lastNonZeroAudioVolume: number;
+  mediaAutoplay: boolean;
   hoverDelayMs: number;
   motion: MotionPreference;
 }
@@ -37,6 +38,7 @@ export const DEFAULT_PREFERENCES: AppPreferencesV1 = {
   audioEnabled: true,
   audioVolume: 65,
   lastNonZeroAudioVolume: 65,
+  mediaAutoplay: false,
   hoverDelayMs: 40,
   motion: "system",
 };
@@ -84,6 +86,7 @@ export function parsePreferences(serialized: string | null, legacyWorkspace?: st
     audioEnabled: typeof raw.audioEnabled === "boolean" ? raw.audioEnabled : true,
     audioVolume,
     lastNonZeroAudioVolume: clamp(Number(raw.lastNonZeroAudioVolume) || audioVolume || 65, 1, 100),
+    mediaAutoplay: typeof raw.mediaAutoplay === "boolean" ? raw.mediaAutoplay : false,
     hoverDelayMs: clamp(Number(raw.hoverDelayMs ?? 40) || 0, 0, 300),
     motion: member(raw.motion, ["system", "full", "reduced"], "system"),
   };

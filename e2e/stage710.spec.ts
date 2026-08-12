@@ -66,13 +66,14 @@ async function installDesktopMock(
   hoverDelayMs = 0,
   motion: "full" | "reduced" = "reduced",
   audioEnabled = false,
+  locale: "en-US" | "zh-CN" = "en-US",
 ): Promise<void> {
-  await page.addInitScript(({ initialSidebarMode, initialHoverDelayMs, initialMotion, initialAudioEnabled }) => {
+  await page.addInitScript(({ initialSidebarMode, initialHoverDelayMs, initialMotion, initialAudioEnabled, initialLocale }) => {
     if (window.sessionStorage.getItem("muller.e2e.desktop-initialized") !== "true") {
       window.localStorage.clear();
       window.localStorage.setItem("muller.preferences.v1", JSON.stringify({
         version: 1,
-        locale: "en-US",
+        locale: initialLocale,
         theme: "dark",
         density: "compact",
         uiScale: 100,
@@ -160,6 +161,7 @@ async function installDesktopMock(
     const runtime = globalThis as typeof globalThis & {
       isTauri: boolean;
       __muller710: MockState;
+      __mullerE2eHtmlDrag: boolean;
     };
     const tauriWindow = window as unknown as {
       __TAURI_INTERNALS__: {
@@ -176,6 +178,7 @@ async function installDesktopMock(
     const searchEntriesBySession = new Map<number, typeof entries>();
     runtime.isTauri = true;
     runtime.__muller710 = state;
+    runtime.__mullerE2eHtmlDrag = true;
 
     tauriWindow.__TAURI_INTERNALS__ = {
       metadata: { currentWindow: { label: "main" } },
@@ -368,6 +371,7 @@ async function installDesktopMock(
     initialHoverDelayMs: hoverDelayMs,
     initialMotion: motion,
     initialAudioEnabled: audioEnabled,
+    initialLocale: locale,
   });
 }
 
@@ -433,6 +437,18 @@ test("Muller opens Home without creating workspace tabs", async ({ page }) => {
   for (let index = 0; index < 4; index += 1) await page.keyboard.press("Control+,");
   await expect(page.locator(".settings-page")).toHaveCount(1);
   await expect(tabs).toHaveCount(1);
+});
+
+test("Windows known folders use Chinese names and distinct location glyphs", async ({ page }) => {
+  await installDesktopMock(page, "classic", 0, "reduced", false, "zh-CN");
+  await page.goto("/");
+  const sidebar = page.locator(".classic-sidebar");
+  const home = sidebar.getByRole("button", { name: "用户主目录", exact: true });
+  const desktop = sidebar.getByRole("button", { name: "桌面", exact: true });
+  const downloads = sidebar.getByRole("button", { name: "下载", exact: true });
+  await expect(home.locator(".location-glyph.is-profile")).toBeVisible();
+  await expect(desktop.locator(".location-glyph.is-desktop")).toBeVisible();
+  await expect(downloads.locator(".location-glyph.is-downloads")).toBeVisible();
 });
 
 test("Muller Home performs paged full-disk search across logical drives", async ({ page }) => {
@@ -518,6 +534,91 @@ test("Compare keeps an invalid attempted path visible and renders its read error
   await expect(page.locator(".directory-pane").first().locator(".pane-error")).toContainText("path not found");
 });
 
+test("Compare Browse supports pane Tab switching, normal context actions, preview, and native drag", async ({ page }) => {
+  await installDesktopMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Compare", exact: true }).click();
+  const workspace = page.locator(".compare-workspace");
+  const panes = workspace.locator(".directory-pane");
+  const viewports = workspace.locator(".directory-list-viewport");
+  await expect(panes).toHaveCount(2);
+
+  await viewports.nth(0).focus();
+  await page.keyboard.press("Tab");
+  await expect(panes.nth(1)).toHaveClass(/is-active/);
+  await expect(viewports.nth(1)).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(panes.nth(0)).toHaveClass(/is-active/);
+
+  await viewports.nth(0).focus();
+  await page.keyboard.press("d");
+  await expect(panes.nth(0).locator(".directory-row", { hasText: "Destination" })).toHaveAttribute("aria-selected", "true");
+
+  const first = viewports.nth(0).locator(".directory-row:not(.is-placeholder)").first();
+  await first.evaluate((entry) => {
+    entry.dispatchEvent(new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      clientX: window.innerWidth - 2,
+      clientY: window.innerHeight - 2,
+    }));
+  });
+  const menu = page.getByRole("menu");
+  await expect(menu.getByRole("menuitem", { name: "Copy", exact: true })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "Cut", exact: true })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "Copy file name", exact: true })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "Copy full path", exact: true })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "Compress selection to ZIP", exact: true })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "Properties", exact: true })).toBeVisible();
+  const menuBounds = await menu.boundingBox();
+  const viewportSize = page.viewportSize();
+  expect(menuBounds ? menuBounds.x + menuBounds.width : Number.POSITIVE_INFINITY).toBeLessThanOrEqual((viewportSize?.width ?? 0) - 8);
+  expect(menuBounds ? menuBounds.y + menuBounds.height : Number.POSITIVE_INFINITY).toBeLessThanOrEqual((viewportSize?.height ?? 0) - 8);
+  await menu.getByRole("menuitem", { name: "Copy", exact: true }).click();
+  await expect(workspace.getByRole("button", { name: "Paste", exact: true })).toBeEnabled();
+
+  const second = viewports.nth(0).locator(".directory-row:not(.is-placeholder)").nth(1);
+  await first.click();
+  await second.click({ modifiers: ["Control"] });
+  await expect(viewports.nth(0).locator(".directory-row[aria-selected='true']")).toHaveCount(2);
+
+  const viewportBounds = await viewports.nth(0).boundingBox();
+  if (!viewportBounds) throw new Error("Compare browse viewport is not measurable");
+  await page.mouse.click(
+    viewportBounds.x + viewportBounds.width / 2,
+    viewportBounds.y + viewportBounds.height - 8,
+    { button: "right" },
+  );
+  const blankMenu = page.getByRole("menu");
+  await expect(blankMenu.getByRole("menuitem", { name: "New folder", exact: true })).toBeVisible();
+  await expect(blankMenu.getByRole("menuitem", { name: "New text document", exact: true })).toBeVisible();
+  await expect(blankMenu.getByRole("menuitem", { name: "New empty file", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await first.click();
+
+  await workspace.getByRole("button", { name: "Toggle preview" }).click();
+  await expect(workspace.locator(".preview-panel")).toBeVisible();
+  await workspace.getByRole("button", { name: "Enable automatic media playback" }).click();
+  await expect(workspace.getByRole("button", { name: "Disable automatic media playback" })).toBeVisible();
+  expect(await page.evaluate(() => {
+    const stored = JSON.parse(window.localStorage.getItem("muller.preferences.v1") ?? "{}") as {
+      mediaAutoplay?: unknown;
+    };
+    return stored.mediaAutoplay === true;
+  })).toBe(true);
+  await workspace.getByRole("button", { name: "Close preview" }).click();
+
+  await first.locator(".directory-drag-label").evaluate((source) => {
+    Reflect.set(globalThis, "__mullerE2eHtmlDrag", false);
+    source.dispatchEvent(new DragEvent("dragstart", {
+      bubbles: true,
+      cancelable: true,
+      dataTransfer: new DataTransfer(),
+    }));
+  });
+  await expect.poll(async () => (await mockState(page)).nativeDragPaths.at(-1)).toEqual(["D:\\Muller\\Alpha.txt"]);
+});
+
 test("Compare pane hierarchy controls survive navigation from a result view", async ({ page }) => {
   await installDesktopMock(page);
   await page.goto("/");
@@ -528,7 +629,7 @@ test("Compare pane hierarchy controls survive navigation from a result view", as
   await panes.nth(0).locator(".directory-row", { hasText: "Destination" }).click();
   await panes.nth(1).locator(".directory-row", { hasText: "Destination" }).click();
   await page.getByRole("button", { name: "Left: Open selected child folder" }).click();
-  await expect(panes.nth(0).locator(".directory-pane-heading > span")).toHaveText("D:\\Muller\\Destination");
+  await expect(panes.nth(0).locator(".directory-pane-heading > span")).toHaveAttribute("title", "D:\\Muller\\Destination");
   const visibleGeometry = await panes.nth(0).evaluate((pane) => {
     const viewport = pane.querySelector<HTMLElement>(".directory-list-viewport");
     const row = pane.querySelector<HTMLElement>(".directory-row:not(.is-placeholder)");
@@ -543,17 +644,17 @@ test("Compare pane hierarchy controls survive navigation from a result view", as
   expect(visibleGeometry?.viewportHeight ?? 0).toBeGreaterThan(32);
   expect(visibleGeometry?.intersection ?? 0).toBeGreaterThan(0);
   await page.getByRole("button", { name: "Left: Parent folder" }).click();
-  await expect(panes.nth(0).locator(".directory-pane-heading > span")).toHaveText("D:\\");
+  await expect(panes.nth(0).locator(".directory-pane-heading > span")).toHaveAttribute("title", "D:\\");
 
   await page.getByRole("button", { name: "Right: Open selected child folder" }).click();
-  await expect(panes.nth(1).locator(".directory-pane-heading > span")).toHaveText("D:\\Muller\\Destination");
+  await expect(panes.nth(1).locator(".directory-pane-heading > span")).toHaveAttribute("title", "D:\\Muller\\Destination");
 
   await page.locator(".compare-actions .command-button.is-primary").click();
   await expect(page.locator(".folder-diff-pane")).toBeVisible();
   await page.getByRole("button", { name: "Up one level", exact: true }).click();
   await expect(page.locator(".compare-browser-surface")).toBeVisible();
   await expect(panes).toHaveCount(2);
-  await expect(panes.nth(1).locator(".directory-pane-heading > span")).toHaveText("D:\\");
+  await expect(panes.nth(1).locator(".directory-pane-heading > span")).toHaveAttribute("title", "D:\\");
 });
 
 test("UNC host addresses render as network breadcrumbs and navigate up to This PC", async ({ page }) => {
@@ -650,8 +751,13 @@ test("window controls dispatch all three native window operations", async ({ pag
   const restore = page.getByRole("button", { name: "Restore" });
   await expect(restore.locator(".lucide-minimize2")).toBeVisible();
   await expect(restore).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".stage7-shell")).toHaveClass(/is-window-maximized/);
+  await expect(page.locator(".stage7-shell")).toHaveCSS("border-radius", "0px");
+  await expect(page.locator(".flow-border")).toHaveCSS("border-radius", "0px");
   await restore.click();
   await expect(page.getByRole("button", { name: "Maximize" })).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator(".stage7-shell")).not.toHaveClass(/is-window-maximized/);
+  await expect(page.locator(".stage7-shell")).toHaveCSS("border-radius", "12px");
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await expect.poll(async () => (await mockState(page)).windowCommands).toEqual([
     "plugin:window|minimize",

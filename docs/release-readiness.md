@@ -39,7 +39,7 @@ Stage 8 is a separate performance milestone and does not block this preview.
 
 - The repository is initialized and `origin` is configured for
   `AuAtmos/Muller`.
-- The existing GPLv3 `LICENSE` commit is retained as the base of `main`.
+- The existing GPLv3 `LICENSE` commit is retained as the repository baseline.
 - The current source tree is committed and pushed separately from any release.
 - Publishing `v0.1.0` is authorized. The tag workflow creates a draft, uploads
   and hashes both Windows executables, then publishes the completed prerelease.
@@ -68,7 +68,8 @@ Evergreen WebView2 Runtime installed once.
 ## Publication sequence
 
 1. The repository, `origin`, author metadata, and GPLv3 licensing are configured.
-2. The current source tree is committed and pushed to `main`.
+2. The current source tree is committed and promoted to `master` through the
+   version's release branch.
 3. Confirm the Windows CI workflow passes.
 4. Push tag `v0.1.0`; the release workflow creates a draft, rebuilds the Windows
    assets, uploads their checksums, and then publishes the prerelease.

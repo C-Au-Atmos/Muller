@@ -68,6 +68,7 @@ export function useMarqueeSelection({
     startedOnItem: boolean;
   } | null>(null);
   const frameRef = useRef<number | null>(null);
+  const updateFrameRef = useRef<number | null>(null);
   const suppressClickRef = useRef(false);
 
   const contentPoint = useCallback((client: Point): Point | null => {
@@ -100,6 +101,22 @@ export function useMarqueeSelection({
     frameRef.current = null;
   }, []);
 
+  const scheduleUpdate = useCallback(() => {
+    if (updateFrameRef.current !== null) return;
+    updateFrameRef.current = window.requestAnimationFrame(() => {
+      updateFrameRef.current = null;
+      update();
+    });
+  }, [update]);
+
+  const flushUpdate = useCallback(() => {
+    if (updateFrameRef.current !== null) {
+      window.cancelAnimationFrame(updateFrameRef.current);
+      updateFrameRef.current = null;
+    }
+    update();
+  }, [update]);
+
   const autoScroll = useCallback(() => {
     const viewport = viewportRef.current;
     const pointer = pointerRef.current;
@@ -122,10 +139,10 @@ export function useMarqueeSelection({
       if (axis === "horizontal") viewport.scrollLeft += step;
       else viewport.scrollTop += step;
       const current = axis === "horizontal" ? viewport.scrollLeft : viewport.scrollTop;
-      if (current !== previous) update();
+      if (current !== previous) scheduleUpdate();
     }
     frameRef.current = window.requestAnimationFrame(autoScroll);
-  }, [axis, update, viewportRef]);
+  }, [axis, scheduleUpdate, viewportRef]);
 
   const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     const startedOnItem = Boolean(
@@ -167,12 +184,13 @@ export function useMarqueeSelection({
       }
       frameRef.current ??= window.requestAnimationFrame(autoScroll);
     }
-    update();
-  }, [autoScroll, update]);
+    scheduleUpdate();
+  }, [autoScroll, scheduleUpdate]);
 
   const finish = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     const pointer = pointerRef.current;
     if (!pointer || pointer.id !== event.pointerId) return;
+    if (pointer.dragging) flushUpdate();
     if (!pointer.dragging && !pointer.startedOnItem) onBlankClick(pointer.modifiers);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
@@ -186,9 +204,15 @@ export function useMarqueeSelection({
         suppressClickRef.current = false;
       }, 0);
     }
-  }, [onBlankClick, onEnd, stopAutoScroll]);
+  }, [flushUpdate, onBlankClick, onEnd, stopAutoScroll]);
 
-  useEffect(() => stopAutoScroll, [stopAutoScroll]);
+  useEffect(() => () => {
+    stopAutoScroll();
+    if (updateFrameRef.current !== null) {
+      window.cancelAnimationFrame(updateFrameRef.current);
+      updateFrameRef.current = null;
+    }
+  }, [stopAutoScroll]);
 
   return {
     rectangle,

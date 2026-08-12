@@ -11,7 +11,7 @@ use std::{
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use image::{ImageFormat, ImageReader};
+use image::{DynamicImage, ImageBuffer, ImageFormat, ImageReader, Rgb, Rgba};
 use lofty::prelude::{Accessor as _, AudioFile as _, TaggedFileExt as _};
 use muller_core::CancellationToken;
 use muller_diff::{decode_text_bytes, is_developer_text_path};
@@ -654,7 +654,7 @@ fn build_image_preview(
         .decode()
         .map_err(|error| PreviewBuildError::Message(format!("cannot decode image: {error}")))?;
     let color_type = format!("{:?}", decoded.color());
-    let resized = decoded.thumbnail(PREVIEW_IMAGE_EDGE, PREVIEW_IMAGE_EDGE);
+    let resized = tone_map_float_image(decoded.thumbnail(PREVIEW_IMAGE_EDGE, PREVIEW_IMAGE_EDGE));
     let mut encoded = Cursor::new(Vec::new());
     resized
         .write_to(&mut encoded, ImageFormat::Png)
@@ -670,6 +670,50 @@ fn build_image_preview(
         color_type,
         bytes_loaded,
     ))
+}
+
+fn tone_map_float_channel(value: f32) -> u8 {
+    let linear = if value.is_finite() {
+        value.max(0.0)
+    } else {
+        0.0
+    };
+    let mapped = linear / (1.0 + linear);
+    let srgb = if mapped <= 0.003_130_8 {
+        mapped * 12.92
+    } else {
+        1.055 * mapped.powf(1.0 / 2.4) - 0.055
+    };
+    (srgb.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+fn tone_map_float_image(image: DynamicImage) -> DynamicImage {
+    match image {
+        DynamicImage::ImageRgb32F(buffer) => {
+            let mapped = ImageBuffer::from_fn(buffer.width(), buffer.height(), |x, y| {
+                let pixel = buffer.get_pixel(x, y).0;
+                Rgb([
+                    tone_map_float_channel(pixel[0]),
+                    tone_map_float_channel(pixel[1]),
+                    tone_map_float_channel(pixel[2]),
+                ])
+            });
+            DynamicImage::ImageRgb8(mapped)
+        }
+        DynamicImage::ImageRgba32F(buffer) => {
+            let mapped = ImageBuffer::from_fn(buffer.width(), buffer.height(), |x, y| {
+                let pixel = buffer.get_pixel(x, y).0;
+                Rgba([
+                    tone_map_float_channel(pixel[0]),
+                    tone_map_float_channel(pixel[1]),
+                    tone_map_float_channel(pixel[2]),
+                    (pixel[3].clamp(0.0, 1.0) * 255.0).round() as u8,
+                ])
+            });
+            DynamicImage::ImageRgba8(mapped)
+        }
+        image => image,
+    }
 }
 
 fn unix_ms(value: Option<std::time::SystemTime>) -> Option<u64> {
@@ -713,6 +757,7 @@ fn image_mime(extension: &str) -> Option<&'static str> {
         "png" => Some("image/png"),
         "jpg" | "jpeg" => Some("image/jpeg"),
         "gif" => Some("image/gif"),
+        "hdr" => Some("image/vnd.radiance"),
         "webp" => Some("image/webp"),
         "bmp" => Some("image/bmp"),
         "ico" => Some("image/x-icon"),
@@ -832,6 +877,26 @@ mod tests {
             assert_eq!(preview.kind, PreviewKind::Text, "file: {name}");
             assert_eq!(preview.text.as_deref(), Some("key = value\n"));
         }
+    }
+
+    #[test]
+    fn radiance_hdr_preview_is_decoded_to_png() {
+        let fixture = tempdir().expect("fixture");
+        let path = fixture.path().join("studio.hdr");
+        let mut hdr = b"#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 1\n".to_vec();
+        hdr.extend_from_slice(&[128, 128, 128, 129]);
+        fs::write(&path, hdr).expect("hdr fixture");
+
+        let preview =
+            load_preview(&PreviewManager::default(), &path, &Default::default()).expect("preview");
+        assert_eq!(preview.kind, PreviewKind::Image);
+        assert_eq!(preview.mime.as_deref(), Some("image/vnd.radiance"));
+        assert!(
+            preview
+                .data_url
+                .as_deref()
+                .is_some_and(|value| value.starts_with("data:image/png;base64,"))
+        );
     }
 
     #[test]

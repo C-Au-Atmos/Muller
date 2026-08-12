@@ -18,7 +18,7 @@ function trackPageErrors(page: Page): string[] {
 async function expectMouseTargets(page: Page, context: string): Promise<void> {
   const undersized = await page.locator("button:visible").evaluateAll((buttons) =>
     buttons.flatMap((button) => {
-      if (button.matches(".pane-resizer, .preview-resizer, .inspector-resizer")) return [];
+      if (button.matches(".pane-resizer, .preview-resizer, .inspector-resizer, .sidebar-resizer")) return [];
       const bounds = button.getBoundingClientRect();
       if (
         bounds.width >= 31.5 &&
@@ -70,6 +70,14 @@ test("Stage 7 V5 shell, GradientText, tabs, rails, filters, and views are integr
   await expect(addressbar).toHaveCSS("height", "52px");
   await expect(toolbar).toHaveCSS("height", "48px");
   await expect(rail).toHaveCSS("width", "210px");
+  const sidebarSeparator = page.getByRole("separator", { name: "Resize navigation sidebar" });
+  await expect(sidebarSeparator).toBeVisible();
+  await sidebarSeparator.focus();
+  await sidebarSeparator.press("ArrowRight");
+  await expect(sidebarSeparator).toHaveAttribute("aria-valuenow", "218");
+  await expect(rail).toHaveCSS("width", "218px");
+  await sidebarSeparator.press("ArrowLeft");
+  await expect(rail).toHaveCSS("width", "210px");
 
   const brand = page.locator(".gradient-text__content");
   await expect(brand).toHaveText("Muller");
@@ -88,7 +96,10 @@ test("Stage 7 V5 shell, GradientText, tabs, rails, filters, and views are integr
   expect(brandStyle.color).toBe("rgba(0, 0, 0, 0)");
   await expect(page.locator(".brand-copy small")).toHaveCount(0);
   await expect(page.locator(".brand-copy .gradient-text")).toHaveCSS("font-size", "17px");
+  await expect(page.locator(".color-bends")).toHaveCount(0);
+  await page.locator(".brand-lockup").click();
   await expect(page.locator(".color-bends")).toHaveAttribute("data-renderer", "three-webgl");
+  await expect(page.locator(".color-bends")).toHaveClass(/is-home/);
   await expect.poll(async () => {
     const png = PNG.sync.read(await page.locator(".color-bends").screenshot({ omitBackground: true }));
     let painted = 0;
@@ -97,6 +108,8 @@ test("Stage 7 V5 shell, GradientText, tabs, rails, filters, and views are integr
     }
     return painted;
   }).toBeGreaterThan(20);
+  await page.getByRole("tab").first().click();
+  await expect(page.locator(".color-bends")).toHaveCount(0);
   await page.screenshot({ path: path.join(artifactDirectory, "browse-option-wheel-v5.png"), fullPage: true });
 
   await expect(page.getByRole("tab")).toHaveCount(1);
@@ -122,6 +135,12 @@ test("Stage 7 V5 shell, GradientText, tabs, rails, filters, and views are integr
   await expect(page.getByRole("button", { name: /Filters/ }).locator("b")).toHaveText("1");
 
   const separator = page.getByRole("separator", { name: "Resize directory panes" });
+  const leftScrollbarHit = await page.locator(".directory-pane").first().evaluate((pane) => {
+    const paneBounds = pane.getBoundingClientRect();
+    const target = document.elementFromPoint(paneBounds.right - 1, paneBounds.top + paneBounds.height / 2);
+    return target instanceof Element && target.closest(".pane-resizer") !== null;
+  });
+  expect(leftScrollbarHit).toBe(false);
   const initialRatio = Number(await separator.getAttribute("aria-valuenow"));
   await separator.focus();
   await separator.press("ArrowRight");
@@ -142,6 +161,31 @@ test("Stage 7 V5 shell, GradientText, tabs, rails, filters, and views are integr
 
   await page.screenshot({ path: path.join(artifactDirectory, "desktop-v5.png"), fullPage: true });
   expect(errors).toEqual([]);
+});
+
+test("navigation sidebar pointer resizing persists and compact mode stays fixed", async ({ page }) => {
+  await page.setViewportSize({ width: 1360, height: 840 });
+  await page.goto("/");
+
+  const rail = page.locator(".location-rail");
+  const separator = page.getByRole("separator", { name: "Resize navigation sidebar" });
+  const separatorBox = await separator.boundingBox();
+  if (!separatorBox) throw new Error("Sidebar resizer is not measurable");
+
+  await page.mouse.move(separatorBox.x + separatorBox.width / 2, separatorBox.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(separatorBox.x + separatorBox.width / 2 + 64, separatorBox.y + 100);
+  await page.mouse.up();
+  await expect(separator).toHaveAttribute("aria-valuenow", "274");
+  await expect(rail).toHaveCSS("width", "274px");
+
+  await page.reload();
+  await expect(page.getByRole("separator", { name: "Resize navigation sidebar" })).toHaveAttribute("aria-valuenow", "274");
+  await expect(rail).toHaveCSS("width", "274px");
+
+  await page.setViewportSize({ width: 760, height: 520 });
+  await expect(separator).toBeHidden();
+  await expect(rail).toHaveCSS("width", "58px");
 });
 
 for (const viewport of [
