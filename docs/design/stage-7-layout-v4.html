@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Muller Stage 7 Layout V4</title>
+  <style>
+    html, body, iframe { width: 100%; height: 100%; margin: 0; border: 0; overflow: hidden; background: #1B1722; }
+  </style>
+</head>
+<body>
+  <iframe id="prototype" title="Muller Stage 7 V4 prototype"></iframe>
+  <script>
+    const sidebar = new URLSearchParams(location.search).get('sidebar') === 'line' ? 'line' : 'option';
+    document.querySelector('#prototype').src = `./stage-7-layout-v3.html?theme=uniform&sidebar=${sidebar}`;
+  </script>
+</body>
+</html>

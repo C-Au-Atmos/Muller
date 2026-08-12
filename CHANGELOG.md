@@ -2,6 +2,31 @@
 
 All notable changes to Muller are documented in this file.
 
+## [0.1.2] - 2026-08-09
+
+Workspace and preview refinement release.
+
+### Added
+
+- Resizable navigation sidebar with persisted width and dedicated glyphs for
+  Windows known folders, drives, favorites, and This PC.
+- Full Browse-style navigation, search, preview, context menus, and file
+  operations inside the Compare workspace.
+- HDR image decoding and a user preference for workspace glass effects.
+
+### Changed
+
+- Improved marquee selection, preview behavior, range-control animation, and
+  flow-border rendering under active desktop workloads.
+- Expanded directory search and Compare workflows to work consistently across
+  both panes.
+
+### Fixed
+
+- Rounded window corners are now transparent instead of exposing the obsolete
+  black WebView/window background; maximized windows correctly use square
+  corners.
+
 ## [0.1.1] - 2026-08-08
 
 First public preview hotfix.

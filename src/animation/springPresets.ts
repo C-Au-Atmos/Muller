@@ -38,3 +38,11 @@ export function pointerFollowTransition(followDistance = 0): Transition {
     restSpeed: 8,
   };
 }
+
+export function selectionTransition(): Transition {
+  return {
+    type: "tween",
+    duration: 0.055,
+    ease: "easeOut",
+  };
+}

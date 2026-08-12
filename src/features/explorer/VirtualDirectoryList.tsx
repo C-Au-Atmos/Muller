@@ -27,7 +27,7 @@ import {
 } from "react";
 
 import { formatBytes } from "../dedup/duplicateListModel";
-import { pointerFollowTransition, springTransition } from "../../animation/springPresets";
+import { pointerFollowTransition, selectionTransition } from "../../animation/springPresets";
 import { useAppI18n, type I18nValue } from "../../i18n/i18n";
 import type { SelectionModifiers } from "../selection/selectionModel";
 import { useMarqueeSelection } from "../selection/useMarqueeSelection";
@@ -451,7 +451,7 @@ export const VirtualDirectoryList = forwardRef<
             className="directory-list-selection"
             initial={false}
             animate={{ y: (focusedPosition ?? 0) * ROW_HEIGHT + 2, height: ROW_HEIGHT - 4 }}
-            transition={reducedMotion ? { duration: 0 } : springTransition("snappy", "subtle")}
+            transition={reducedMotion ? { duration: 0 } : selectionTransition()}
             aria-hidden="true"
           />
         ) : null}

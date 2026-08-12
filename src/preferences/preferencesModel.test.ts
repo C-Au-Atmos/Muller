@@ -13,6 +13,7 @@ describe("Stage 7.10 preferences", () => {
     expect(value.hoverDelayMs).toBe(300);
     expect(value.sidebarMode).toBe("classic");
     expect(value.glassBackground).toBe(false);
+    expect(value.mediaAutoplay).toBe(false);
   });
 
   it("uses a perceptual volume curve and system-language fallback", () => {
@@ -35,5 +36,10 @@ describe("Stage 7.10 preferences", () => {
   it("persists the optional frosted-glass appearance", () => {
     expect(parsePreferences(JSON.stringify({ glassBackground: true })).glassBackground).toBe(true);
     expect(parsePreferences(JSON.stringify({ glassBackground: "true" })).glassBackground).toBe(false);
+  });
+
+  it("persists media autoplay only as an explicit boolean", () => {
+    expect(parsePreferences(JSON.stringify({ mediaAutoplay: true })).mediaAutoplay).toBe(true);
+    expect(parsePreferences(JSON.stringify({ mediaAutoplay: "true" })).mediaAutoplay).toBe(false);
   });
 });

@@ -131,6 +131,28 @@ const INITIAL_STATS: FlowBorderStats = {
   drawCallsPerFrame: 4,
 };
 const EMPTY_SCAN_STATE = createInitialScanState();
+const DEFAULT_SIDEBAR_WIDTH = 210;
+const MIN_SIDEBAR_WIDTH = 160;
+const MAX_SIDEBAR_WIDTH = 360;
+const SIDEBAR_WIDTH_STORAGE_KEY = "muller:sidebar-width";
+
+function clampSidebarWidth(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_SIDEBAR_WIDTH;
+  return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, Math.round(value)));
+}
+
+const SHELL_LOCATION_PRESENTATION: Partial<Record<string, {
+  label: TranslationKey;
+  icon: NonNullable<QuickLocation["icon"]>;
+}>> = {
+  profile: { label: "knownFolderProfile", icon: "profile" },
+  desktop: { label: "knownFolderDesktop", icon: "desktop" },
+  documents: { label: "knownFolderDocuments", icon: "documents" },
+  downloads: { label: "knownFolderDownloads", icon: "downloads" },
+  pictures: { label: "knownFolderPictures", icon: "pictures" },
+  music: { label: "knownFolderMusic", icon: "music" },
+  videos: { label: "knownFolderVideos", icon: "videos" },
+};
 
 const ColorBendsBackground = lazy(async () => {
   const module = await import("./visual/ColorBendsBackground");
@@ -211,6 +233,14 @@ export function App({ initialPath }: AppProps) {
       return false;
     }
   });
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    try {
+      const storedWidth = window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+      return storedWidth === null ? DEFAULT_SIDEBAR_WIDTH : clampSidebarWidth(Number(storedWidth));
+    } catch {
+      return DEFAULT_SIDEBAR_WIDTH;
+    }
+  });
   const [fileClipboard, setFileClipboard] = useState<FileClipboardState | null>(null);
   const activeTool = activeTab.mode;
   const explorerTool = activeTool === "browse" || activeTool === "album";
@@ -226,6 +256,12 @@ export function App({ initialPath }: AppProps) {
   const recycleCancelRef = useRef<HTMLButtonElement>(null);
   const pendingVelocity = useRef<number | null>(null);
   const velocityFrame = useRef<number | null>(null);
+  const sidebarWidthRef = useRef(sidebarWidth);
+  const sidebarResizeRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
   const [duplicateFocusPath, setDuplicateFocusPath] = useState<string | null>(null);
   const [selectedDuplicatePaths, setSelectedDuplicatePaths] = useState<Set<string>>(new Set());
   const [duplicateDecisions, setDuplicateDecisions] = useState<Map<string, DuplicateDecision>>(new Map());
@@ -249,6 +285,12 @@ export function App({ initialPath }: AppProps) {
     canBack: false,
     canForward: false,
     canUp: false,
+    searchQuery: "",
+    searchMode: "current",
+    searchResultCount: 0,
+    totalEntries: 0,
+    searchBoth: false,
+    canSearchBoth: true,
     editing: false,
   });
   const [compareAddress, setCompareAddress] = useState(initialPath);
@@ -256,6 +298,8 @@ export function App({ initialPath }: AppProps) {
   const [browseNavigation, setBrowseNavigation] = useState<BrowseNavigationState>({
     activePane: "left",
     path: initialPath,
+    leftPath: initialPath,
+    rightPath: initialPath,
     split: true,
     canBack: false,
     canForward: false,
@@ -833,7 +877,7 @@ export function App({ initialPath }: AppProps) {
         "togglePreview",
         "selectAll",
       ]).has(command);
-      if (fileCommand && !explorerMode && !(activeTool === "duplicates" && command === "selectAll")) return;
+      if (fileCommand && !addressMode && !(activeTool === "duplicates" && command === "selectAll")) return;
       const paneCommand =
         command === "activateLeftPane" || command === "activateRightPane";
       if (paneCommand && (!addressMode || !explorerNavigation.split)) return;
@@ -928,28 +972,35 @@ export function App({ initialPath }: AppProps) {
           if (activeTool === "compare") compareRef.current?.previousDifference();
           break;
         case "copySelection":
-          browseRef.current?.copySelection();
+          if (activeTool === "compare") compareRef.current?.copySelection();
+          else browseRef.current?.copySelection();
           break;
         case "cutSelection":
-          browseRef.current?.cutSelection();
+          if (activeTool === "compare") compareRef.current?.cutSelection();
+          else browseRef.current?.cutSelection();
           break;
         case "paste":
-          browseRef.current?.paste();
+          if (activeTool === "compare") compareRef.current?.paste();
+          else browseRef.current?.paste();
           break;
         case "renameSelection":
-          browseRef.current?.renameSelection();
+          if (activeTool === "compare") compareRef.current?.renameSelection();
+          else browseRef.current?.renameSelection();
           break;
         case "recycleSelection":
-          browseRef.current?.recycleSelection();
+          if (activeTool === "compare") compareRef.current?.recycleSelection();
+          else browseRef.current?.recycleSelection();
           break;
         case "goUp":
           browseRef.current?.up();
           break;
         case "refresh":
-          browseRef.current?.refresh();
+          if (activeTool === "compare") compareRef.current?.refresh();
+          else browseRef.current?.refresh();
           break;
         case "togglePreview":
-          browseRef.current?.togglePreview();
+          if (activeTool === "compare") compareRef.current?.togglePreview();
+          else browseRef.current?.togglePreview();
           break;
         case "findInDirectory":
           if (activeTool === "duplicates") openDuplicateSearch();
@@ -1147,20 +1198,26 @@ export function App({ initialPath }: AppProps) {
     }
   }, [globalSearchRoots]);
   const quickLocations: readonly QuickLocation[] = useMemo(() => [
-    { id: "this-pc", label: t("thisPc"), target: { kind: "this-pc" as const } },
+    { id: "this-pc", label: t("thisPc"), icon: "this-pc" as const, target: { kind: "this-pc" as const } },
     ...logicalDrives.map((drive) => ({
       id: `drive-${drive.path.toLowerCase()}`,
       label: `${drive.label || t("localDisk")} (${displayPath(drive.path).replace("\\", "")})`,
+      icon: "drive" as const,
       target: { kind: "directory" as const, path: drive.path },
     })),
-    ...shellLocations.map((location) => ({
-      id: `known-${location.id}`,
-      label: location.label,
-      target: { kind: "directory" as const, path: location.path },
-    })),
+    ...shellLocations.map((location) => {
+      const presentation = SHELL_LOCATION_PRESENTATION[location.id];
+      return {
+        id: `known-${location.id}`,
+        label: presentation ? t(presentation.label) : location.label,
+        icon: presentation?.icon ?? "folder" as const,
+        target: { kind: "directory" as const, path: location.path },
+      };
+    }),
     ...workspaceState.favorites.map((path) => ({
       id: `favorite-${path.toLowerCase()}`,
       label: path.split(/[\\/]/).filter(Boolean).at(-1) ?? displayPath(path),
+      icon: "favorite" as const,
       target: { kind: "directory" as const, path },
     })),
   ], [logicalDrives, shellLocations, t, workspaceState.favorites]);
@@ -1321,9 +1378,9 @@ export function App({ initialPath }: AppProps) {
     },
   ];
 
-  const SearchScopeIcon = browseNavigation.searchMode === "global"
+  const SearchScopeIcon = explorerNavigation.searchMode === "global"
     ? Globe2
-    : browseNavigation.searchMode === "recursive"
+    : explorerNavigation.searchMode === "recursive"
       ? FolderTree
       : FolderSearch;
   const searchModeOptions: readonly { mode: DirectorySearchMode; label: TranslationKey; icon: typeof Search }[] = [
@@ -1331,9 +1388,9 @@ export function App({ initialPath }: AppProps) {
     { mode: "recursive", label: "searchModeRecursive", icon: FolderTree },
     { mode: "current", label: "searchModeCurrent", icon: FolderSearch },
   ];
-  const searchPlaceholder = browseNavigation.searchMode === "global"
+  const searchPlaceholder = explorerNavigation.searchMode === "global"
     ? t("searchAllDrives")
-    : browseNavigation.searchMode === "recursive"
+    : explorerNavigation.searchMode === "recursive"
       ? t("searchModeRecursive")
       : t("searchModeCurrent");
 
@@ -1361,11 +1418,26 @@ export function App({ initialPath }: AppProps) {
     void getCurrentWindow().startDragging().catch(() => undefined);
   };
 
+  const updateSidebarWidth = (value: number) => {
+    const nextWidth = clampSidebarWidth(value);
+    sidebarWidthRef.current = nextWidth;
+    setSidebarWidth(nextWidth);
+  };
+
+  const persistSidebarWidth = () => {
+    try {
+      window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidthRef.current));
+    } catch {
+      // Resizing remains available when persistence is unavailable.
+    }
+  };
+
   return (
     <I18nProvider locale={preferences.locale}>
       <div
-        className={`app-shell stage7-shell${ribbonCollapsed ? " is-ribbon-collapsed" : ""}`}
+        className={`app-shell stage7-shell${ribbonCollapsed ? " is-ribbon-collapsed" : ""}${windowMaximized ? " is-window-maximized" : ""}`}
         data-workspace-mode={activePage}
+        style={{ "--sidebar-width-desktop": `${sidebarWidth}px` } as CSSProperties}
       >
       <FlowBorder
         ref={flowRef}
@@ -1379,9 +1451,11 @@ export function App({ initialPath }: AppProps) {
         <span>{stats.messagesPerSecond} msg/s</span>
       </output>
 
-      <Suspense fallback={null}>
-        <ColorBendsBackground intensity="workspace" />
-      </Suspense>
+      {systemRoute === "home" || preferences.glassBackground ? (
+        <Suspense fallback={null}>
+          <ColorBendsBackground intensity={systemRoute === "home" ? "home" : "workspace"} />
+        </Suspense>
+      ) : null}
 
       <header className="stage7-header">
         <div className="stage7-topbar" onPointerDown={handleWindowDrag}>
@@ -1451,16 +1525,16 @@ export function App({ initialPath }: AppProps) {
                 onNavigateThisPc={openThisPcHome}
                 onPaneToggle={() => explorerRef.current?.activatePane(explorerNavigation.activePane === "left" ? "right" : "left")}
               />
-              {explorerMode ? (
+              {addressMode ? (
                 <label className="address-directory-search" role="search">
                   <div className="address-search-mode" ref={searchModeMenuRef}>
                     <button
                       type="button"
                       className="address-search-mode-button"
                       aria-label={t("chooseSearchMode")}
-                      title={t(browseNavigation.searchMode === "global"
+                      title={t(explorerNavigation.searchMode === "global"
                         ? "searchModeGlobal"
-                        : browseNavigation.searchMode === "recursive"
+                        : explorerNavigation.searchMode === "recursive"
                           ? "searchModeRecursive"
                           : "searchModeCurrent")}
                       aria-expanded={searchModeMenuOpen}
@@ -1474,11 +1548,11 @@ export function App({ initialPath }: AppProps) {
                           <button
                             type="button"
                             role="menuitemradio"
-                            aria-checked={browseNavigation.searchMode === mode}
-                            className={browseNavigation.searchMode === mode ? "is-active" : ""}
+                            aria-checked={explorerNavigation.searchMode === mode}
+                            className={explorerNavigation.searchMode === mode ? "is-active" : ""}
                             key={mode}
                             onClick={() => {
-                              browseRef.current?.setSearchMode(mode);
+                              explorerRef.current?.setSearchMode(mode);
                               play("navigate");
                               setSearchModeMenuOpen(false);
                               window.requestAnimationFrame(() => directorySearchRef.current?.focus());
@@ -1491,37 +1565,37 @@ export function App({ initialPath }: AppProps) {
                     ) : null}
                   </div>
                   <input
-                    key={browseNavigation.searchMode}
+                    key={explorerNavigation.searchMode}
                     className="address-search-input is-mode-changing"
                     ref={directorySearchRef}
                     aria-label={t("searchDirectory")}
                     placeholder={searchPlaceholder}
-                    value={browseNavigation.searchQuery}
-                    onChange={(event) => browseRef.current?.setSearchQuery(event.target.value)}
+                    value={explorerNavigation.searchQuery}
+                    onChange={(event) => explorerRef.current?.setSearchQuery(event.target.value)}
                     onKeyDown={(event) => {
                       if (event.key === "Escape") {
-                        browseRef.current?.setSearchQuery("");
+                        explorerRef.current?.setSearchQuery("");
                         event.currentTarget.blur();
                       } else if (event.key === "Enter") {
-                        browseRef.current?.commitSearch();
+                        explorerRef.current?.commitSearch();
                       }
                     }}
                   />
                   <span className="address-search-actions">
-                    {browseNavigation.searchQuery ? (
-                      <output>{browseNavigation.searchMode === "current"
-                        ? `${formatNumber(browseNavigation.searchResultCount)} / ${formatNumber(browseNavigation.totalEntries)}`
-                        : formatNumber(browseNavigation.searchResultCount)}</output>
+                    {explorerNavigation.searchQuery ? (
+                      <output>{explorerNavigation.searchMode === "current"
+                        ? `${formatNumber(explorerNavigation.searchResultCount)} / ${formatNumber(explorerNavigation.totalEntries)}`
+                        : formatNumber(explorerNavigation.searchResultCount)}</output>
                     ) : null}
                     <button
                       type="button"
-                      className={`address-search-both-button${browseNavigation.searchBoth ? " is-active" : ""}`}
-                      aria-label={t(browseNavigation.searchBoth ? "searchActivePane" : "searchBothPanes")}
-                      title={t(browseNavigation.searchBoth ? "searchActivePane" : "searchBothPanes")}
-                      aria-pressed={browseNavigation.searchBoth}
-                      disabled={!browseNavigation.canSearchBoth}
+                      className={`address-search-both-button${explorerNavigation.searchBoth ? " is-active" : ""}`}
+                      aria-label={t(explorerNavigation.searchBoth ? "searchActivePane" : "searchBothPanes")}
+                      title={t(explorerNavigation.searchBoth ? "searchActivePane" : "searchBothPanes")}
+                      aria-pressed={explorerNavigation.searchBoth}
+                      disabled={!explorerNavigation.canSearchBoth}
                       onClick={() => {
-                        browseRef.current?.setSearchBoth(!browseNavigation.searchBoth);
+                        explorerRef.current?.setSearchBoth(!explorerNavigation.searchBoth);
                         directorySearchRef.current?.focus();
                       }}
                     >
@@ -1531,9 +1605,9 @@ export function App({ initialPath }: AppProps) {
                       type="button"
                       aria-label={t("closeSearch")}
                       title={t("closeSearch")}
-                      disabled={!browseNavigation.searchQuery}
+                      disabled={!explorerNavigation.searchQuery}
                       onClick={() => {
-                        browseRef.current?.setSearchQuery("");
+                        explorerRef.current?.setSearchQuery("");
                         directorySearchRef.current?.focus();
                       }}
                     >
@@ -1588,6 +1662,58 @@ export function App({ initialPath }: AppProps) {
         onNavigate={navigateQuickLocation}
         onTick={() => play("navigate")}
       />
+      <button
+        className="sidebar-resizer"
+        type="button"
+        role="separator"
+        aria-label={t("resizeSidebar")}
+        aria-orientation="vertical"
+        aria-valuemin={MIN_SIDEBAR_WIDTH}
+        aria-valuemax={MAX_SIDEBAR_WIDTH}
+        aria-valuenow={sidebarWidth}
+        title={t("resizeSidebar")}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          sidebarResizeRef.current = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startWidth: sidebarWidthRef.current,
+          };
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }}
+        onPointerMove={(event) => {
+          const resize = sidebarResizeRef.current;
+          if (!resize || resize.pointerId !== event.pointerId) return;
+          if ((event.buttons & 1) === 0) {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            }
+            return;
+          }
+          updateSidebarWidth(resize.startWidth + event.clientX - resize.startX);
+        }}
+        onPointerUp={(event) => {
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+        }}
+        onPointerCancel={(event) => {
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+        }}
+        onLostPointerCapture={() => {
+          sidebarResizeRef.current = null;
+          persistSidebarWidth();
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+          event.preventDefault();
+          updateSidebarWidth(sidebarWidthRef.current + (event.key === "ArrowLeft" ? -8 : 8));
+          persistSidebarWidth();
+        }}
+      />
 
       <main
         className={`${activeTool === "duplicates" && systemRoute === "workspace" ? "workspace stage7-workspace has-inspector" : "workspace stage7-workspace"}${filterOpen && explorerMode ? " has-filter" : ""}`}
@@ -1629,6 +1755,8 @@ export function App({ initialPath }: AppProps) {
             operationsCollapsed={fileActionsCollapsed}
             onOperationsCollapsedChange={updateFileActionsCollapsed}
             onCompareSelection={launchBrowseComparison}
+            mediaAutoplay={preferences.mediaAutoplay}
+            onMediaAutoplayChange={(mediaAutoplay) => updatePreferences({ mediaAutoplay })}
             clipboard={fileClipboard}
             onClipboardChange={setFileClipboard}
           />
@@ -1835,6 +1963,16 @@ export function App({ initialPath }: AppProps) {
             onNavigationChange={handleCompareNavigation}
             onScrollVelocity={sendScrollVelocity}
             onSuccess={handleSuccess}
+            clipboard={fileClipboard}
+            onClipboardChange={setFileClipboard}
+            mediaAutoplay={preferences.mediaAutoplay}
+            onMediaAutoplayChange={(mediaAutoplay) => updatePreferences({ mediaAutoplay })}
+            paneRatio={workspaceState.paneRatio}
+            previewWidth={workspaceState.previewWidth}
+            globalSearchRoots={globalSearchRoots}
+            hoverDelayMs={preferences.hoverDelayMs}
+            onPaneRatioChange={(value) => dispatchWorkspace({ type: "set-pane-ratio", value })}
+            onPreviewWidthChange={(value) => dispatchWorkspace({ type: "set-preview-width", value })}
             launchRequest={compareLaunchRequest}
             onLaunchConsumed={(token) => setCompareLaunchRequest((current) => current?.token === token ? null : current)}
           />
