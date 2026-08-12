@@ -110,7 +110,7 @@ const DIRECTORY_COLUMN_LABELS: Record<DirectoryListColumn, TranslationKey> = {
 };
 const NATIVE_DRAG_ICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAANElEQVRYR+3OMQ0AAAjEMMC/5yFjRxMFfXpm5g5gACN2gAE7wIAdYMAOMGAHGLADfKwBfgGShwM9EKgB0QAAAABJRU5ErkJggg==";
 const NATIVE_DRAG_EDGE_MARGIN = 48;
-const NATIVE_DRAG_POINT_MAX_AGE_MS = 500;
+const NATIVE_DRAG_POINT_MAX_AGE_MS = 750;
 const MIN_GRID_TILE_WIDTH = 96;
 const MAX_GRID_TILE_WIDTH = 256;
 
@@ -140,6 +140,10 @@ function initialPreviewPinned(): boolean {
 
 function fileUri(path: string): string {
   return encodeURI(`file:///${path.replaceAll("\\", "/")}`).replaceAll("#", "%23");
+}
+
+function shouldStartNativeFileDrag(): boolean {
+  return isTauri() && Reflect.get(globalThis, "__mullerE2eHtmlDrag") !== true;
 }
 
 function directoryPathLabel(path: string): string {
@@ -190,6 +194,8 @@ function DirectoryColumnHeadings({
 export interface BrowseNavigationState {
   activePane: PaneId;
   path: string;
+  leftPath: string;
+  rightPath: string;
   split: boolean;
   canBack: boolean;
   canForward: boolean;
@@ -205,6 +211,7 @@ export interface BrowseNavigationState {
 
 export interface BrowseWorkspaceHandle {
   navigateActive: (path: string) => void;
+  navigatePane: (pane: PaneId, path: string) => void;
   back: () => void;
   forward: () => void;
   up: () => void;
@@ -251,6 +258,9 @@ interface BrowseWorkspaceProps {
   operationsCollapsed?: boolean;
   onOperationsCollapsedChange?: (collapsed: boolean) => void;
   onCompareSelection?: (request: BrowseComparisonRequest) => void;
+  onComparisonSelectionChange?: (request: BrowseComparisonRequest | null) => void;
+  mediaAutoplay?: boolean;
+  onMediaAutoplayChange?: (enabled: boolean) => void;
   clipboard?: FileClipboardState | null;
   onClipboardChange?: (clipboard: FileClipboardState | null) => void;
 }
@@ -322,6 +332,9 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
       operationsCollapsed = false,
       onOperationsCollapsedChange,
       onCompareSelection,
+      onComparisonSelectionChange,
+      mediaAutoplay = false,
+      onMediaAutoplayChange,
       clipboard: controlledClipboard,
       onClipboardChange,
     },
@@ -426,6 +439,10 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
       return { leftPath: leftEntry.path, rightPath: rightEntry.path, kind: leftEntry.kind };
     }, [left, leftSelection, right, rightSelection, visibleSplit]);
 
+    useEffect(() => {
+      onComparisonSelectionChange?.(comparisonSelection);
+    }, [comparisonSelection, onComparisonSelectionChange]);
+
 
     useEffect(() => {
       if (!searchBoth || canSearchBoth) return;
@@ -457,6 +474,8 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
       onNavigationChange({
         activePane,
         path: active.state.requestedPath || active.state.path,
+        leftPath: left.state.requestedPath || left.state.path,
+        rightPath: right.state.requestedPath || right.state.path,
         split: visibleSplit,
         canBack: active.canBack,
         canForward: active.canForward,
@@ -483,7 +502,11 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
       active.visibleTotalEntries,
       activePane,
       canSearchBoth,
+      left.state.path,
+      left.state.requestedPath,
       onNavigationChange,
+      right.state.path,
+      right.state.requestedPath,
       selectedEntry?.name,
       selectedCount,
       searchBoth,
@@ -819,21 +842,35 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
         query: target.search.query,
         positions,
       };
+      const sourcePaths = positions.flatMap((selectedPosition) => {
+        const selected = target.entryAt(selectedPosition);
+        return selected ? [selected.path] : [];
+      });
       activeDragRef.current = {
         ...payload,
         sourceDirectory: target.state.path,
-        sourcePaths: positions.flatMap((selectedPosition) => {
-          const selected = target.entryAt(selectedPosition);
-          return selected ? [selected.path] : [];
-        }),
+        sourcePaths: sourcePaths.length > 0 ? sourcePaths : [entry.path],
       };
       rememberDragPoint(event);
-      const sourcePaths = activeDragRef.current.sourcePaths;
+      const nativePaths = activeDragRef.current.sourcePaths;
+      if (shouldStartNativeFileDrag()) {
+        event.preventDefault();
+        nativeDragStartedRef.current = true;
+        void startDrag({
+          item: nativePaths,
+          icon: NATIVE_DRAG_ICON,
+          mode: event.ctrlKey ? "copy" : "move",
+        }, fileDragEnd).catch((dragError) => {
+          setError(errorMessage(dragError, t("unableTransfer")));
+          fileDragEnd();
+        });
+        return;
+      }
       event.dataTransfer.effectAllowed = "copyMove";
       event.dataTransfer.setData(INTERNAL_FILE_DRAG_MIME, JSON.stringify(payload));
       event.dataTransfer.setData("text/plain", positions.length === 1 ? entry.name : t("itemCount", { count: formatNumber(positions.length) }));
-      event.dataTransfer.setData("text/uri-list", sourcePaths.map(fileUri).join("\r\n"));
-    }, [formatNumber, handleSelect, left, leftSelection, rememberDragPoint, right, rightSelection, t]);
+      event.dataTransfer.setData("text/uri-list", nativePaths.map(fileUri).join("\r\n"));
+    }, [fileDragEnd, formatNumber, handleSelect, left, leftSelection, rememberDragPoint, right, rightSelection, t]);
 
     const resolveActiveDrag = useCallback((event: DragEvent): ActiveFileDrag | null => {
       if (activeDragRef.current) return activeDragRef.current;
@@ -856,11 +893,10 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
 
     const beginNativeDragOutsideWindow = useCallback((event: DragEvent) => {
       const payload = activeDragRef.current;
-      const outsideWindow = event.relatedTarget === null
-        && (event.clientX <= 1
+      const outsideWindow = event.clientX <= 1
           || event.clientY <= 1
           || event.clientX >= window.innerWidth - 1
-          || event.clientY >= window.innerHeight - 1);
+          || event.clientY >= window.innerHeight - 1;
       const lastPoint = lastDragPointRef.current;
       const recentlyApproachedEdge = lastPoint !== null
         && performance.now() - lastPoint.at <= NATIVE_DRAG_POINT_MAX_AGE_MS
@@ -870,20 +906,15 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
           || (event.clientY >= window.innerHeight - 1 && lastPoint.y >= window.innerHeight - NATIVE_DRAG_EDGE_MARGIN));
       if (!isTauri() || !payload || payload.sourcePaths.length === 0 || nativeDragStartedRef.current || nativeDragTimerRef.current !== null || !outsideWindow || !recentlyApproachedEdge) return;
       const mode = event.ctrlKey ? "copy" : "move";
-      nativeDragTimerRef.current = window.setTimeout(() => {
-        nativeDragTimerRef.current = null;
-        const latest = activeDragRef.current;
-        if (!latest || nativeDragStartedRef.current) return;
-        nativeDragStartedRef.current = true;
-        void startDrag({
-          item: latest.sourcePaths,
-          icon: NATIVE_DRAG_ICON,
-          mode,
-        }, fileDragEnd).catch((dragError) => {
-          setError(errorMessage(dragError, t("unableTransfer")));
-          fileDragEnd();
-        });
-      }, 120);
+      nativeDragStartedRef.current = true;
+      void startDrag({
+        item: payload.sourcePaths,
+        icon: NATIVE_DRAG_ICON,
+        mode,
+      }, fileDragEnd).catch((dragError) => {
+        setError(errorMessage(dragError, t("unableTransfer")));
+        fileDragEnd();
+      });
     }, [fileDragEnd, t]);
 
     const performSessionDrop = useCallback(async (
@@ -1400,6 +1431,10 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
       navigateActive(path) {
         void active.openPath(path);
       },
+      navigatePane(pane, path) {
+        setActivePane(pane);
+        void (pane === "left" ? left : right).openPath(path);
+      },
       back: active.back,
       forward: active.forward,
       up: active.up,
@@ -1627,7 +1662,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
         <div
           ref={panesRef}
           className={visibleSplit ? "directory-panes has-resizer" : `directory-panes is-single is-${activePane}`}
-          style={visibleSplit ? { gridTemplateColumns: `minmax(0, ${paneRatio}fr) 5px minmax(0, ${100 - paneRatio}fr)` } : undefined}
+          style={visibleSplit ? { gridTemplateColumns: `minmax(0, ${paneRatio}fr) 7px minmax(0, ${100 - paneRatio}fr)` } : undefined}
         >
           <section data-drop-directory={left.state.path} className={`${activePane === "left" ? "directory-pane is-active" : "directory-pane"}${presentation === "list" ? "" : " is-visual"}`}>
             <div className="directory-pane-heading">
@@ -1831,6 +1866,8 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
           <PreviewPanel
             entry={selectedEntry}
             pinned={previewPinned}
+            mediaAutoplay={mediaAutoplay}
+            onMediaAutoplayChange={(enabled) => onMediaAutoplayChange?.(enabled)}
             onPinnedChange={(pinned) => {
               setPreviewPinned(pinned);
               try {

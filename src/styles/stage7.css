@@ -9,9 +9,10 @@
   --type-body: calc(12px * var(--ui-scale, 1));
   --type-emphasis: calc(13px * var(--ui-scale, 1));
   --type-heading: calc(15px * var(--ui-scale, 1));
-  --sidebar-width: 210px;
+  --sidebar-width: var(--sidebar-width-desktop, 210px);
+  --sidebar-resizer-width: 7px;
   --tool-ribbon-height: 48px;
-  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-columns: calc(var(--sidebar-width) + var(--sidebar-resizer-width)) minmax(0, 1fr);
   grid-template-rows: 42px 52px var(--tool-ribbon-height) minmax(0, 1fr) 26px;
   color: var(--copy);
   background: var(--shell);
@@ -22,7 +23,7 @@
   --tool-ribbon-height: 0px;
 }
 
-.stage7-shell button:not(.pane-resizer):not(.preview-resizer):not(.inspector-resizer) {
+.stage7-shell button:not(.pane-resizer):not(.preview-resizer):not(.inspector-resizer):not(.sidebar-resizer) {
   min-width: 36px;
   min-height: 36px;
 }
@@ -524,9 +525,40 @@
   grid-row: 2 / 5;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 38px minmax(0, 1fr) 42px;
+  width: var(--sidebar-width);
   overflow: hidden;
   border-right: 1px solid var(--border-subtle);
   background: var(--surface-sidebar);
+}
+
+.sidebar-resizer {
+  position: relative;
+  z-index: 29;
+  width: var(--sidebar-resizer-width);
+  min-width: var(--sidebar-resizer-width);
+  height: 100%;
+  grid-column: 1;
+  grid-row: 2 / 5;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--surface-sidebar);
+  cursor: col-resize;
+  justify-self: end;
+  touch-action: none;
+}
+
+.sidebar-resizer::after {
+  position: absolute;
+  inset: 0 auto 0 3px;
+  width: 1px;
+  background: var(--border-subtle);
+  content: "";
+}
+
+.sidebar-resizer:hover::after,
+.sidebar-resizer:focus-visible::after {
+  background: var(--accent);
 }
 
 .location-rail__label {
@@ -612,6 +644,26 @@
   transform-origin: left center;
   will-change: transform, opacity, filter;
 }
+
+.option-wheel__icon,
+.line-sidebar__icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+}
+
+.option-wheel__icon { margin-right: 6px; vertical-align: middle; }
+.option-wheel__label { vertical-align: middle; }
+.line-sidebar__icon { color: var(--text-secondary); }
+.line-sidebar__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.location-glyph.is-desktop { color: var(--info); }
+.location-glyph.is-documents { color: var(--text-primary); }
+.location-glyph.is-downloads { color: var(--success); }
+.location-glyph.is-pictures { color: var(--warning); }
+.location-glyph.is-music { color: var(--danger); }
+.location-glyph.is-videos { color: var(--info); }
+.location-glyph.is-profile,
+.location-glyph.is-favorite { color: var(--accent); }
 
 .line-sidebar {
   height: 100%;
@@ -1471,14 +1523,15 @@
 .pane-resizer {
   position: relative;
   z-index: 4;
-  width: 5px;
-  min-width: 5px;
+  width: 7px;
+  min-width: 7px;
   height: 100%;
   padding: 0;
   border: 0;
   border-radius: 0;
   background: var(--border-subtle);
   cursor: col-resize;
+  touch-action: none;
 }
 
 .preview-resizer,
@@ -1508,11 +1561,17 @@
   transform: translateY(-50%);
 }
 
-.pane-resizer::before,
 .preview-resizer::before,
 .inspector-resizer::before {
   position: absolute;
   inset: 0 -16px;
+  background: transparent;
+  content: "";
+}
+
+.pane-resizer::before {
+  position: absolute;
+  inset: 0;
   background: transparent;
   content: "";
 }
@@ -1528,7 +1587,7 @@
 .pane-resizer::after {
   position: absolute;
   top: 50%;
-  left: 2px;
+  left: 3px;
   width: 1px;
   height: 42px;
   background: var(--muted);
@@ -1754,11 +1813,12 @@
 }
 
 @media (max-width: 900px) {
-  .stage7-shell { --sidebar-width: 58px; }
+  .stage7-shell { --sidebar-width: 58px; --sidebar-resizer-width: 0px; }
   .stage7-topbar { grid-template-columns: 145px minmax(0, 1fr) 74px; }
   .stage7-workspace,
   .stage7-workspace.has-inspector { grid-template-columns: minmax(0, 1fr); }
   .location-rail { grid-template-rows: 38px minmax(0, 1fr) 116px; }
+  .sidebar-resizer { display: none; }
   .location-rail__label { padding: 0 8px; font-size: 0; }
   .option-wheel__item { left: 8px; width: 46px; overflow: hidden; font-size: 8px; }
   .option-wheel__centerline { right: 3px; width: 42px; }
@@ -2788,6 +2848,17 @@
   .browse-content.has-preview .preview-resizer {
     display: none;
   }
+}
+
+/* Opaque mode should not allocate full-surface blur passes. */
+:root:not([data-glass="true"]) .stage7-topbar,
+:root:not([data-glass="true"]) .stage7-addressbar,
+:root:not([data-glass="true"]) .tool-ribbon,
+:root:not([data-glass="true"]) .stage7-workspace,
+:root:not([data-glass="true"]) .workspace-filter-menu,
+:root:not([data-glass="true"]) .browse-content.has-preview .preview-panel {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 /* Optional glass layer. Theme colors remain the source tint for every surface. */

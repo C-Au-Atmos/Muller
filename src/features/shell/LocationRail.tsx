@@ -7,6 +7,7 @@ import { SpecularButton } from "../../ui/react-bits/SpecularButton/SpecularButto
 import type { SidebarMode } from "../../preferences/preferencesModel";
 import type { VirtualLocation, WorkspaceMode } from "../../workspace/workspaceModel";
 import { ClassicSidebar } from "./ClassicSidebar";
+import { LocationGlyph, type LocationGlyphKind } from "./LocationGlyph";
 
 export type QuickLocationTarget =
   | { kind: "this-pc" }
@@ -15,6 +16,7 @@ export type QuickLocationTarget =
 export interface QuickLocation {
   id: string;
   label: string;
+  icon?: LocationGlyphKind;
   target: QuickLocationTarget;
 }
 
@@ -32,6 +34,9 @@ interface LocationRailProps {
 export function LocationRail({ mode, path, virtualLocation, locations, soundEnabled, onModeChange, onNavigate, onTick }: LocationRailProps) {
   const { t } = useAppI18n();
   const labels = useMemo(() => locations.map((location) => location.label), [locations]);
+  const icons = useMemo(() => locations.map((location) => (
+    <LocationGlyph key={location.id} kind={location.icon ?? "folder"} size={14} />
+  )), [locations]);
   const selected = locations.findIndex((location) => {
     if (location.target.kind === "this-pc") return virtualLocation === "this-pc";
     return virtualLocation === null && location.target.path.toLowerCase() === path.toLowerCase();
@@ -47,12 +52,13 @@ export function LocationRail({ mode, path, virtualLocation, locations, soundEnab
         {mode === "option" ? (
           <OptionWheel
             items={labels}
+            icons={icons}
             selected={selected}
             onChange={(index) => change(index)}
             onTick={soundEnabled ? onTick : undefined}
           />
         ) : mode === "line" ? (
-          <LineSidebar items={labels} selected={selected} onChange={(index) => change(index)} onTick={soundEnabled ? onTick : undefined} />
+          <LineSidebar items={labels} icons={icons} selected={selected} onChange={(index) => change(index)} onTick={soundEnabled ? onTick : undefined} />
         ) : (
           <ClassicSidebar locations={locations} selected={selected} onNavigate={onNavigate} onTick={soundEnabled ? onTick : undefined} />
         )}

@@ -13,7 +13,7 @@ import {
   type UIEvent,
 } from "react";
 
-import { pointerFollowTransition, springTransition } from "../../animation/springPresets";
+import { pointerFollowTransition, selectionTransition } from "../../animation/springPresets";
 import { useAppI18n } from "../../i18n/i18n";
 import { isAlbumImageExtension } from "../album/imageFormats";
 import type { SelectionModifiers } from "../selection/selectionModel";
@@ -421,7 +421,7 @@ export const VirtualDirectoryGrid = forwardRef<VirtualDirectoryListHandle, Virtu
               className="directory-grid-selection"
               initial={false}
               animate={selectionTarget}
-              transition={reducedMotion ? { duration: 0 } : springTransition("snappy", "subtle")}
+              transition={reducedMotion ? { duration: 0 } : selectionTransition()}
               aria-hidden="true"
             />
           ) : null}

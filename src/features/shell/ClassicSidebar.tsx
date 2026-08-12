@@ -1,9 +1,10 @@
-import { ChevronDown, ChevronRight, Folder, HardDrive, Monitor } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { useCallback, useState, type MouseEvent } from "react";
 
 import { useAppI18n } from "../../i18n/i18n";
 import { completeDirectoryPath } from "./windowsNavigationClient";
 import type { QuickLocation } from "./LocationRail";
+import { LocationGlyph } from "./LocationGlyph";
 
 interface ClassicSidebarProps {
   locations: readonly QuickLocation[];
@@ -32,6 +33,7 @@ export function ClassicSidebar({ locations, selected, onNavigate, onTick }: Clas
       setChildren((current) => new Map(current).set(key, paths.map((path) => ({
         id: `tree-${path.toLocaleLowerCase("en-US")}`,
         label: path.replace(/[\\/]+$/, "").split(/[\\/]/).at(-1) ?? path,
+        icon: "folder" as const,
         target: { kind: "directory" as const, path },
       }))));
     } catch {
@@ -51,7 +53,7 @@ export function ClassicSidebar({ locations, selected, onNavigate, onTick }: Clas
     const isThisPc = location.target.kind === "this-pc";
     const isDrive = location.target.kind === "directory" && /^[a-z]:[\\/]?$/i.test(location.target.path);
     const isExpanded = expanded.has(location.id);
-    const Icon = isThisPc ? Monitor : isDrive ? HardDrive : Folder;
+    const icon = location.icon ?? (isThisPc ? "this-pc" : isDrive ? "drive" : "folder");
     return (
       <div className={`classic-tree-node${isThisPc ? " is-this-pc" : ""}${isDrive ? " is-drive" : ""}`} key={location.id}>
         <div className={isSelected ? "classic-tree-row is-selected" : "classic-tree-row"} style={{ paddingLeft: 6 + depth * 14 }} onPointerEnter={onTick}>
@@ -64,7 +66,7 @@ export function ClassicSidebar({ locations, selected, onNavigate, onTick }: Clas
             onAuxClick={(event) => open(event, location)}
             onDoubleClick={isDirectory ? () => void toggle(location) : undefined}
           >
-            <Icon size={15} /><span>{location.label}</span>
+            <LocationGlyph kind={icon} /><span>{location.label}</span>
           </button>
         </div>
         {isExpanded ? <div role="group">{loading.has(location.id) ? <div className="classic-tree-loading" style={{ paddingLeft: 34 + depth * 14 }}>...</div> : (children.get(location.id) ?? []).map((child) => renderNode(child, depth + 1))}</div> : null}

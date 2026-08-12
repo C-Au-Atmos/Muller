@@ -4,8 +4,10 @@ import {
   FileText,
   Folder,
   LoaderCircle,
+  Pause,
   Pin,
   PinOff,
+  Play,
   Presentation,
   X,
 } from "lucide-react";
@@ -27,11 +29,20 @@ import { useFilePreview } from "./useFilePreview";
 interface PreviewPanelProps {
   entry: DirectoryEntry | null;
   pinned: boolean;
+  mediaAutoplay: boolean;
   onPinnedChange: (pinned: boolean) => void;
+  onMediaAutoplayChange: (enabled: boolean) => void;
   onClose: () => void;
 }
 
-export function PreviewPanel({ entry, pinned, onPinnedChange, onClose }: PreviewPanelProps) {
+export function PreviewPanel({
+  entry,
+  pinned,
+  mediaAutoplay,
+  onPinnedChange,
+  onMediaAutoplayChange,
+  onClose,
+}: PreviewPanelProps) {
   const { t, formatDate, formatNumber } = useAppI18n();
   const rawEntry = entry?.kind === "file" && isRawImageExtension(entry.extension) ? entry : null;
   const pptxEntry = entry?.kind === "file" && entry.extension?.toLowerCase() === "pptx" ? entry : null;
@@ -101,11 +112,28 @@ export function PreviewPanel({ entry, pinned, onPinnedChange, onClose }: Preview
     });
   };
 
+  const autoplayWhenReady = (event: SyntheticEvent<HTMLMediaElement>) => {
+    if (!mediaAutoplay) return;
+    void event.currentTarget.play().catch(() => {
+      // Native media policies may still require an explicit user gesture.
+    });
+  };
+
   return (
     <aside className="preview-panel" aria-label={t("filePreview")}>
       <div className="preview-heading">
         <span>{t("preview")}</span>
         <span className="preview-heading__actions">
+          <button
+            className={mediaAutoplay ? "icon-button is-active" : "icon-button"}
+            type="button"
+            aria-label={t(mediaAutoplay ? "disableMediaAutoplay" : "enableMediaAutoplay")}
+            title={t(mediaAutoplay ? "disableMediaAutoplay" : "enableMediaAutoplay")}
+            aria-pressed={mediaAutoplay}
+            onClick={() => onMediaAutoplayChange(!mediaAutoplay)}
+          >
+            {mediaAutoplay ? <Pause size={14} /> : <Play size={14} />}
+          </button>
           <button
             className={pinned ? "icon-button is-active" : "icon-button"}
             type="button"
@@ -211,10 +239,10 @@ export function PreviewPanel({ entry, pinned, onPinnedChange, onClose }: Preview
             ) : preview.kind === "audio" ? (
               <div className="audio-preview">
                 {preview.artworkDataUrl ? <img src={preview.artworkDataUrl} alt="" /> : null}
-                <audio controls preload="metadata" src={convertFileSrc(preview.path)} onLoadedMetadata={captureStreamMetadata} />
+                <audio autoPlay={mediaAutoplay} controls preload="metadata" src={convertFileSrc(preview.path)} onLoadedMetadata={captureStreamMetadata} onCanPlay={autoplayWhenReady} />
               </div>
             ) : preview.kind === "video" ? (
-              <video controls preload="metadata" src={convertFileSrc(preview.path)} onLoadedMetadata={captureStreamMetadata} />
+              <video autoPlay={mediaAutoplay} controls preload="metadata" src={convertFileSrc(preview.path)} onLoadedMetadata={captureStreamMetadata} onCanPlay={autoplayWhenReady} />
             ) : preview.kind === "text" && preview.text !== null ? (
               <pre>{preview.text}</pre>
             ) : (
