@@ -18,6 +18,8 @@
         "minWidth": 760,
         "minHeight": 520,
         "center": true,
+        "visible": true,
+        "focus": true,
         "resizable": true,
         "decorations": false,
         "shadow": false,
@@ -39,6 +41,11 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "windows": {
+      "nsis": {
+        "installerHooks": "installer.nsh"
+      }
+    },
     "icon": ["icons/icon.png", "icons/icon.ico"]
   }
 }
