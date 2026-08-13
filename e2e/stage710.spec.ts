@@ -10,6 +10,8 @@ interface MockPayload {
   item?: string[];
   input?: string;
   path?: string;
+  behavior?: "hide" | "quit";
+  enabled?: boolean;
   onEvent?: MockChannel;
   request?: {
     path?: string;
@@ -36,6 +38,8 @@ interface MockPayload {
 
 interface MockState {
   audioStarts: number;
+  autostartEnabled: boolean;
+  closeBehavior: "hide" | "quit";
   windowCommands: string[];
   windowMaximized: boolean;
   completionInputs: string[];
@@ -96,6 +100,8 @@ async function installDesktopMock(
     ];
     const state: MockState = {
       audioStarts: 0,
+      autostartEnabled: false,
+      closeBehavior: "hide",
       windowCommands: [],
       windowMaximized: false,
       completionInputs: [],
@@ -191,6 +197,20 @@ async function installDesktopMock(
         callbacks.delete(id);
       },
       invoke(command, payload) {
+        if (command === "get_close_behavior") {
+          return { behavior: state.closeBehavior };
+        }
+        if (command === "set_close_behavior") {
+          state.closeBehavior = payload.behavior ?? "hide";
+          return { behavior: state.closeBehavior };
+        }
+        if (command === "get_autostart_status") {
+          return { enabled: state.autostartEnabled, error: null };
+        }
+        if (command === "set_autostart_enabled") {
+          state.autostartEnabled = payload.enabled === true;
+          return { enabled: state.autostartEnabled, error: null };
+        }
         if (command === "plugin:window|is_maximized") {
           return Promise.resolve(state.windowMaximized);
         }
@@ -739,6 +759,33 @@ test("standard density keeps the five-row workspace chrome within its intended s
   await expect(page.getByRole("button", { name: "Minimize" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Maximize" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Close" })).toBeVisible();
+});
+
+test("desktop lifecycle settings update native state and restore defaults", async ({ page }) => {
+  await installDesktopMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open settings" }).click();
+
+  const hide = page.getByRole("radio", { name: "Hide to system tray" });
+  const quit = page.getByRole("radio", { name: "Quit Muller" });
+  const autostart = page.getByRole("checkbox", { name: "Start Muller when I sign in to Windows" });
+  await expect(hide).toHaveAttribute("aria-checked", "true");
+  await expect(autostart).not.toBeChecked();
+
+  await quit.click();
+  await autostart.check();
+  await expect.poll(async () => {
+    const state = await mockState(page);
+    return { closeBehavior: state.closeBehavior, autostartEnabled: state.autostartEnabled };
+  }).toEqual({ closeBehavior: "quit", autostartEnabled: true });
+
+  await page.getByRole("button", { name: "Restore defaults" }).click();
+  await expect.poll(async () => {
+    const state = await mockState(page);
+    return { closeBehavior: state.closeBehavior, autostartEnabled: state.autostartEnabled };
+  }).toEqual({ closeBehavior: "hide", autostartEnabled: false });
+  await expect(hide).toHaveAttribute("aria-checked", "true");
+  await expect(autostart).not.toBeChecked();
 });
 
 test("window controls dispatch all three native window operations", async ({ page }) => {

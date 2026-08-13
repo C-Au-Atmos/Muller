@@ -1,9 +1,11 @@
 mod diff;
 mod explorer;
 mod file_operations;
+mod lifecycle;
 mod mutation;
 mod preview;
 mod scan;
+mod startup_gate;
 mod thumbnail;
 mod windows_navigation;
 
@@ -28,12 +30,17 @@ use file_operations::{
     extract_zip, open_native_path, open_terminal, recycle_entry, rename_entry,
     transfer_directory_entries, transfer_entry,
 };
+use lifecycle::{
+    CloseBehavior, LifecycleState, get_autostart_status, get_close_behavior, is_autostart_args,
+    refresh_enabled_autostart_registration, set_autostart_enabled, set_close_behavior,
+};
 use mutation::{
     MutationManager, close_edit_session, open_edit_session, recycle_duplicates, rollback_edit_side,
     save_edit_side,
 };
 use preview::{PreviewManager, cancel_file_preview, start_file_preview};
 use scan::{ScanManager, cancel_scan, start_scan};
+use startup_gate::StartupGate;
 use thumbnail::{
     ShellVisualManager, cancel_image_thumbnail, cancel_shell_visual, start_image_thumbnail,
     start_shell_visual,
@@ -50,12 +57,54 @@ fn show_main_window(app: &tauri::AppHandle) {
     }
 }
 
+fn request_show_main_window(app: &tauri::AppHandle) {
+    if app.get_webview_window("main").is_some() {
+        show_main_window(app);
+    } else if let Some(state) = app.try_state::<LifecycleState>() {
+        state.mark_pending_show();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let launch_args = std::env::args().collect::<Vec<_>>();
+    let launch_is_autostart = is_autostart_args(&launch_args);
+    let mut context = tauri::generate_context!();
+    if launch_is_autostart
+        && let Some(main_window) = context
+            .config_mut()
+            .app
+            .windows
+            .iter_mut()
+            .find(|window| window.label == "main")
+    {
+        main_window.visible = false;
+        main_window.focus = false;
+    }
+    let startup_gate =
+        StartupGate::acquire().expect("failed to acquire the Muller startup serialization gate");
     tauri::Builder::default()
+        // Register this first so a secondary process is rejected before it can
+        // create a window or initialize application state.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if !is_autostart_args(&args) {
+                request_show_main_window(app);
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_drag::init())
-        .setup(|app| {
+        .setup(move |app| {
+            let show_on_launch = if let Some(state) = app.try_state::<LifecycleState>() {
+                state.initialize(app.handle());
+                !state.is_autostart_launch() || state.take_pending_show()
+            } else {
+                !launch_is_autostart
+            };
+            if show_on_launch {
+                show_main_window(app.handle());
+            }
+
+            refresh_enabled_autostart_registration();
             let show_item =
                 MenuItem::with_id(app, "show", "Show Muller", true, Some("Ctrl+Shift+Space"))?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit Muller", true, None::<&str>)?;
@@ -63,7 +112,7 @@ pub fn run() {
             let show_id = show_item.id().clone();
             let quit_id = quit_item.id().clone();
             let mut tray = TrayIconBuilder::with_id("muller-main")
-                .tooltip("Muller - Ctrl+Shift+Space to show")
+                .tooltip("Muller")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(move |app, event| {
@@ -101,14 +150,26 @@ pub fn run() {
             )?;
             // A shortcut conflict must not prevent the file manager from starting.
             let _ = app.global_shortcut().register("ctrl+shift+space");
+            startup_gate.release()?;
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+                let behavior = window
+                    .app_handle()
+                    .try_state::<LifecycleState>()
+                    .map(|state| state.close_behavior())
+                    .unwrap_or_default();
+                if matches!(behavior, CloseBehavior::Hide) {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
             }
         })
+        .manage(LifecycleState::new(launch_is_autostart))
         .manage(ScanManager::default())
         .manage(ExplorerManager::default())
         .manage(DiffManager::default())
@@ -163,7 +224,11 @@ pub fn run() {
             complete_directory_path,
             list_logical_drives,
             list_logical_drivers,
+            get_close_behavior,
+            set_close_behavior,
+            get_autostart_status,
+            set_autostart_enabled,
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running Muller");
 }
