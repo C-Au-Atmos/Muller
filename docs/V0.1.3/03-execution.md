@@ -60,13 +60,30 @@
 - [x] `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`
 - [x] `npm.cmd run test:e2e`：Edge E2E 完整套件 `83/83` 通过；最终 IME 日志
   语义调整后，定向 IME E2E `1/1` 再次通过。
-- [ ] `npm.cmd run tauri build`，并检查 NSIS 安装器钩子已包含在产物中。
+- [ ] `npm.cmd run tauri build`：应用 release 编译成功，但本机 Windows Installer
+  服务不可访问，MSI 的 WiX ICE 校验以 `LGHT0217` / `0x643` 失败。
+- [x] `npm.cmd run tauri -- build --bundles nsis --verbose`：生成
+  `Muller_0.1.3_x64-setup.exe`；生成脚本包含 `installer.nsh` 并在卸载段调用
+  `NSIS_HOOK_POSTUNINSTALL`。
 - [ ] Windows 非管理员干净用户完成关闭、自启动、单实例、升级与卸载矩阵。
 
 自动化尚不能替代以下实机证据：微软拼音/微信输入法、HKCU 自启动与登录竞态、
 升级路径刷新与 NSIS 卸载清理、真实多进程与连续启动 10 次、前台激活限制与耗时
-基线、原生日志文件创建/跨重启设置/5 MiB 轮转/不可写目录降级，以及 Windows
+基线、debug 设置持久化/5 MiB 日志轮转/不可写目录降级，以及 Windows
 关闭、注销和关机矩阵。
+
+### 2026-08-25 本地候选产物证据
+
+- `muller.exe` 和 NSIS 安装器的 FileVersion/ProductVersion 均为 `0.1.3`；SHA-256
+  分别为 `54FF8D9CCA4B1DBC009800D4A30BCD9F44E970DA36D45C59E235E6E27725A8AC`
+  和 `5C751F61C9BEB50983964559211BB701ABD9C91048A09F70032F9E5BBEE92C9C`。
+- 未安装的 release EXE 连续两次启动成功，创建并追加 `muller.log` 和
+  `diagnostics.json`；日志含时间、级别、稳定 target 和事件名，基础敏感模式扫描
+  `0` 命中。二次手动启动进程在 10 秒内退出，进程数收敛为 `1`，主实例记录
+  `instance.secondary_show_requested`。
+- 上述只证明本机未安装 EXE 的基础启动、日志和一次二次启动 smoke；不替代干净
+  用户安装、真实输入法、10 次竞态、前台限制、轮转/不可写、登录/升级/卸载或
+  关闭/注销/关机矩阵。
 
 <a id="req-0-1-3-001"></a>
 
@@ -182,7 +199,7 @@
 | `REQ-0.1.3-002-T01` | 完成当前用户 Run/StartupApproved 的读取、写入、删除、状态调和和路径刷新，并将未跟踪原生模块纳入提交。 | `src-tauri/src/lifecycle.rs` | `TBD` | None | `Completed` |
 | `REQ-0.1.3-002-T02` | 完成前端状态 client、设置开关、中英文错误、实际状态回滚，并将 client 文件纳入提交。 | `src/features/lifecycle/`、`src/features/settings/`、`src/i18n/` | `TBD` | T01 | `Completed` |
 | `REQ-0.1.3-002-T03` | 完成 `--autostart` 隐藏/不聚焦启动与手动显示优先的数据流。 | `src-tauri/src/lib.rs`、`src-tauri/src/lifecycle.rs` | `TBD` | `REQ-0.1.3-003-T01` | `Completed` |
-| `REQ-0.1.3-002-T04` | 完成 NSIS 卸载清理，确保钩子进入打包产物，并将未跟踪钩子纳入提交。 | `src-tauri/installer.nsh`、`src-tauri/tauri.conf.json` | `TBD` | T01 | `In progress` |
+| `REQ-0.1.3-002-T04` | 完成 NSIS 卸载清理，确保钩子进入打包产物，并将未跟踪钩子纳入提交。 | `src-tauri/installer.nsh`、`src-tauri/tauri.conf.json` | `TBD` | T01 | `Completed` |
 | `REQ-0.1.3-002-T05` | 在非管理员干净 Windows 用户验证启停、登录、外部禁用、竞态、升级和卸载。 | Windows 发布包与测试账号 | `TBD` | T01-T04 | `Planned` |
 
 ### 验证计划
@@ -213,7 +230,7 @@
 
 | 日期 | 提交/PR | 检查结果 | 记录人 |
 |---|---|---|---|
-| 2026-08-24 | `298a6af`、`aa6dacf`、`4629fe1` | 代码与自动化通过；HKCU、登录竞态、升级路径刷新和 NSIS 卸载清理实机证据待补充 | `TBD` |
+| 2026-08-25 | `298a6af`、`aa6dacf`、`4629fe1` | 代码、自动化和 NSIS 钩子打包通过；HKCU、登录竞态、升级路径刷新和安装/卸载实机证据待补充 | `TBD` |
 
 <a id="req-0-1-3-003"></a>
 
@@ -287,7 +304,7 @@
 
 | 日期 | 提交/PR | 检查结果 | 记录人 |
 |---|---|---|---|
-| 2026-08-24 | `298a6af`、`aa6dacf`、`4629fe1` | 代码与自动化通过；真实多进程、连续启动 10 次、前台受限场景与唤出耗时基线待补充 | `TBD` |
+| 2026-08-25 | `298a6af`、`aa6dacf`、`4629fe1` | 代码与自动化通过；本地一次二次启动收敛 smoke 通过，连续启动 10 次、前台受限场景与唤出耗时基线待补充 | `TBD` |
 
 <a id="bug-0-1-3-001"></a>
 
@@ -480,4 +497,4 @@
 
 | 日期 | 提交/PR | 检查结果 | 记录人 |
 |---|---|---|---|
-| 2026-08-24 | `4629fe1` | 代码与自动化通过；原生日志文件创建、跨重启设置、5 MiB 轮转、不可写目录降级及安装版隐私检查待补充 | `TBD` |
+| 2026-08-25 | `4629fe1`、`37d75b9` | 代码与自动化通过；未安装 release EXE 的日志创建、跨启动追加和基础脱敏 smoke 通过，debug 设置持久化、5 MiB 轮转、不可写目录降级及安装版隐私检查待补充 | `TBD` |
