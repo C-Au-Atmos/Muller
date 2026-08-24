@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import {
+  diagnosticDebug,
+  reportDiagnosticError,
+} from "../../diagnostics/diagnosticsClient";
 import { isPageLoaded, mergePage, pagesForRange } from "../paging/pagedData";
 
 import {
@@ -142,8 +146,14 @@ export function useDirectoryPane(
           entries: mergePage(current.entries, page.offset, page.entries),
           error: null,
         }));
+        diagnosticDebug("search.page_ready", {
+          generation,
+          resultCount: page.totalEntries,
+          status: "ready",
+        });
       } catch (error) {
         if (searchGenerationRef.current !== generation) return;
+        reportDiagnosticError("search.page_failed", error, { generation });
         setSearch((current) => ({
           ...current,
           status: "error",
@@ -177,6 +187,12 @@ export function useDirectoryPane(
         window.clearTimeout(searchTimerRef.current);
         searchTimerRef.current = null;
       }
+      diagnosticDebug("search.scheduled", {
+        generation,
+        inputLength: query.length,
+        mode,
+        status: previousSearchTask !== null || previousSearchSession !== null ? "replaced" : "new",
+      });
       if (!query.trim()) {
         setSearch(emptySearchState(mode));
         return;
@@ -192,6 +208,11 @@ export function useDirectoryPane(
       searchTimerRef.current = window.setTimeout(() => {
         searchTimerRef.current = null;
         if (searchGenerationRef.current !== generation) return;
+        diagnosticDebug("search.debounce_finished", {
+          generation,
+          inputLength: query.length,
+          mode,
+        });
         if (mode === "current") {
           const sessionId = sessionRef.current;
           if (sessionId !== null) void loadSearchPage(sessionId, query, 0, generation);
@@ -199,6 +220,7 @@ export function useDirectoryPane(
         }
         const roots = mode === "global" ? [...globalSearchRoots] : [state.path];
         if (roots.length === 0 || roots.every((root) => !root.trim())) {
+          diagnosticDebug("search.roots_unavailable", { generation, mode });
           setSearch((current) => ({ ...current, status: "error", error: "No searchable roots are available" }));
           return;
         }
@@ -213,6 +235,11 @@ export function useDirectoryPane(
           searchTaskRef.current = null;
           if (event.type === "ready") {
             searchSessionRef.current = event.sessionId;
+            diagnosticDebug("search.session_ready", {
+              generation,
+              mode,
+              resultCount: event.totalEntries,
+            });
             setSearch((current) => ({
               ...current,
               status: "ready",
@@ -222,8 +249,13 @@ export function useDirectoryPane(
             }));
             void loadSearchPage(event.sessionId, query, 0, generation);
           } else if (event.type === "cancelled") {
+            diagnosticDebug("search.session_cancelled", { generation, mode });
             setSearch((current) => ({ ...current, status: "idle" }));
           } else {
+            reportDiagnosticError("search.session_failed", new Error("native search error"), {
+              generation,
+              mode,
+            });
             setSearch((current) => ({ ...current, status: "error", error: event.message }));
           }
         }, filter).then((start) => {
@@ -234,6 +266,7 @@ export function useDirectoryPane(
           }
         }).catch((error) => {
           if (searchGenerationRef.current !== generation) return;
+          reportDiagnosticError("search.start_failed", error, { generation, mode });
           setSearch((current) => ({
             ...current,
             status: "error",
@@ -246,6 +279,7 @@ export function useDirectoryPane(
   );
 
   const setSearchQuery = useCallback((query: string) => {
+    if (query === searchQueryRef.current) return;
     scheduleSearch(query, searchModeRef.current);
   }, [scheduleSearch]);
 

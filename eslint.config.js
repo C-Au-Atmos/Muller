@@ -35,4 +35,19 @@ export default tseslint.config(
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
     },
   },
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: [
+      "src/diagnostics/diagnosticsClient.ts",
+      "src/diagnostics/diagnosticsClient.test.ts",
+    ],
+    rules: {
+      "no-restricted-imports": ["error", {
+        paths: [{
+          name: "@tauri-apps/plugin-log",
+          message: "Use the allowlisted diagnostics facade instead.",
+        }],
+      }],
+    },
+  },
 );

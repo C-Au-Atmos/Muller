@@ -84,6 +84,7 @@ import {
   type BrowseWorkspaceHandle,
 } from "./features/explorer/BrowseWorkspace";
 import { DirectorySearchBar } from "./features/explorer/DirectorySearchBar";
+import { ImeAwareSearchInput } from "./features/explorer/ImeAwareSearchInput";
 import { listDirectoryExtensions, warmGlobalSearchIndex, type DirectoryExtensionCount } from "./features/explorer/explorerClient";
 import { openNativePath } from "./features/explorer/fileOperationsClient";
 import { displayPath } from "./features/explorer/pathDisplay";
@@ -1564,14 +1565,16 @@ export function App({ initialPath }: AppProps) {
                       </div>
                     ) : null}
                   </div>
-                  <input
+                  <ImeAwareSearchInput
                     key={explorerNavigation.searchMode}
                     className="address-search-input is-mode-changing"
                     ref={directorySearchRef}
                     aria-label={t("searchDirectory")}
+                    diagnosticMode={explorerNavigation.searchMode}
+                    diagnosticSource="address"
                     placeholder={searchPlaceholder}
                     value={explorerNavigation.searchQuery}
-                    onChange={(event) => explorerRef.current?.setSearchQuery(event.target.value)}
+                    onValueChange={(value) => explorerRef.current?.setSearchQuery(value)}
                     onKeyDown={(event) => {
                       if (event.key === "Escape") {
                         explorerRef.current?.setSearchQuery("");

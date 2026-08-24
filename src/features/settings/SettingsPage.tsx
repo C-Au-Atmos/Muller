@@ -1,6 +1,11 @@
-import { Download, Languages, MonitorCog, MousePointer2, Palette, RotateCcw, Upload, Volume2 } from "lucide-react";
-import { useRef, useState, type ChangeEvent, type CSSProperties } from "react";
+import { Bug, Download, FolderOpen, Languages, MonitorCog, MousePointer2, Palette, Power, RotateCcw, Upload, Volume2 } from "lucide-react";
+import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties } from "react";
 
+import {
+  getDiagnosticsLogDirectory,
+  getDiagnosticsStatus,
+  setDebugLogging,
+} from "../../diagnostics/diagnosticsClient";
 import type { AppPreferencesV1 } from "../../preferences/preferencesModel";
 import { useI18n } from "../../i18n/i18n";
 import {
@@ -10,6 +15,13 @@ import {
   parseThemeColorScheme,
   serializeThemeColorScheme,
 } from "../../theme/colorScheme";
+import {
+  getAutostartStatus,
+  getCloseBehavior,
+  setAutostartEnabled,
+  setCloseBehavior,
+} from "../lifecycle/lifecycleClient";
+import { openNativePath } from "../explorer/fileOperationsClient";
 
 interface SettingsPageProps {
   preferences: AppPreferencesV1;
@@ -22,11 +34,12 @@ function rangeStyle(value: number, minimum: number, maximum: number): CSSPropert
   return { "--range-progress": `${Math.min(Math.max(progress, 0), 100)}%` } as CSSProperties;
 }
 
-function Segmented<T extends string>({ value, options, label, onChange }: {
+function Segmented<T extends string>({ value, options, label, onChange, disabled = false }: {
   value: T;
   options: readonly { value: T; label: string }[];
   label: string;
   onChange: (value: T) => void;
+  disabled?: boolean;
 }) {
   return (
     <div className="settings-segmented" role="radiogroup" aria-label={label}>
@@ -35,6 +48,7 @@ function Segmented<T extends string>({ value, options, label, onChange }: {
           type="button"
           role="radio"
           aria-checked={value === option.value}
+          disabled={disabled}
           className={value === option.value ? "is-active" : ""}
           key={option.value}
           onClick={() => onChange(option.value)}
@@ -50,9 +64,157 @@ export function SettingsPage({ preferences, onChange, onReset }: SettingsPagePro
   const { t } = useI18n(preferences.locale);
   const themeFileRef = useRef<HTMLInputElement>(null);
   const [themeFileStatus, setThemeFileStatus] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const [closeBehaviorBusy, setCloseBehaviorBusy] = useState(false);
+  const [closeBehaviorError, setCloseBehaviorError] = useState<string | null>(null);
+  const [autostartEnabled, setAutostartEnabledState] = useState(preferences.autostartEnabled);
+  const [autostartBusy, setAutostartBusy] = useState(false);
+  const [autostartError, setAutostartError] = useState<string | null>(null);
+  const [debugLoggingEnabled, setDebugLoggingEnabledState] = useState(false);
+  const [diagnosticsLevel, setDiagnosticsLevel] = useState<"info" | "debug" | "trace">("info");
+  const [diagnosticsDirectoryAvailable, setDiagnosticsDirectoryAvailable] = useState(false);
+  const [diagnosticsBusy, setDiagnosticsBusy] = useState(false);
+  const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
   const delayPreset = [0, 40, 150].includes(preferences.hoverDelayMs)
     ? String(preferences.hoverDelayMs)
     : "custom";
+
+  useEffect(() => {
+    let mounted = true;
+    void getCloseBehavior()
+      .then((behavior) => {
+        if (!mounted) return;
+        if (behavior !== null) onChange({ closeBehavior: behavior });
+        setCloseBehaviorError(null);
+      })
+      .catch(() => {
+        if (mounted) setCloseBehaviorError(t("closeBehaviorReadError"));
+      });
+    return () => { mounted = false; };
+  }, [onChange, t]);
+
+  useEffect(() => {
+    let mounted = true;
+    void getDiagnosticsStatus().then((status) => {
+      if (!mounted) return;
+      setDebugLoggingEnabledState(status.debugEnabled);
+      setDiagnosticsLevel(status.effectiveLevel);
+      setDiagnosticsDirectoryAvailable(status.logDirectory !== null);
+      setDiagnosticsError(status.error ? t("diagnosticsReadError") : null);
+    });
+    return () => { mounted = false; };
+  }, [t]);
+
+  useEffect(() => {
+    let mounted = true;
+    void getAutostartStatus()
+      .then((status) => {
+        if (!mounted) return;
+        if (status.error?.code !== "autostart_status_failed") {
+          setAutostartEnabledState(status.enabled);
+          onChange({ autostartEnabled: status.enabled });
+        }
+        setAutostartError(status.error ? t("autostartReadError") : null);
+      })
+      .catch(() => {
+        if (mounted) setAutostartError(t("autostartReadError"));
+      });
+    return () => { mounted = false; };
+  }, [onChange, t]);
+
+  const updateCloseBehavior = async (behavior: AppPreferencesV1["closeBehavior"]): Promise<boolean> => {
+    setCloseBehaviorBusy(true);
+    setCloseBehaviorError(null);
+    try {
+      const actual = await setCloseBehavior(behavior);
+      onChange({ closeBehavior: actual });
+      return true;
+    } catch {
+      setCloseBehaviorError(t("closeBehaviorUpdateError"));
+      return false;
+    } finally {
+      setCloseBehaviorBusy(false);
+    }
+  };
+
+  const updateAutostart = async (enabled: boolean, rollbackValue = preferences.autostartEnabled) => {
+    setAutostartBusy(true);
+    setAutostartError(null);
+    try {
+      const status = await setAutostartEnabled(enabled);
+      if (status.error?.code !== "autostart_status_failed") {
+        setAutostartEnabledState(status.enabled);
+        onChange({ autostartEnabled: status.enabled });
+      } else {
+        setAutostartEnabledState(rollbackValue);
+        onChange({ autostartEnabled: rollbackValue });
+      }
+      if (status.error) setAutostartError(t("autostartUpdateError"));
+    } catch {
+      const status = await getAutostartStatus();
+      if (status.error?.code !== "autostart_status_failed") {
+        setAutostartEnabledState(status.enabled);
+        onChange({ autostartEnabled: status.enabled });
+      } else {
+        setAutostartEnabledState(rollbackValue);
+        onChange({ autostartEnabled: rollbackValue });
+      }
+      setAutostartError(t("autostartUpdateError"));
+    } finally {
+      setAutostartBusy(false);
+    }
+  };
+
+  const updateDebugLogging = async (enabled: boolean, rollbackValue = debugLoggingEnabled): Promise<boolean> => {
+    setDiagnosticsBusy(true);
+    setDiagnosticsError(null);
+    try {
+      const status = await setDebugLogging(enabled);
+      setDebugLoggingEnabledState(status.debugEnabled);
+      setDiagnosticsLevel(status.effectiveLevel);
+      setDiagnosticsDirectoryAvailable(status.logDirectory !== null);
+      if (status.error) setDiagnosticsError(t("diagnosticsReadError"));
+      return status.debugEnabled === enabled;
+    } catch {
+      const status = await getDiagnosticsStatus();
+      if (status.error?.code === "diagnostics_status_failed") {
+        setDebugLoggingEnabledState(rollbackValue);
+      } else {
+        setDebugLoggingEnabledState(status.debugEnabled);
+        setDiagnosticsLevel(status.effectiveLevel);
+        setDiagnosticsDirectoryAvailable(status.logDirectory !== null);
+      }
+      setDiagnosticsError(t("diagnosticsUpdateError"));
+      return false;
+    } finally {
+      setDiagnosticsBusy(false);
+    }
+  };
+
+  const openDiagnosticsDirectory = async () => {
+    setDiagnosticsBusy(true);
+    setDiagnosticsError(null);
+    try {
+      const directory = await getDiagnosticsLogDirectory();
+      if (!directory) throw new Error("diagnostics directory unavailable");
+      await openNativePath(directory);
+    } catch {
+      setDiagnosticsError(t("diagnosticsOpenError"));
+    } finally {
+      setDiagnosticsBusy(false);
+    }
+  };
+
+  const resetSettings = () => {
+    const previousCloseBehavior = preferences.closeBehavior;
+    const previousAutostart = autostartEnabled;
+    const previousDebugLogging = debugLoggingEnabled;
+    onReset();
+    void updateCloseBehavior("hide").then((succeeded) => {
+      if (!succeeded) onChange({ closeBehavior: previousCloseBehavior });
+    });
+    void updateAutostart(false, previousAutostart);
+    void updateDebugLogging(false, previousDebugLogging);
+  };
 
   const importTheme = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -91,10 +253,61 @@ export function SettingsPage({ preferences, onChange, onReset }: SettingsPagePro
     <main className="settings-page" aria-labelledby="settings-title">
       <header className="settings-heading">
         <div><MonitorCog size={20} /><h1 id="settings-title">{t("settings")}</h1></div>
-        <button className="command-button" type="button" onClick={onReset}>
+        <button className="command-button" type="button" onClick={resetSettings}>
           <RotateCcw size={15} /><span>{t("reset")}</span>
         </button>
       </header>
+
+      <section className="settings-section" aria-labelledby="lifecycle-title">
+        <h2 id="lifecycle-title"><Power size={16} />{t("startupAndClosing")}</h2>
+        <div className="settings-row">
+          <div><strong>{t("closeMainWindow")}</strong><small>{t("closeMainWindowDetail")}</small></div>
+          <Segmented value={preferences.closeBehavior} label={t("closeMainWindow")} options={[
+            { value: "hide", label: t("hideToTray") }, { value: "quit", label: t("quitMuller") },
+          ]} disabled={closeBehaviorBusy} onChange={(closeBehavior) => void updateCloseBehavior(closeBehavior)} />
+        </div>
+        <label className="settings-row">
+          <div><strong>{t("autostartOnLogin")}</strong><small>{t("autostartOnLoginDetail")}</small></div>
+          <input
+            type="checkbox"
+            aria-label={t("autostartOnLogin")}
+            checked={autostartEnabled}
+            disabled={autostartBusy}
+            onChange={(event) => void updateAutostart(event.target.checked)}
+          />
+        </label>
+        {closeBehaviorError ? <div className="settings-error" role="alert">{closeBehaviorError}</div> : null}
+        {autostartError ? <div className="settings-error" role="alert">{autostartError}</div> : null}
+      </section>
+
+      <section className="settings-section" aria-labelledby="diagnostics-title">
+        <h2 id="diagnostics-title"><Bug size={16} />{t("diagnostics")}</h2>
+        <label className="settings-row">
+          <div>
+            <strong>{t("detailedDebugLogging")}</strong>
+            <small>{t("diagnosticsLevel", { level: diagnosticsLevel.toUpperCase() })}</small>
+          </div>
+          <input
+            type="checkbox"
+            aria-label={t("detailedDebugLogging")}
+            checked={debugLoggingEnabled}
+            disabled={diagnosticsBusy}
+            onChange={(event) => void updateDebugLogging(event.target.checked)}
+          />
+        </label>
+        <div className="settings-row">
+          <div><strong>{t("diagnosticFiles")}</strong><small>{t("diagnosticFilesDetail")}</small></div>
+          <button
+            className="command-button"
+            type="button"
+            disabled={diagnosticsBusy || !diagnosticsDirectoryAvailable}
+            onClick={() => void openDiagnosticsDirectory()}
+          >
+            <FolderOpen size={15} /><span>{t("openLogFolder")}</span>
+          </button>
+        </div>
+        {diagnosticsError ? <div className="settings-error" role="alert">{diagnosticsError}</div> : null}
+      </section>
 
       <section className="settings-section" aria-labelledby="appearance-title">
         <h2 id="appearance-title"><MonitorCog size={16} />{t("appearance")}</h2>
