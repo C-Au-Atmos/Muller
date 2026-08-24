@@ -23,12 +23,19 @@ jobs:
         with:
           workspaces: . -> .cargo-target
       - run: npm ci
-      - name: Verify tag matches package version
+      - name: Verify release versions match tag
         shell: pwsh
         run: |
-          $version = (Get-Content package.json | ConvertFrom-Json).version
-          if ($env:GITHUB_REF_NAME -ne "v$version") {
-            throw "Tag $env:GITHUB_REF_NAME does not match package version $version"
+          $packageVersion = (Get-Content package.json | ConvertFrom-Json).version
+          $cargoPackages = cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
+          $cargoVersion = ($cargoPackages.packages | Where-Object name -eq "muller").version
+          $tauriVersion = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
+
+          if ($packageVersion -ne $cargoVersion -or $packageVersion -ne $tauriVersion) {
+            throw "Release versions differ: package=$packageVersion cargo=$cargoVersion tauri=$tauriVersion"
+          }
+          if ($env:GITHUB_REF_NAME -ne "v$packageVersion") {
+            throw "Tag $env:GITHUB_REF_NAME does not match release version $packageVersion"
           }
       - uses: tauri-apps/tauri-action@v0
         env:
