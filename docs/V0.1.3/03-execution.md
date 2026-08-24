@@ -15,7 +15,8 @@
 
 - 本文只接收 [`02-review.md`](02-review.md) 中结论为 `Accepted` 的条目。
 - 前三项生命周期需求的实现、测试、提交和 PR 使用 `REQ-0.1.3-001` 至
-  `REQ-0.1.3-003`，本次浏览搜索输入法修复使用 `BUG-0.1.3-001`；
+  `REQ-0.1.3-003`，debug 日志体系使用 `REQ-0.1.3-004`，本次浏览搜索输入法
+  修复使用 `BUG-0.1.3-001`；
   `MUL-LIFE-001` 至 `MUL-LIFE-003` 只作为前三项的 Stage 7.11 历史追踪 ID。
 - 当前代码工作树已存在生命周期实现，但本计划不把“代码存在”等同于“完成”；
   必须在全部必要文件纳入版本控制、自动化检查和 Windows 实机验收后更新状态。
@@ -30,6 +31,7 @@
 | `REQ-0.1.3-001` | `MUL-LIFE-001` | `Accepted` | `TBD` | `In progress` | 设置 UI、关闭策略、持久化、测试 | `Pending` |
 | `REQ-0.1.3-002` | `MUL-LIFE-002` | `Accepted` | `TBD` | `In progress` | 自启动状态、注册表、安装器清理、测试 | `Pending` |
 | `REQ-0.1.3-003` | `MUL-LIFE-003` | `Accepted` | `TBD` | `In progress` | 单实例启动门、显示意图、窗口唤出、测试 | `Pending` |
+| `REQ-0.1.3-004` | `None` | `Accepted` | `TBD` | `Planned` | 持久日志、级别配置、前端桥接、脱敏、轮转和测试 | `Pending` |
 | `BUG-0.1.3-001` | `None` | `Accepted` | `Chen TianHao` | `Planned` | IME 事件保护、最终查询提交、快捷键隔离、测试 | `Pending` |
 
 ## 生命周期共同技术合同
@@ -388,3 +390,91 @@
 | 日期 | 提交/PR | 检查结果 | 记录人 |
 |---|---|---|---|
 | TBD | TBD | 自动化、微软拼音与微信输入法 Windows 安装版证据待补充 | `Chen TianHao` |
+
+<a id="req-0-1-3-004"></a>
+
+## `REQ-0.1.3-004` - 新增 debug 日志体系
+
+### 追踪关系
+
+- 原始输入：[`01-original-input.md#req-0-1-3-004`](01-original-input.md#req-0-1-3-004)
+- 评审记录：[`02-review.md#req-0-1-3-004`](02-review.md#req-0-1-3-004)
+- 历史 ID：`None`
+- 来源：`用户紧急需求`
+- 关联 Issue/PR：`TBD`
+- 实现提交：`TBD`
+
+### 技术设计
+
+- 目标行为：Muller 在 Windows 应用日志目录持久化有级别、可轮转、可脱敏的 Rust
+  与前端诊断事件；用户可在 Settings 开启详细 debug 级别并打开日志目录，任何
+  日志故障都不得阻断启动或核心文件工作流。
+- 技术栈：Rust `log` facade、`tauri-plugin-log` 2、Tauri LogDir、React 19、
+  TypeScript 和 Vitest。
+- 修改范围：`src-tauri/Cargo.toml`、`Cargo.lock`、
+  `src-tauri/src/diagnostics.rs`、`src-tauri/src/lib.rs`、Tauri capability、
+  `package.json`/lockfile、`src/diagnostics/`、`src/main.tsx`、Settings、偏好、i18n、
+  生命周期与浏览搜索观测点及对应测试。
+- 原生数据流：日志插件在其他业务插件前注册，写入 Tauri LogDir；`DiagnosticsState`
+  从原生配置读取 debug 开关并结合 debug build 默认值及 `MULLER_LOG` 单次启动覆盖
+  设置最大级别；读取/写入设置 command 返回规范化状态，配置损坏回退并重写默认值。
+- 前端数据流：`src/diagnostics/` 只接受稳定事件名和字段白名单，规范化 Error/未知
+  对象后调用 guest API；`window.error`、`unhandledrejection` 和 React 启动边界接入
+  facade，纯浏览器和 E2E mock 缺少 Tauri API 时吞掉桥接失败但保留应用行为。
+- 文件与保留：单个日志文件约 5 MiB 后轮转，启动时清理为当前文件加最多 4 个历史
+  文件，总预算约 25 MiB；只操作 Muller 自己的日志前缀，不跟随符号链接，不写 exe
+  目录。清理失败记录到仍可用 sink 后继续启动。
+- 事件与脱敏：`INFO` 记录启动、配置、窗口/自启动/单实例和任务终态；`WARN/ERROR`
+  记录降级与失败；`DEBUG` 记录 IME composition、搜索 generation 和状态机边界。
+  所有记录只使用模式、布尔值、长度、计数、耗时、错误类别/代码等白名单字段，禁止
+  原始路径/文件名、查询词、IME data、文件/剪贴板内容、argv 和 cwd。
+- 兼容与迁移：旧安装没有 diagnostics 配置时采用 release `INFO`/debug build
+  `DEBUG`，详细 debug 默认为关闭；恢复默认时关闭详细 debug，正常 `INFO` 日志继续。
+  新增日志不改变用户工作区、目录 session、搜索或生命周期配置格式。
+- 性能预算：`INFO` 不记录每项文件/每次按键；高频事件仅在 `DEBUG/TRACE` 聚合记录，
+  不序列化大对象；日志目录总预算约 25 MiB，记录失败不做同步无界重试。
+- 错误处理：日志插件、目录、配置或前端桥接失败时回退到可用输出并继续；设置写入
+  失败回显原生实际状态；panic/未处理错误只记录清洗后的类别和安全消息。
+- 明确不做：远程遥测、自动上传、用户标识、日志查看器/搜索器、问题工单集成、
+  文件内容采样、全量 Tauri command 参数记录和无限期日志保留。
+
+### 实现任务
+
+| 任务 ID | 工作内容 | 位置 | 负责人 | 前置依赖 | 状态 |
+|---|---|---|---|---|---|
+| `REQ-0.1.3-004-T01` | 接入 Tauri 日志插件、LogDir sink、级别/格式、5 MiB 轮转与最多 4 个历史文件清理，并实现原生配置和环境覆盖。 | `src-tauri/Cargo.toml`、`Cargo.lock`、`src-tauri/src/diagnostics.rs`、`src-tauri/src/lib.rs` | `TBD` | None | `Planned` |
+| `REQ-0.1.3-004-T02` | 实现前端 diagnostics facade、字段白名单、错误规范化及全局 error/unhandledrejection 桥接，补齐 capability。 | `package.json`、lockfile、`src/diagnostics/`、`src/main.tsx`、`src-tauri/capabilities/` | `TBD` | T01 | `Planned` |
+| `REQ-0.1.3-004-T03` | 增加中英文“诊断”设置、详细 debug 开关、实际状态回滚、打开日志目录和恢复默认接线。 | Settings、偏好、i18n、样式 | `TBD` | T01、T02 | `Planned` |
+| `REQ-0.1.3-004-T04` | 在启动、窗口关闭/唤出、自启动、单实例、IME composition 和目录搜索调度添加不含用户内容的关键观测事件。 | `src-tauri/src/lib.rs`、`lifecycle.rs`、`src/App.tsx`、Explorer hooks | `TBD` | T01、T02、`BUG-0.1.3-001-T01` | `Planned` |
+| `REQ-0.1.3-004-T05` | 增加原生配置/清理、前端脱敏/降级/设置测试，并在 Windows 候选安装版验证目录、重启、轮转和不可写降级。 | Rust/Vitest/E2E、Windows 发布包 | `TBD` | T01-T04 | `Planned` |
+
+### 验证计划
+
+- [ ] 单元测试：原生默认值、配置解析、损坏回退、环境覆盖、文件筛选和保留数量；
+  前端字段白名单、Error/未知值规范化、非 Tauri 降级及 debug 设置状态同步。
+- [ ] Rust/集成测试：插件先于业务初始化，设置立即变更最大级别并持久化，重启读取，
+  配置/日志目录失败不阻止启动，清理只命中 Muller 日志前缀。
+- [ ] Edge E2E：Settings debug 开关、错误回滚、恢复默认、打开日志目录 mock，以及
+  IME composition/搜索调度记录只含事件名、模式和长度，不含预编辑或最终查询文字。
+- [ ] 性能检查：正常 `INFO` 不逐键或逐文件记录；debug 关闭时 IME 高频调试事件不
+  落盘；5 MiB 轮转后最多保留 5 个文件且总预算约 25 MiB。
+- [ ] 人工验证：Windows V0.1.3 安装版验证默认日志、debug 开关立即/重启生效、目录
+  可打开、轮转、日志目录短暂不可写和配置损坏恢复；检查日志不含真实路径和输入词。
+- [ ] 回归范围：冷启动、`--autostart`、单实例二次启动、关闭策略、托盘、全局快捷键、
+  三种搜索模式、微软拼音/微信输入法和普通英文输入。
+
+### 发布与回滚
+
+- 配置或迁移步骤：首次启动按默认值创建原生 diagnostics 配置；无需迁移旧数据。
+- 发布观察项：启动失败、无日志、日志级别失控、日志风暴、磁盘预算超限、设置与
+  实际状态不一致，以及日志中出现用户内容或原始路径。
+- 回滚触发条件：日志初始化阻断启动、持续高 I/O/磁盘增长、敏感内容泄露、插件
+  引发崩溃或 debug 开关无法恢复到安全默认值。
+- 回滚步骤：在 `feat/0.1.3` 回退插件与桥接，删除仅由 Muller 创建的 diagnostics
+  配置和日志入口；保留业务错误处理，不删除用户工作区或其他应用日志。
+
+### 完成证据
+
+| 日期 | 提交/PR | 检查结果 | 记录人 |
+|---|---|---|---|
+| TBD | TBD | 自动化、Windows 日志目录、轮转、持久化和隐私证据待补充 | `TBD` |
