@@ -2,6 +2,7 @@ import { LoaderCircle, Search, X } from "lucide-react";
 import { forwardRef, type KeyboardEvent } from "react";
 
 import { useAppI18n } from "../../i18n/i18n";
+import { ImeAwareSearchInput } from "./ImeAwareSearchInput";
 
 interface DirectorySearchBarProps {
   label: string;
@@ -50,13 +51,14 @@ export const DirectorySearchBar = forwardRef<
       ) : (
         <Search size={14} />
       )}
-      <input
+      <ImeAwareSearchInput
         ref={ref}
         aria-label={label}
+        diagnosticSource="shared"
         value={query}
+        onValueChange={onQueryChange}
         placeholder={placeholder ?? t("searchThisFolder")}
         spellCheck={false}
-        onChange={(event) => onQueryChange(event.target.value)}
         onKeyDown={handleKeyDown}
       />
       <output title={t("resultCount", { result: formatNumber(resultCount), total: formatNumber(totalCount) })}>

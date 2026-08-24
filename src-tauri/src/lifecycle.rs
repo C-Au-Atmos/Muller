@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     fs, io,
     path::{Path, PathBuf},
     sync::{
@@ -75,6 +75,8 @@ pub struct AutostartStatus {
     pub error: Option<LifecycleError>,
 }
 
+static AUTOSTART_REFRESH_ERROR: Mutex<Option<LifecycleError>> = Mutex::new(None);
+
 #[derive(Debug, Deserialize, Serialize)]
 struct PersistedSettings {
     behavior: CloseBehavior,
@@ -108,17 +110,28 @@ impl LifecycleState {
             .path()
             .app_config_dir()
             .map(|dir| dir.join(SETTINGS_FILE));
+        let mut loaded = false;
         if let Ok(path) = path {
             if let Ok(contents) = fs::read_to_string(&path)
                 && let Ok(settings) = serde_json::from_str::<PersistedSettings>(&contents)
                 && let Ok(mut behavior) = self.behavior.lock()
             {
                 *behavior = settings.behavior;
+                loaded = true;
             }
             if let Ok(mut stored_path) = self.settings_path.lock() {
                 *stored_path = Some(path);
             }
         }
+        log::info!(
+            target: "muller::lifecycle",
+            "event=lifecycle.initialized close_behavior={} source={}",
+            match self.close_behavior() {
+                CloseBehavior::Hide => "hide",
+                CloseBehavior::Quit => "quit",
+            },
+            if loaded { "persisted" } else { "default" }
+        );
     }
 
     pub fn close_behavior(&self) -> CloseBehavior {
@@ -141,6 +154,14 @@ impl LifecycleState {
         if let Ok(mut current) = self.behavior.lock() {
             *current = behavior;
         }
+        log::info!(
+            target: "muller::lifecycle",
+            "event=lifecycle.close_behavior_changed behavior={}",
+            match behavior {
+                CloseBehavior::Hide => "hide",
+                CloseBehavior::Quit => "quit",
+            }
+        );
         Ok(())
     }
 
@@ -195,6 +216,35 @@ fn startup_approved_enabled(bytes: &[u8]) -> Option<bool> {
     }
 }
 
+fn startup_approved_allows_autostart(bytes: Option<&[u8]>) -> io::Result<bool> {
+    match bytes {
+        None => Ok(true),
+        Some(bytes) => startup_approved_enabled(bytes).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Windows StartupApproved value is malformed",
+            )
+        }),
+    }
+}
+
+fn autostart_registration_matches_executable(registration: &OsStr, executable: &Path) -> bool {
+    registration
+        .to_string_lossy()
+        .eq_ignore_ascii_case(&autostart_command(executable).to_string_lossy())
+}
+
+fn validate_autostart_registration(registration: &OsStr, executable: &Path) -> io::Result<()> {
+    if autostart_registration_matches_executable(registration, executable) {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Windows startup registration does not target the current Muller executable",
+        ))
+    }
+}
+
 #[cfg(windows)]
 fn is_not_found(error: &io::Error) -> bool {
     error.kind() == io::ErrorKind::NotFound
@@ -231,19 +281,25 @@ fn read_startup_approved() -> io::Result<Option<Vec<u8>>> {
 }
 
 #[cfg(windows)]
+fn read_enabled_run_registration() -> io::Result<Option<OsString>> {
+    let Some(registration) = read_run_registration()? else {
+        return Ok(None);
+    };
+    let startup_approved = read_startup_approved()?;
+    if startup_approved_allows_autostart(startup_approved.as_deref())? {
+        Ok(Some(registration))
+    } else {
+        Ok(None)
+    }
+}
+
+#[cfg(windows)]
 fn read_autostart_enabled() -> io::Result<bool> {
-    if read_run_registration()?.is_none() {
+    let Some(registration) = read_enabled_run_registration()? else {
         return Ok(false);
-    }
-    match read_startup_approved()? {
-        None => Ok(true),
-        Some(bytes) => startup_approved_enabled(&bytes).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Windows StartupApproved value is malformed",
-            )
-        }),
-    }
+    };
+    validate_autostart_registration(&registration, &std::env::current_exe()?)?;
+    Ok(true)
 }
 
 #[cfg(not(windows))]
@@ -303,16 +359,15 @@ fn disable_autostart() -> io::Result<()> {
 }
 
 fn autostart_status() -> AutostartStatus {
-    match read_autostart_enabled() {
-        Ok(enabled) => AutostartStatus {
-            enabled,
-            error: None,
-        },
-        Err(error) => AutostartStatus {
-            enabled: false,
-            error: Some(LifecycleError::autostart_status(error)),
-        },
-    }
+    let status =
+        autostart_status_from_result(read_autostart_enabled(), take_autostart_refresh_error());
+    log::debug!(
+        target: "muller::lifecycle",
+        "event=autostart.status enabled={} error_code={}",
+        status.enabled,
+        status.error.as_ref().map_or("none", |error| error.code.as_str())
+    );
+    status
 }
 
 fn reconcile_autostart_status(
@@ -328,6 +383,46 @@ fn reconcile_autostart_status(
     status
 }
 
+fn autostart_status_from_result(
+    result: io::Result<bool>,
+    refresh_error: Option<LifecycleError>,
+) -> AutostartStatus {
+    match result {
+        Ok(enabled) => AutostartStatus {
+            enabled,
+            error: refresh_error,
+        },
+        Err(error) => {
+            let message = if let Some(refresh_error) = refresh_error {
+                format!(
+                    "{error}; startup registration refresh failed: {}",
+                    refresh_error.message
+                )
+            } else {
+                error.to_string()
+            };
+            AutostartStatus {
+                enabled: false,
+                error: Some(LifecycleError::autostart_status(message)),
+            }
+        }
+    }
+}
+
+fn replace_autostart_refresh_error(error: Option<LifecycleError>) {
+    let mut current = AUTOSTART_REFRESH_ERROR
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *current = error;
+}
+
+fn take_autostart_refresh_error() -> Option<LifecycleError> {
+    AUTOSTART_REFRESH_ERROR
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .take()
+}
+
 #[tauri::command]
 pub fn get_autostart_status() -> AutostartStatus {
     autostart_status()
@@ -335,6 +430,12 @@ pub fn get_autostart_status() -> AutostartStatus {
 
 #[tauri::command]
 pub fn set_autostart_enabled(enabled: bool) -> AutostartStatus {
+    log::info!(
+        target: "muller::lifecycle",
+        "event=autostart.change_requested enabled={enabled}"
+    );
+    // A user-requested update supersedes any startup-time refresh failure.
+    let _ = take_autostart_refresh_error();
     let operation_error = if enabled {
         enable_autostart().err()
     } else {
@@ -342,17 +443,52 @@ pub fn set_autostart_enabled(enabled: bool) -> AutostartStatus {
     }
     .map(LifecycleError::autostart);
 
-    reconcile_autostart_status(enabled, operation_error, autostart_status())
+    let status = reconcile_autostart_status(enabled, operation_error, autostart_status());
+    log::info!(
+        target: "muller::lifecycle",
+        "event=autostart.change_finished enabled={} error_code={}",
+        status.enabled,
+        status.error.as_ref().map_or("none", |error| error.code.as_str())
+    );
+    status
 }
 
 pub fn is_autostart_args(args: &[String]) -> bool {
     args.iter().any(|arg| arg == AUTOSTART_FLAG)
 }
 
-pub fn refresh_enabled_autostart_registration() {
-    if matches!(read_autostart_enabled(), Ok(true)) {
-        let _ = enable_autostart();
+#[cfg(windows)]
+fn refresh_enabled_autostart_registration_inner() -> io::Result<()> {
+    let Some(registration) = read_enabled_run_registration()? else {
+        return Ok(());
+    };
+    let executable = std::env::current_exe()?;
+    if autostart_registration_matches_executable(&registration, &executable) {
+        return Ok(());
     }
+
+    enable_autostart()?;
+    let refreshed = read_enabled_run_registration()?.ok_or_else(|| {
+        io::Error::other("Windows disabled the Muller startup registration after it was refreshed")
+    })?;
+    validate_autostart_registration(&refreshed, &executable)
+}
+
+#[cfg(not(windows))]
+fn refresh_enabled_autostart_registration_inner() -> io::Result<()> {
+    Ok(())
+}
+
+pub fn refresh_enabled_autostart_registration() {
+    let error = refresh_enabled_autostart_registration_inner()
+        .err()
+        .map(LifecycleError::autostart);
+    if error.is_some() {
+        log::warn!(target: "muller::lifecycle", "event=autostart.refresh_failed");
+    } else {
+        log::debug!(target: "muller::lifecycle", "event=autostart.refresh_finished");
+    }
+    replace_autostart_refresh_error(error);
 }
 
 #[cfg(test)]
@@ -459,6 +595,62 @@ mod tests {
         let path = "C:\\Program Files\\Muller \u{7a0b}\u{5e8f}\\muller.exe";
         let command = autostart_command(Path::new(path));
         assert_eq!(command.to_string_lossy(), format!("\"{path}\" --autostart"));
+    }
+
+    #[test]
+    fn autostart_registration_must_target_the_current_executable() {
+        let current = Path::new("C:\\Program Files\\Muller\\muller.exe");
+        let current_command = autostart_command(current);
+        let differently_cased =
+            OsString::from("\"c:\\program files\\muller\\MULLER.EXE\" --autostart");
+        let stale_command = autostart_command(Path::new(
+            "C:\\Users\\user\\AppData\\Local\\Muller-old\\muller.exe",
+        ));
+
+        assert!(autostart_registration_matches_executable(
+            &current_command,
+            current
+        ));
+        assert!(autostart_registration_matches_executable(
+            &differently_cased,
+            current
+        ));
+        assert!(!autostart_registration_matches_executable(
+            &stale_command,
+            current
+        ));
+        assert_eq!(
+            validate_autostart_registration(&stale_command, current)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn startup_refresh_failure_is_exposed_by_the_next_status_read() {
+        let refresh_error = LifecycleError::autostart("access denied while refreshing the path");
+
+        let status = autostart_status_from_result(Ok(false), Some(refresh_error));
+
+        assert!(!status.enabled);
+        let error = status.error.unwrap();
+        assert_eq!(error.code, "autostart_failed");
+        assert!(error.message.contains("access denied"));
+    }
+
+    #[test]
+    fn startup_refresh_and_status_failures_preserve_both_diagnostics() {
+        let read_error = io::Error::new(io::ErrorKind::InvalidData, "stale Run command");
+        let refresh_error = LifecycleError::autostart("registry write denied");
+
+        let status = autostart_status_from_result(Err(read_error), Some(refresh_error));
+
+        assert!(!status.enabled);
+        let error = status.error.unwrap();
+        assert_eq!(error.code, "autostart_status_failed");
+        assert!(error.message.contains("stale Run command"));
+        assert!(error.message.contains("registry write denied"));
     }
 
     #[test]

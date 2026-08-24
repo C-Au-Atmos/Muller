@@ -1,3 +1,5 @@
+import { isImeCompositionEvent, type ImeEventDescriptor } from "../input/imeInput";
+
 export type AppCommandId =
   | "openCommandPalette"
   | "openDuplicates"
@@ -29,7 +31,7 @@ export type AppCommandId =
   | "activateLeftPane"
   | "activateRightPane";
 
-interface KeyDescriptor {
+interface KeyDescriptor extends ImeEventDescriptor {
   key: string;
   ctrlKey?: boolean;
   altKey?: boolean;
@@ -72,6 +74,7 @@ const APP_KEYMAP: readonly CommandBinding[] = [
 ];
 
 export function resolveAppCommand(event: KeyDescriptor): AppCommandId | null {
+  if (isImeCompositionEvent(event)) return null;
   const normalizedKey = event.key.length === 1 ? event.key.toLowerCase() : event.key;
   const binding = APP_KEYMAP.find(
     (candidate) =>

@@ -1,3 +1,4 @@
+mod diagnostics;
 mod diff;
 mod explorer;
 mod file_operations;
@@ -10,12 +11,15 @@ mod thumbnail;
 mod windows_navigation;
 
 use tauri::{
-    Manager,
+    Manager, UserAttentionType,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, ShortcutState};
 
+use diagnostics::{
+    DiagnosticsState, get_diagnostics_log_directory, get_diagnostics_status, set_debug_logging,
+};
 use diff::{
     DiffManager, cancel_diff, close_diff_session, find_diff_position, read_binary_range,
     read_folder_diff_page, read_text_diff_page, start_file_diff, start_folder_diff,
@@ -50,10 +54,28 @@ use windows_navigation::{
 };
 
 fn show_main_window(app: &tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
+    let Some(window) = app.get_webview_window("main") else {
+        log::warn!(target: "muller::lifecycle", "event=window.show_missing");
+        return;
+    };
+    if window.show().is_err() {
+        log::warn!(target: "muller::lifecycle", "event=window.show_failed");
+    }
+    if window.unminimize().is_err() {
+        log::warn!(target: "muller::lifecycle", "event=window.unminimize_failed");
+    }
+    if window.set_focus().is_err() {
+        log::warn!(target: "muller::lifecycle", "event=window.focus_failed fallback=attention");
+    } else {
+        log::debug!(target: "muller::lifecycle", "event=window.shown");
+    }
+    // Windows can reject foreground activation while the underlying API still
+    // reports success. This is a no-op when the application is already focused.
+    if window
+        .request_user_attention(Some(UserAttentionType::Informational))
+        .is_err()
+    {
+        log::warn!(target: "muller::lifecycle", "event=window.attention_failed");
     }
 }
 
@@ -62,6 +84,7 @@ fn request_show_main_window(app: &tauri::AppHandle) {
         show_main_window(app);
     } else if let Some(state) = app.try_state::<LifecycleState>() {
         state.mark_pending_show();
+        log::debug!(target: "muller::lifecycle", "event=window.show_deferred");
     }
 }
 
@@ -84,16 +107,28 @@ pub fn run() {
     let startup_gate =
         StartupGate::acquire().expect("failed to acquire the Muller startup serialization gate");
     tauri::Builder::default()
+        .plugin(diagnostics::plugin())
         // Register this first so a secondary process is rejected before it can
         // create a window or initialize application state.
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             if !is_autostart_args(&args) {
+                log::info!(target: "muller::lifecycle", "event=instance.secondary_show_requested");
                 request_show_main_window(app);
+            } else {
+                log::debug!(target: "muller::lifecycle", "event=instance.secondary_autostart_ignored");
             }
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_drag::init())
         .setup(move |app| {
+            if let Some(state) = app.try_state::<DiagnosticsState>() {
+                diagnostics::initialize_logging(app.handle(), &state);
+            }
+            log::info!(
+                target: "muller::lifecycle",
+                "event=application.setup launch_mode={}",
+                if launch_is_autostart { "autostart" } else { "manual" }
+            );
             let show_on_launch = if let Some(state) = app.try_state::<LifecycleState>() {
                 state.initialize(app.handle());
                 !state.is_autostart_launch() || state.take_pending_show()
@@ -117,8 +152,10 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(move |app, event| {
                     if event.id() == &show_id {
+                        log::info!(target: "muller::lifecycle", "event=tray.show_requested");
                         show_main_window(app);
                     } else if event.id() == &quit_id {
+                        log::info!(target: "muller::lifecycle", "event=tray.quit_requested");
                         app.exit(0);
                     }
                 })
@@ -129,6 +166,7 @@ pub fn run() {
                         ..
                     } = event
                     {
+                        log::info!(target: "muller::lifecycle", "event=tray.primary_click");
                         show_main_window(tray.app_handle());
                     }
                 });
@@ -143,14 +181,22 @@ pub fn run() {
                         if event.state == ShortcutState::Pressed
                             && shortcut.matches(Modifiers::CONTROL | Modifiers::SHIFT, Code::Space)
                         {
+                            log::info!(target: "muller::lifecycle", "event=shortcut.show_requested");
                             show_main_window(app);
                         }
                     })
                     .build(),
             )?;
             // A shortcut conflict must not prevent the file manager from starting.
-            let _ = app.global_shortcut().register("ctrl+shift+space");
+            if app
+                .global_shortcut()
+                .register("ctrl+shift+space")
+                .is_err()
+            {
+                log::warn!(target: "muller::lifecycle", "event=shortcut.register_failed");
+            }
             startup_gate.release()?;
+            log::info!(target: "muller::lifecycle", "event=application.ready");
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -163,12 +209,23 @@ pub fn run() {
                     .try_state::<LifecycleState>()
                     .map(|state| state.close_behavior())
                     .unwrap_or_default();
+                log::info!(
+                    target: "muller::lifecycle",
+                    "event=window.close_requested behavior={}",
+                    match behavior {
+                        CloseBehavior::Hide => "hide",
+                        CloseBehavior::Quit => "quit",
+                    }
+                );
                 if matches!(behavior, CloseBehavior::Hide) {
                     api.prevent_close();
-                    let _ = window.hide();
+                    if window.hide().is_err() {
+                        log::warn!(target: "muller::lifecycle", "event=window.hide_failed");
+                    }
                 }
             }
         })
+        .manage(DiagnosticsState::default())
         .manage(LifecycleState::new(launch_is_autostart))
         .manage(ScanManager::default())
         .manage(ExplorerManager::default())
@@ -228,6 +285,9 @@ pub fn run() {
             set_close_behavior,
             get_autostart_status,
             set_autostart_enabled,
+            get_diagnostics_status,
+            set_debug_logging,
+            get_diagnostics_log_directory,
         ])
         .run(context)
         .expect("error while running Muller");

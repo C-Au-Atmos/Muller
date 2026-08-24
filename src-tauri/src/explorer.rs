@@ -537,7 +537,16 @@ pub fn start_directory_search(
 ) -> StartDirectoryResponse {
     let manager = manager.inner().clone();
     let (task_id, cancellation) = manager.begin();
+    let root_count = request.roots.len();
+    let query_length = request.query.chars().count();
+    let indexed = request.indexed;
+    let recursive = request.recursive;
     tauri::async_runtime::spawn_blocking(move || {
+        let started_at = Instant::now();
+        log::debug!(
+            target: "muller::search",
+            "event=search.native_started task_id={task_id} root_count={root_count} query_length={query_length} indexed={indexed} recursive={recursive}"
+        );
         if on_event.send(DirectoryEvent::Started { task_id }).is_err() {
             cancellation.cancel();
         }
@@ -551,6 +560,11 @@ pub fn start_directory_search(
                 let path = session.path.clone();
                 let parent = directory_parent(&path);
                 let total_entries = session.entries.len();
+                log::debug!(
+                    target: "muller::search",
+                    "event=search.native_ready task_id={task_id} result_count={total_entries} duration_ms={}",
+                    started_at.elapsed().as_millis()
+                );
                 manager.store(task_id, session);
                 if on_event
                     .send(DirectoryEvent::Ready {
@@ -566,9 +580,19 @@ pub fn start_directory_search(
                 }
             }
             Ok(_) | Err(DirectoryBuildError::Cancelled) => {
+                log::debug!(
+                    target: "muller::search",
+                    "event=search.native_cancelled task_id={task_id} duration_ms={}",
+                    started_at.elapsed().as_millis()
+                );
                 let _ = on_event.send(DirectoryEvent::Cancelled { task_id });
             }
             Err(error) => {
+                log::warn!(
+                    target: "muller::search",
+                    "event=search.native_failed task_id={task_id} error_kind=build duration_ms={}",
+                    started_at.elapsed().as_millis()
+                );
                 let _ = on_event.send(DirectoryEvent::Error {
                     task_id,
                     message: error.to_string(),
@@ -585,9 +609,23 @@ pub fn warm_global_search_index(manager: State<'_, ExplorerManager>, roots: Vec<
     if roots.is_empty() {
         return;
     }
+    let root_count = roots.len();
     let manager = manager.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let _ = manager.search_index(&roots, &CancellationToken::default());
+        let started_at = Instant::now();
+        match manager.search_index(&roots, &CancellationToken::default()) {
+            Ok(index) => log::debug!(
+                target: "muller::search",
+                "event=search.index_warmed root_count={root_count} entry_count={} duration_ms={}",
+                index.entries.len(),
+                started_at.elapsed().as_millis()
+            ),
+            Err(_) => log::warn!(
+                target: "muller::search",
+                "event=search.index_warm_failed root_count={root_count} duration_ms={}",
+                started_at.elapsed().as_millis()
+            ),
+        }
     });
 }
 
@@ -596,10 +634,16 @@ pub fn cancel_directory_query(
     manager: State<'_, ExplorerManager>,
     task_id: u64,
 ) -> CancelDirectoryResponse {
-    CancelDirectoryResponse {
+    let response = CancelDirectoryResponse {
         task_id,
         cancelled: manager.cancel(task_id),
-    }
+    };
+    log::debug!(
+        target: "muller::search",
+        "event=search.cancel_requested task_id={task_id} cancelled={}",
+        response.cancelled
+    );
+    response
 }
 
 #[tauri::command]

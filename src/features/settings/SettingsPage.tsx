@@ -1,6 +1,11 @@
-import { Download, Languages, MonitorCog, MousePointer2, Palette, Power, RotateCcw, Upload, Volume2 } from "lucide-react";
+import { Bug, Download, FolderOpen, Languages, MonitorCog, MousePointer2, Palette, Power, RotateCcw, Upload, Volume2 } from "lucide-react";
 import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties } from "react";
 
+import {
+  getDiagnosticsLogDirectory,
+  getDiagnosticsStatus,
+  setDebugLogging,
+} from "../../diagnostics/diagnosticsClient";
 import type { AppPreferencesV1 } from "../../preferences/preferencesModel";
 import { useI18n } from "../../i18n/i18n";
 import {
@@ -16,6 +21,7 @@ import {
   setAutostartEnabled,
   setCloseBehavior,
 } from "../lifecycle/lifecycleClient";
+import { openNativePath } from "../explorer/fileOperationsClient";
 
 interface SettingsPageProps {
   preferences: AppPreferencesV1;
@@ -63,6 +69,11 @@ export function SettingsPage({ preferences, onChange, onReset }: SettingsPagePro
   const [autostartEnabled, setAutostartEnabledState] = useState(preferences.autostartEnabled);
   const [autostartBusy, setAutostartBusy] = useState(false);
   const [autostartError, setAutostartError] = useState<string | null>(null);
+  const [debugLoggingEnabled, setDebugLoggingEnabledState] = useState(false);
+  const [diagnosticsLevel, setDiagnosticsLevel] = useState<"info" | "debug" | "trace">("info");
+  const [diagnosticsDirectoryAvailable, setDiagnosticsDirectoryAvailable] = useState(false);
+  const [diagnosticsBusy, setDiagnosticsBusy] = useState(false);
+  const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
   const delayPreset = [0, 40, 150].includes(preferences.hoverDelayMs)
     ? String(preferences.hoverDelayMs)
     : "custom";
@@ -80,6 +91,18 @@ export function SettingsPage({ preferences, onChange, onReset }: SettingsPagePro
       });
     return () => { mounted = false; };
   }, [onChange, t]);
+
+  useEffect(() => {
+    let mounted = true;
+    void getDiagnosticsStatus().then((status) => {
+      if (!mounted) return;
+      setDebugLoggingEnabledState(status.debugEnabled);
+      setDiagnosticsLevel(status.effectiveLevel);
+      setDiagnosticsDirectoryAvailable(status.logDirectory !== null);
+      setDiagnosticsError(status.error ? t("diagnosticsReadError") : null);
+    });
+    return () => { mounted = false; };
+  }, [t]);
 
   useEffect(() => {
     let mounted = true;
@@ -141,14 +164,56 @@ export function SettingsPage({ preferences, onChange, onReset }: SettingsPagePro
     }
   };
 
+  const updateDebugLogging = async (enabled: boolean, rollbackValue = debugLoggingEnabled): Promise<boolean> => {
+    setDiagnosticsBusy(true);
+    setDiagnosticsError(null);
+    try {
+      const status = await setDebugLogging(enabled);
+      setDebugLoggingEnabledState(status.debugEnabled);
+      setDiagnosticsLevel(status.effectiveLevel);
+      setDiagnosticsDirectoryAvailable(status.logDirectory !== null);
+      if (status.error) setDiagnosticsError(t("diagnosticsReadError"));
+      return status.debugEnabled === enabled;
+    } catch {
+      const status = await getDiagnosticsStatus();
+      if (status.error?.code === "diagnostics_status_failed") {
+        setDebugLoggingEnabledState(rollbackValue);
+      } else {
+        setDebugLoggingEnabledState(status.debugEnabled);
+        setDiagnosticsLevel(status.effectiveLevel);
+        setDiagnosticsDirectoryAvailable(status.logDirectory !== null);
+      }
+      setDiagnosticsError(t("diagnosticsUpdateError"));
+      return false;
+    } finally {
+      setDiagnosticsBusy(false);
+    }
+  };
+
+  const openDiagnosticsDirectory = async () => {
+    setDiagnosticsBusy(true);
+    setDiagnosticsError(null);
+    try {
+      const directory = await getDiagnosticsLogDirectory();
+      if (!directory) throw new Error("diagnostics directory unavailable");
+      await openNativePath(directory);
+    } catch {
+      setDiagnosticsError(t("diagnosticsOpenError"));
+    } finally {
+      setDiagnosticsBusy(false);
+    }
+  };
+
   const resetSettings = () => {
     const previousCloseBehavior = preferences.closeBehavior;
     const previousAutostart = autostartEnabled;
+    const previousDebugLogging = debugLoggingEnabled;
     onReset();
     void updateCloseBehavior("hide").then((succeeded) => {
       if (!succeeded) onChange({ closeBehavior: previousCloseBehavior });
     });
     void updateAutostart(false, previousAutostart);
+    void updateDebugLogging(false, previousDebugLogging);
   };
 
   const importTheme = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -213,6 +278,35 @@ export function SettingsPage({ preferences, onChange, onReset }: SettingsPagePro
         </label>
         {closeBehaviorError ? <div className="settings-error" role="alert">{closeBehaviorError}</div> : null}
         {autostartError ? <div className="settings-error" role="alert">{autostartError}</div> : null}
+      </section>
+
+      <section className="settings-section" aria-labelledby="diagnostics-title">
+        <h2 id="diagnostics-title"><Bug size={16} />{t("diagnostics")}</h2>
+        <label className="settings-row">
+          <div>
+            <strong>{t("detailedDebugLogging")}</strong>
+            <small>{t("diagnosticsLevel", { level: diagnosticsLevel.toUpperCase() })}</small>
+          </div>
+          <input
+            type="checkbox"
+            aria-label={t("detailedDebugLogging")}
+            checked={debugLoggingEnabled}
+            disabled={diagnosticsBusy}
+            onChange={(event) => void updateDebugLogging(event.target.checked)}
+          />
+        </label>
+        <div className="settings-row">
+          <div><strong>{t("diagnosticFiles")}</strong><small>{t("diagnosticFilesDetail")}</small></div>
+          <button
+            className="command-button"
+            type="button"
+            disabled={diagnosticsBusy || !diagnosticsDirectoryAvailable}
+            onClick={() => void openDiagnosticsDirectory()}
+          >
+            <FolderOpen size={15} /><span>{t("openLogFolder")}</span>
+          </button>
+        </div>
+        {diagnosticsError ? <div className="settings-error" role="alert">{diagnosticsError}</div> : null}
       </section>
 
       <section className="settings-section" aria-labelledby="appearance-title">
