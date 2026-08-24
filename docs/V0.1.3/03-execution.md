@@ -9,7 +9,7 @@
 | 候选分支 | `release/0.1.3` |
 | 文档状态 | `In progress` |
 | 技术负责人 | `ChenXingYe` |
-| 最后更新 | `2026-08-24` |
+| 最后更新 | `2026-08-25` |
 
 ## 执行规则
 
@@ -18,21 +18,18 @@
   `REQ-0.1.3-003`，debug 日志体系使用 `REQ-0.1.3-004`，本次浏览搜索输入法
   修复使用 `BUG-0.1.3-001`；
   `MUL-LIFE-001` 至 `MUL-LIFE-003` 只作为前三项的 Stage 7.11 历史追踪 ID。
-- 当前代码工作树已存在生命周期实现，但本计划不把“代码存在”等同于“完成”；
-  必须在全部必要文件纳入版本控制、自动化检查和 Windows 实机验收后更新状态。
-- `src-tauri/src/lifecycle.rs`、`src-tauri/src/startup_gate.rs`、
-  `src-tauri/installer.nsh` 和 `src/features/lifecycle/` 当前为未跟踪交付物，合入前
-  必须纳入对应实现提交；`.vs/` 不属于交付范围。
+- 生命周期实现已纳入 `298a6af`、`aa6dacf`，本轮补强、debug 日志和 IME 修复已
+  纳入 `4629fe1`；自动化通过不等同于 Windows 安装版实机验收完成。
 
 ## 执行索引
 
 | 条目 ID | 历史 ID | 评审结论 | 实现负责人 | 状态 | 主要交付物 | 验证状态 |
 |---|---|---|---|---|---|---|
-| `REQ-0.1.3-001` | `MUL-LIFE-001` | `Accepted` | `TBD` | `In progress` | 设置 UI、关闭策略、持久化、测试 | `Pending` |
-| `REQ-0.1.3-002` | `MUL-LIFE-002` | `Accepted` | `TBD` | `In progress` | 自启动状态、注册表、安装器清理、测试 | `Pending` |
-| `REQ-0.1.3-003` | `MUL-LIFE-003` | `Accepted` | `TBD` | `In progress` | 单实例启动门、显示意图、窗口唤出、测试 | `Pending` |
-| `REQ-0.1.3-004` | `None` | `Accepted` | `TBD` | `Planned` | 持久日志、级别配置、前端桥接、脱敏、轮转和测试 | `Pending` |
-| `BUG-0.1.3-001` | `None` | `Accepted` | `Chen TianHao` | `Planned` | IME 事件保护、最终查询提交、快捷键隔离、测试 | `Pending` |
+| `REQ-0.1.3-001` | `MUL-LIFE-001` | `Accepted` | `TBD` | `In progress` | 设置 UI、关闭策略、持久化、测试 | 自动化通过；Windows 生命周期矩阵待验收 |
+| `REQ-0.1.3-002` | `MUL-LIFE-002` | `Accepted` | `TBD` | `In progress` | 自启动状态、注册表、安装器清理、测试 | 自动化通过；登录、升级与卸载待验收 |
+| `REQ-0.1.3-003` | `MUL-LIFE-003` | `Accepted` | `TBD` | `In progress` | 单实例启动门、显示意图、窗口唤出、测试 | 自动化通过；真实多进程与唤出基线待验收 |
+| `REQ-0.1.3-004` | `None` | `Accepted` | `TBD` | `In progress` | 持久日志、级别配置、前端桥接、脱敏、轮转和测试 | 自动化通过；原生日志文件与故障矩阵待验收 |
+| `BUG-0.1.3-001` | `None` | `Accepted` | `Chen TianHao` | `In progress` | IME 事件保护、最终查询提交、快捷键隔离、测试 | 自动化通过；两款真实输入法待验收 |
 
 ## 生命周期共同技术合同
 
@@ -55,15 +52,21 @@
 
 ### 共同质量门禁
 
-- [ ] `npm.cmd run lint`
-- [ ] `npm.cmd run test`
-- [ ] `npm.cmd run build`
-- [ ] `cargo fmt --all -- --check`
-- [ ] `cargo test --workspace --locked`
-- [ ] `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`
-- [ ] `npm.cmd run test:e2e`
+- [x] `npm.cmd run lint`
+- [x] `npm.cmd run test`：Vitest `76/76` 通过。
+- [x] `npm.cmd run build`：生产构建通过，仅有既有 chunk-size 警告。
+- [x] `cargo fmt --all -- --check`
+- [x] `cargo test --workspace --locked`：`122` 个测试通过。
+- [x] `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`
+- [x] `npm.cmd run test:e2e`：Edge E2E 完整套件 `83/83` 通过；最终 IME 日志
+  语义调整后，定向 IME E2E `1/1` 再次通过。
 - [ ] `npm.cmd run tauri build`，并检查 NSIS 安装器钩子已包含在产物中。
 - [ ] Windows 非管理员干净用户完成关闭、自启动、单实例、升级与卸载矩阵。
+
+自动化尚不能替代以下实机证据：微软拼音/微信输入法、HKCU 自启动与登录竞态、
+升级路径刷新与 NSIS 卸载清理、真实多进程与连续启动 10 次、前台激活限制与耗时
+基线、原生日志文件创建/跨重启设置/5 MiB 轮转/不可写目录降级，以及 Windows
+关闭、注销和关机矩阵。
 
 <a id="req-0-1-3-001"></a>
 
@@ -75,7 +78,7 @@
 - 评审记录：[`02-review.md#req-0-1-3-001`](02-review.md#req-0-1-3-001)
 - 历史 ID：`MUL-LIFE-001`
 - 关联 Issue/PR：`TBD`
-- 实现提交：`298a6af` 包含部分已跟踪接线；完整实现提交 `TBD`
+- 实现提交：`298a6af`、`aa6dacf`；补强提交 `4629fe1`
 
 ### 技术设计
 
@@ -103,18 +106,18 @@
 
 | 任务 ID | 工作内容 | 位置 | 负责人 | 前置依赖 | 状态 |
 |---|---|---|---|---|---|
-| `REQ-0.1.3-001-T01` | 完成关闭行为默认值、兼容解析、原生持久化和 command，并将未跟踪原生模块纳入提交。 | `src-tauri/src/lifecycle.rs`、`src-tauri/src/lib.rs` | `TBD` | None | `In progress` |
-| `REQ-0.1.3-001-T02` | 完成设置分组、二选一控件、中英文文案、忙碌与错误回滚，并将生命周期 client 纳入提交。 | `src/features/settings/`、`src/features/lifecycle/`、`src/preferences/`、`src/i18n/` | `TBD` | T01 | `In progress` |
-| `REQ-0.1.3-001-T03` | 覆盖偏好损坏、写入失败、恢复默认和关闭入口一致性测试。 | `src/**/*.test.ts`、`src-tauri/src/lifecycle.rs`、`e2e/` | `TBD` | T01、T02 | `Planned` |
+| `REQ-0.1.3-001-T01` | 完成关闭行为默认值、兼容解析、原生持久化和 command，并将未跟踪原生模块纳入提交。 | `src-tauri/src/lifecycle.rs`、`src-tauri/src/lib.rs` | `TBD` | None | `Completed` |
+| `REQ-0.1.3-001-T02` | 完成设置分组、二选一控件、中英文文案、忙碌与错误回滚，并将生命周期 client 纳入提交。 | `src/features/settings/`、`src/features/lifecycle/`、`src/preferences/`、`src/i18n/` | `TBD` | T01 | `Completed` |
+| `REQ-0.1.3-001-T03` | 覆盖偏好损坏、写入失败、恢复默认和关闭入口一致性测试。 | `src/**/*.test.ts`、`src-tauri/src/lifecycle.rs`、`e2e/` | `TBD` | T01、T02 | `Completed` |
 | `REQ-0.1.3-001-T04` | 在 Windows 安装版验证隐藏、退出、托盘退出、注销、关机和更新退出矩阵。 | Windows 发布包 | `TBD` | T03 | `Planned` |
 
 ### 验证计划
 
-- [ ] 单元测试：默认 `hide`、历史别名、未知值和损坏 JSON 回退、先持久化后生效、
+- [x] 单元测试：默认 `hide`、历史别名、未知值和损坏 JSON 回退、先持久化后生效、
   command 错误规范化、设置 UI 回滚。
 - [ ] Rust/集成测试：主窗口 `CloseRequested` 的 `hide/quit` 分支；非主窗口不受影响；
   正常退出事件不被隐藏逻辑拦截。
-- [ ] Edge E2E：设置页切换和恢复默认；mock 原生命令失败时保持之前选择并显示错误。
+- [x] Edge E2E：设置页切换和恢复默认；mock 原生命令失败时保持之前选择并显示错误。
 - [ ] 性能检查：关闭事件无磁盘 I/O，设置写入不阻塞动画和交互。
 - [ ] 人工验证：Windows 10/11 非管理员用户，分别通过 `X`、`Alt+F4`、任务栏关闭
   测试两种策略；验证托盘和 `Ctrl+Shift+Space` 恢复同一窗口。
@@ -136,7 +139,7 @@
 
 | 日期 | 提交/PR | 检查结果 | 记录人 |
 |---|---|---|---|
-| TBD | TBD | 自动化与 Windows 实机证据待补充 | `TBD` |
+| 2026-08-24 | `298a6af`、`aa6dacf`、`4629fe1` | 代码与自动化通过；Windows 安装版关闭、注销和关机矩阵待补充 | `TBD` |
 
 <a id="req-0-1-3-002"></a>
 
@@ -148,7 +151,7 @@
 - 评审记录：[`02-review.md#req-0-1-3-002`](02-review.md#req-0-1-3-002)
 - 历史 ID：`MUL-LIFE-002`
 - 关联 Issue/PR：`TBD`
-- 实现提交：`298a6af` 包含部分已跟踪接线；完整实现提交 `TBD`
+- 实现提交：`298a6af`、`aa6dacf`；路径刷新补强提交 `4629fe1`
 
 ### 技术设计
 
@@ -176,19 +179,19 @@
 
 | 任务 ID | 工作内容 | 位置 | 负责人 | 前置依赖 | 状态 |
 |---|---|---|---|---|---|
-| `REQ-0.1.3-002-T01` | 完成当前用户 Run/StartupApproved 的读取、写入、删除、状态调和和路径刷新，并将原生模块纳入提交。 | `src-tauri/src/lifecycle.rs` | `TBD` | None | `In progress` |
-| `REQ-0.1.3-002-T02` | 完成前端状态 client、设置开关、中英文错误、实际状态回滚，并将 client 文件纳入提交。 | `src/features/lifecycle/`、`src/features/settings/`、`src/i18n/` | `TBD` | T01 | `In progress` |
-| `REQ-0.1.3-002-T03` | 完成 `--autostart` 隐藏/不聚焦启动与手动显示优先的数据流。 | `src-tauri/src/lib.rs`、`src-tauri/src/lifecycle.rs` | `TBD` | `REQ-0.1.3-003-T01` | `In progress` |
+| `REQ-0.1.3-002-T01` | 完成当前用户 Run/StartupApproved 的读取、写入、删除、状态调和和路径刷新，并将未跟踪原生模块纳入提交。 | `src-tauri/src/lifecycle.rs` | `TBD` | None | `Completed` |
+| `REQ-0.1.3-002-T02` | 完成前端状态 client、设置开关、中英文错误、实际状态回滚，并将 client 文件纳入提交。 | `src/features/lifecycle/`、`src/features/settings/`、`src/i18n/` | `TBD` | T01 | `Completed` |
+| `REQ-0.1.3-002-T03` | 完成 `--autostart` 隐藏/不聚焦启动与手动显示优先的数据流。 | `src-tauri/src/lib.rs`、`src-tauri/src/lifecycle.rs` | `TBD` | `REQ-0.1.3-003-T01` | `Completed` |
 | `REQ-0.1.3-002-T04` | 完成 NSIS 卸载清理，确保钩子进入打包产物，并将未跟踪钩子纳入提交。 | `src-tauri/installer.nsh`、`src-tauri/tauri.conf.json` | `TBD` | T01 | `In progress` |
 | `REQ-0.1.3-002-T05` | 在非管理员干净 Windows 用户验证启停、登录、外部禁用、竞态、升级和卸载。 | Windows 发布包与测试账号 | `TBD` | T01-T04 | `Planned` |
 
 ### 验证计划
 
-- [ ] 单元测试：路径含空格/Unicode 时正确引用；`--autostart` 识别；12 字节
+- [x] 单元测试：路径含空格/Unicode 时正确引用；`--autostart` 识别；12 字节
   StartupApproved 启用/禁用/损坏状态；设置失败后实际状态优先；前端错误规范化。
 - [ ] Rust/集成测试：注册/注销幂等、当前用户范围、启动时路径刷新、后台意图不会
   隐藏已运行窗口、手动显示意图优先。
-- [ ] Edge E2E：设置开关初始状态、切换、失败回滚、恢复默认；mock 不替代实机
+- [x] Edge E2E：设置开关初始状态、切换、失败回滚、恢复默认；mock 不替代实机
   注册表和登录测试。
 - [ ] 性能检查：登录启动过程中无窗口闪现或焦点抢占；启动注册刷新不造成明显延迟。
 - [ ] 人工验证：Windows 10/11 非管理员干净用户，读取 HKCU 实际值，完成重新登录、
@@ -210,7 +213,7 @@
 
 | 日期 | 提交/PR | 检查结果 | 记录人 |
 |---|---|---|---|
-| TBD | TBD | 自动化、打包与 Windows 登录/卸载证据待补充 | `TBD` |
+| 2026-08-24 | `298a6af`、`aa6dacf`、`4629fe1` | 代码与自动化通过；HKCU、登录竞态、升级路径刷新和 NSIS 卸载清理实机证据待补充 | `TBD` |
 
 <a id="req-0-1-3-003"></a>
 
@@ -222,7 +225,7 @@
 - 评审记录：[`02-review.md#req-0-1-3-003`](02-review.md#req-0-1-3-003)
 - 历史 ID：`MUL-LIFE-003`
 - 关联 Issue/PR：`TBD`
-- 实现提交：`298a6af` 包含部分已跟踪接线；完整实现提交 `TBD`
+- 实现提交：`298a6af`、`aa6dacf`；抢焦点降级补强提交 `4629fe1`
 
 ### 技术设计
 
@@ -250,10 +253,10 @@
 
 | 任务 ID | 工作内容 | 位置 | 负责人 | 前置依赖 | 状态 |
 |---|---|---|---|---|---|
-| `REQ-0.1.3-003-T01` | 接入单实例插件、手动/登录启动意图和主窗口显示回调。 | `src-tauri/Cargo.toml`、`Cargo.lock`、`src-tauri/src/lib.rs` | `TBD` | None | `In progress` |
-| `REQ-0.1.3-003-T02` | 完成 Windows 命名启动门和 RAII 释放，将未跟踪模块纳入提交，封闭端点初始化竞态。 | `src-tauri/src/startup_gate.rs`、`src-tauri/src/lib.rs` | `TBD` | T01 | `In progress` |
-| `REQ-0.1.3-003-T03` | 完成窗口未就绪时的 pending show、各窗口状态恢复、模态窗口优先和抢焦点降级。 | `src-tauri/src/lifecycle.rs`、`src-tauri/src/lib.rs` | `TBD` | T01、T02 | `In progress` |
-| `REQ-0.1.3-003-T04` | 增加启动门单元测试和真实多进程/窗口状态验证，记录唤出耗时基线。 | Rust 测试、Windows 发布包 | `TBD` | T01-T03 | `Planned` |
+| `REQ-0.1.3-003-T01` | 接入单实例插件、手动/登录启动意图和主窗口显示回调。 | `src-tauri/Cargo.toml`、`Cargo.lock`、`src-tauri/src/lib.rs` | `TBD` | None | `Completed` |
+| `REQ-0.1.3-003-T02` | 完成 Windows 命名启动门和 RAII 释放，将未跟踪模块纳入提交，封闭端点初始化竞态。 | `src-tauri/src/startup_gate.rs`、`src-tauri/src/lib.rs` | `TBD` | T01 | `Completed` |
+| `REQ-0.1.3-003-T03` | 完成窗口未就绪时的 pending show、各窗口状态恢复、模态窗口优先和抢焦点降级。 | `src-tauri/src/lifecycle.rs`、`src-tauri/src/lib.rs` | `TBD` | T01、T02 | `Completed` |
+| `REQ-0.1.3-003-T04` | 增加启动门单元测试和真实多进程/窗口状态验证，记录唤出耗时基线。 | Rust 测试、Windows 发布包 | `TBD` | T01-T03 | `In progress` |
 
 ### 验证计划
 
@@ -284,7 +287,7 @@
 
 | 日期 | 提交/PR | 检查结果 | 记录人 |
 |---|---|---|---|
-| TBD | TBD | 自动化、多进程和唤出性能证据待补充 | `TBD` |
+| 2026-08-24 | `298a6af`、`aa6dacf`、`4629fe1` | 代码与自动化通过；真实多进程、连续启动 10 次、前台受限场景与唤出耗时基线待补充 | `TBD` |
 
 <a id="bug-0-1-3-001"></a>
 
@@ -299,7 +302,7 @@
 - 评审人：`Chen XingYe`
 - 实现负责人：`Chen TianHao`
 - 关联 Issue/PR：`TBD`
-- 实现提交：`TBD`
+- 实现提交：`4629fe1`
 
 ### 技术设计
 
@@ -341,32 +344,32 @@
 
 | 任务 ID | 工作内容 | 位置 | 负责人 | 前置依赖 | 状态 |
 |---|---|---|---|---|---|
-| `BUG-0.1.3-001-T01` | 建立浏览顶部搜索框的组合状态和最终值提交流程，组合期间隔离 pane 查询，并确保最终查询只提交一次。 | `src/App.tsx`、`src/features/explorer/BrowseWorkspace.tsx`、`src/features/explorer/useDirectoryPane.ts` | `Chen TianHao` | None | `Planned` |
-| `BUG-0.1.3-001-T02` | 在输入框与全局键盘路径统一保护组合态和兼容键值 `229`，防止提交、清空、失焦、结果选择或误取消扫描；同步共享搜索框语义。 | `src/App.tsx`、`src/commands/appCommands.ts`、`src/features/explorer/DirectorySearchBar.tsx` | `Chen TianHao` | T01 | `Planned` |
-| `BUG-0.1.3-001-T03` | 增加组合状态、事件顺序、最终值去重和普通键盘行为的前端单元/组件测试。 | `src/**/*.test.ts`、必要的输入事件辅助模块 | `Chen TianHao` | T01、T02 | `Planned` |
-| `BUG-0.1.3-001-T04` | 扩展 Edge E2E 桌面 mock，覆盖预编辑无查询、候选 Enter/Escape、`229`、三种搜索模式、双栏和扫描并行场景。 | `e2e/stage710.spec.ts`、相关 E2E 夹具 | `Chen TianHao` | T01-T03 | `Planned` |
+| `BUG-0.1.3-001-T01` | 建立浏览顶部搜索框的组合状态和最终值提交流程，组合期间隔离 pane 查询，并确保最终查询只提交一次。 | `src/App.tsx`、`src/features/explorer/BrowseWorkspace.tsx`、`src/features/explorer/useDirectoryPane.ts` | `Chen TianHao` | None | `Completed` |
+| `BUG-0.1.3-001-T02` | 在输入框与全局键盘路径统一保护组合态和兼容键值 `229`，防止提交、清空、失焦、结果选择或误取消扫描；同步共享搜索框语义。 | `src/App.tsx`、`src/commands/appCommands.ts`、`src/features/explorer/DirectorySearchBar.tsx` | `Chen TianHao` | T01 | `Completed` |
+| `BUG-0.1.3-001-T03` | 增加组合状态、事件顺序、最终值去重和普通键盘行为的前端单元/组件测试。 | `src/**/*.test.ts`、必要的输入事件辅助模块 | `Chen TianHao` | T01、T02 | `Completed` |
+| `BUG-0.1.3-001-T04` | 扩展 Edge E2E 桌面 mock，覆盖预编辑无查询、候选 Enter/Escape、`229`、三种搜索模式、双栏和扫描并行场景。 | `e2e/stage710.spec.ts`、相关 E2E 夹具 | `Chen TianHao` | T01-T03 | `Completed` |
 | `BUG-0.1.3-001-T05` | 使用 Windows Tauri 安装版分别完成微软拼音和微信输入法人工验收，记录环境、产物和结果。 | Windows V0.1.3 候选安装包、人工验证记录 | `Chen TianHao` | T04 | `Planned` |
 
 ### 验证计划
 
-- [ ] 单元/组件测试：覆盖 `compositionstart`、预编辑 `input/change`、组合态
+- [x] 单元/组件测试：覆盖 `compositionstart`、预编辑 `input/change`、组合态
   `Enter`/`Escape`、`compositionend`、最终 `input/change`、失焦和卸载顺序；验证
   标准 `isComposing` 与兼容键值 `229`，并断言最终查询不丢失、不重复。
-- [ ] Edge E2E：预编辑文本停留超过 120 ms 时，不调用 `search_directory_page`、
+- [x] Edge E2E：预编辑文本停留超过 120 ms 时，不调用 `search_directory_page`、
   `start_directory_search`、`cancel_directory_query` 或关闭 session，不改变结果和焦点。
-- [ ] Edge E2E：组合态 `Enter` 不提交或聚焦首个结果，最终中文上屏后输入框保持
+- [x] Edge E2E：组合态 `Enter` 不提交或聚焦首个结果，最终中文上屏后输入框保持
   焦点且只查询最终文字；组合态 `Escape` 不清空、不失焦、不关闭搜索。
-- [ ] Edge E2E：扫描运行时在搜索框组合态按 `Escape` 不取消扫描；普通非组合态
+- [x] Edge E2E：扫描运行时在搜索框组合态按 `Escape` 不取消扫描；普通非组合态
   取消扫描、搜索 `Enter`/`Escape` 和全局快捷键仍按现有合同工作。
-- [ ] 模式矩阵：当前目录、递归、全盘和双栏搜索在组合期间均不查询，组合结束后
+- [x] 模式矩阵：当前目录、递归、全盘和双栏搜索在组合期间均不查询，组合结束后
   只收到最终中文；根目录、递归、indexed、过滤、分页和结果提交语义不变。
-- [ ] 共享组件回归：比较左右目录搜索和重复结果搜索的候选 `Enter`/`Escape` 不被
+- [x] 共享组件回归：比较左右目录搜索和重复结果搜索的候选 `Enter`/`Escape` 不被
   Muller 消费，普通非组合提交/关闭行为保持。
-- [ ] 普通输入回归：英文、数字、粘贴、`Ctrl+F`、搜索模式切换和清空操作保持；
+- [x] 普通输入回归：英文、数字、粘贴、`Ctrl+F`、搜索模式切换和清空操作保持；
   现有 `.fill()` 用例继续通过，但不得把它当作 IME 覆盖。
-- [ ] 性能检查：一次组合输入不产生预编辑查询或取消风暴，最终文字对每个目标
+- [x] 性能检查：一次组合输入不产生预编辑查询或取消风暴，最终文字对每个目标
   pane 最多进入一次 120 ms 调度；普通输入的搜索请求时序不退化。
-- [ ] 自动化质量门禁：`npm.cmd run lint`、`npm.cmd run test`、`npm.cmd run build`、
+- [x] 自动化质量门禁：`npm.cmd run lint`、`npm.cmd run test`、`npm.cmd run build`、
   `npm.cmd run test:e2e:all` 通过；里程碑晋级时继续执行本文共同质量门禁。
 - [ ] Windows 人工验证：在 V0.1.3 候选安装版中，微软拼音和微信输入法各验证
   `Enter` 确认、`Escape` 取消、连续选词、中文最终搜索、三种搜索模式、双栏和扫描
@@ -389,7 +392,7 @@
 
 | 日期 | 提交/PR | 检查结果 | 记录人 |
 |---|---|---|---|
-| TBD | TBD | 自动化、微软拼音与微信输入法 Windows 安装版证据待补充 | `Chen TianHao` |
+| 2026-08-24 | `4629fe1` | 自动化通过（完整 Edge E2E `83/83`；最终调整后定向 IME E2E `1/1`）；微软拼音与微信输入法 Windows 安装版待验收 | `Chen TianHao` |
 
 <a id="req-0-1-3-004"></a>
 
@@ -402,7 +405,7 @@
 - 历史 ID：`None`
 - 来源：`用户紧急需求`
 - 关联 Issue/PR：`TBD`
-- 实现提交：`TBD`
+- 实现提交：`4629fe1`
 
 ### 技术设计
 
@@ -442,11 +445,11 @@
 
 | 任务 ID | 工作内容 | 位置 | 负责人 | 前置依赖 | 状态 |
 |---|---|---|---|---|---|
-| `REQ-0.1.3-004-T01` | 接入 Tauri 日志插件、LogDir sink、级别/格式、5 MiB 轮转与最多 4 个历史文件清理，并实现原生配置和环境覆盖。 | `src-tauri/Cargo.toml`、`Cargo.lock`、`src-tauri/src/diagnostics.rs`、`src-tauri/src/lib.rs` | `TBD` | None | `Planned` |
-| `REQ-0.1.3-004-T02` | 实现前端 diagnostics facade、字段白名单、错误规范化及全局 error/unhandledrejection 桥接，补齐 capability。 | `package.json`、lockfile、`src/diagnostics/`、`src/main.tsx`、`src-tauri/capabilities/` | `TBD` | T01 | `Planned` |
-| `REQ-0.1.3-004-T03` | 增加中英文“诊断”设置、详细 debug 开关、实际状态回滚、打开日志目录和恢复默认接线。 | Settings、偏好、i18n、样式 | `TBD` | T01、T02 | `Planned` |
-| `REQ-0.1.3-004-T04` | 在启动、窗口关闭/唤出、自启动、单实例、IME composition 和目录搜索调度添加不含用户内容的关键观测事件。 | `src-tauri/src/lib.rs`、`lifecycle.rs`、`src/App.tsx`、Explorer hooks | `TBD` | T01、T02、`BUG-0.1.3-001-T01` | `Planned` |
-| `REQ-0.1.3-004-T05` | 增加原生配置/清理、前端脱敏/降级/设置测试，并在 Windows 候选安装版验证目录、重启、轮转和不可写降级。 | Rust/Vitest/E2E、Windows 发布包 | `TBD` | T01-T04 | `Planned` |
+| `REQ-0.1.3-004-T01` | 接入 Tauri 日志插件、LogDir sink、级别/格式、5 MiB 轮转与最多 4 个历史文件清理，并实现原生配置和环境覆盖。 | `src-tauri/Cargo.toml`、`Cargo.lock`、`src-tauri/src/diagnostics.rs`、`src-tauri/src/lib.rs` | `TBD` | None | `Completed` |
+| `REQ-0.1.3-004-T02` | 实现前端 diagnostics facade、字段白名单、错误规范化及全局 error/unhandledrejection 桥接，补齐 capability。 | `package.json`、lockfile、`src/diagnostics/`、`src/main.tsx`、`src-tauri/capabilities/` | `TBD` | T01 | `Completed` |
+| `REQ-0.1.3-004-T03` | 增加中英文“诊断”设置、详细 debug 开关、实际状态回滚、打开日志目录和恢复默认接线。 | Settings、偏好、i18n、样式 | `TBD` | T01、T02 | `Completed` |
+| `REQ-0.1.3-004-T04` | 在启动、窗口关闭/唤出、自启动、单实例、IME composition 和目录搜索调度添加不含用户内容的关键观测事件。 | `src-tauri/src/lib.rs`、`lifecycle.rs`、`src/App.tsx`、Explorer hooks | `TBD` | T01、T02、`BUG-0.1.3-001-T01` | `Completed` |
+| `REQ-0.1.3-004-T05` | 增加原生配置/清理、前端脱敏/降级/设置测试，并在 Windows 候选安装版验证目录、重启、轮转和不可写降级。 | Rust/Vitest/E2E、Windows 发布包 | `TBD` | T01-T04 | `In progress` |
 
 ### 验证计划
 
@@ -454,7 +457,7 @@
   前端字段白名单、Error/未知值规范化、非 Tauri 降级及 debug 设置状态同步。
 - [ ] Rust/集成测试：插件先于业务初始化，设置立即变更最大级别并持久化，重启读取，
   配置/日志目录失败不阻止启动，清理只命中 Muller 日志前缀。
-- [ ] Edge E2E：Settings debug 开关、错误回滚、恢复默认、打开日志目录 mock，以及
+- [x] Edge E2E：Settings debug 开关、错误回滚、恢复默认、打开日志目录 mock，以及
   IME composition/搜索调度记录只含事件名、模式和长度，不含预编辑或最终查询文字。
 - [ ] 性能检查：正常 `INFO` 不逐键或逐文件记录；debug 关闭时 IME 高频调试事件不
   落盘；5 MiB 轮转后最多保留 5 个文件且总预算约 25 MiB。
@@ -477,4 +480,4 @@
 
 | 日期 | 提交/PR | 检查结果 | 记录人 |
 |---|---|---|---|
-| TBD | TBD | 自动化、Windows 日志目录、轮转、持久化和隐私证据待补充 | `TBD` |
+| 2026-08-24 | `4629fe1` | 代码与自动化通过；原生日志文件创建、跨重启设置、5 MiB 轮转、不可写目录降级及安装版隐私检查待补充 | `TBD` |
