@@ -265,6 +265,27 @@ fn is_muller_log_target(target: &str) -> bool {
             .is_some_and(|suffix| suffix.starts_with(':'))
 }
 
+fn safe_log_target(target: &str) -> &str {
+    if target == tauri_plugin_log::WEBVIEW_TARGET
+        || target
+            .strip_prefix(tauri_plugin_log::WEBVIEW_TARGET)
+            .is_some_and(|suffix| suffix.starts_with(':'))
+    {
+        tauri_plugin_log::WEBVIEW_TARGET
+    } else {
+        target
+    }
+}
+
+fn format_log_line(
+    timestamp: impl std::fmt::Display,
+    level: impl std::fmt::Display,
+    target: &str,
+    message: impl std::fmt::Display,
+) -> String {
+    format!("[{timestamp}][{level}][{target}] {message}")
+}
+
 fn log_builder(include_file: bool) -> LogBuilder {
     let mut targets = vec![
         Target::new(TargetKind::Stdout).filter(|metadata| is_muller_log_target(metadata.target())),
@@ -283,12 +304,13 @@ fn log_builder(include_file: bool) -> LogBuilder {
         .rotation_strategy(RotationStrategy::KeepSome(ARCHIVED_LOG_FILES))
         .timezone_strategy(TimezoneStrategy::UseLocal)
         .format(|out, message, record| {
-            out.finish(format_args!(
-                "[{}][{}] {}",
+            let line = format_log_line(
                 TimezoneStrategy::UseLocal.get_now(),
                 record.level(),
-                message
-            ));
+                safe_log_target(record.target()),
+                message,
+            );
+            out.finish(format_args!("{line}"));
         })
         .max_file_size(LOG_FILE_SIZE_BYTES)
         .targets(targets)
@@ -432,6 +454,23 @@ mod tests {
         assert!(!is_muller_log_target("muller_other"));
         assert!(!is_muller_log_target("tauri::runtime"));
         assert!(!is_muller_log_target("wry"));
+        assert_eq!(
+            safe_log_target("webview:diagnosticInfo@http://tauri.localhost/app.js:1:2"),
+            "webview"
+        );
+        assert_eq!(
+            safe_log_target("muller::diagnostics"),
+            "muller::diagnostics"
+        );
+        assert_eq!(
+            format_log_line(
+                "2026-08-25 09:00:00",
+                log::Level::Info,
+                "muller::diagnostics",
+                "event=diagnostics.initialized"
+            ),
+            "[2026-08-25 09:00:00][INFO][muller::diagnostics] event=diagnostics.initialized"
+        );
     }
 
     #[test]
