@@ -23,6 +23,7 @@ import {
   Square,
   SquareTerminal,
   Trash2,
+  Undo2,
   X,
 } from "lucide-react";
 import {
@@ -64,6 +65,8 @@ import {
   renameEntry,
   transferDirectoryEntries,
   transferEntry,
+  organizeByKeyword,
+  undoOrganizeByKeyword,
   createEntry,
   createZip,
   extractZip,
@@ -208,6 +211,7 @@ export interface BrowseNavigationState {
   totalEntries: number;
   searchBoth: boolean;
   canSearchBoth: boolean;
+  canUndo: boolean;
 }
 
 export interface BrowseWorkspaceHandle {
@@ -226,6 +230,7 @@ export interface BrowseWorkspaceHandle {
   paste: () => void;
   renameSelection: () => void;
   recycleSelection: () => void;
+  undo: () => void;
   togglePreview: () => void;
   activatePane: (pane: PaneId) => void;
   findInDirectory: () => void;
@@ -276,6 +281,17 @@ interface ContextMenuState {
 interface ActiveFileDrag extends InternalFileDrag {
   sourceDirectory: string;
   sourcePaths: string[];
+}
+
+interface OrganizeDialogState {
+  sourceDirectory: string;
+  destinationDirectory: string;
+  destinationName: string;
+}
+
+interface OrganizeUndoEntry {
+  source: string;
+  destination: string;
 }
 
 function dropDirectoryTarget(target: EventTarget | null): { element: HTMLElement; path: string } | null {
@@ -396,6 +412,13 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
     const [recycleTarget, setRecycleTarget] = useState<DirectoryEntry[]>([]);
     const [propertiesTarget, setPropertiesTarget] = useState<DirectoryEntry | null>(null);
     const [pendingConflict, setPendingConflict] = useState<PendingConflict | null>(null);
+    const [createFolderPane, setCreateFolderPane] = useState<PaneId | null>(null);
+    const [folderName, setFolderName] = useState("New folder");
+    const [folderAutoOrganize, setFolderAutoOrganize] = useState(false);
+    const [folderKeyword, setFolderKeyword] = useState("");
+    const [organizeDialog, setOrganizeDialog] = useState<OrganizeDialogState | null>(null);
+    const organizeUndoRef = useRef<OrganizeUndoEntry[]>([]);
+    const [organizeUndoAvailable, setOrganizeUndoAvailable] = useState(false);
     const [previewOpen, setPreviewOpen] = useState(false);
     const [previewPinned, setPreviewPinned] = useState(initialPreviewPinned);
     const [renderedPreviewWidth, setRenderedPreviewWidth] = useState(() => clampPreviewWidth(previewWidth));
@@ -490,6 +513,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
         totalEntries: active.state.totalEntries,
         searchBoth: searchBoth && canSearchBoth,
         canSearchBoth,
+        canUndo: organizeUndoAvailable,
       });
     }, [
       active.canBack,
@@ -511,6 +535,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
       selectedEntry?.name,
       selectedCount,
       searchBoth,
+      organizeUndoAvailable,
       visibleSplit,
       formatNumber,
       t,
@@ -733,8 +758,63 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
       }
     }, []);
 
+    const clearOrganizeUndo = useCallback(() => {
+      organizeUndoRef.current = [];
+      setOrganizeUndoAvailable(false);
+    }, []);
+
+    const finishOrganization = useCallback(
+      (
+        result: Awaited<ReturnType<typeof organizeByKeyword>>,
+        destinationDirectory: string,
+      ) => {
+        const moved = result.reports.filter((report) => report.outcome === "moved" && !report.sourceRetained);
+        organizeUndoRef.current = moved.map((report) => ({
+          source: report.source,
+          destination: report.destination,
+        }));
+        setOrganizeUndoAvailable(moved.length > 0);
+        const summary = moved.length > 0
+          ? t("organizedItems", { count: formatNumber(moved.length), destination: displayPath(destinationDirectory) })
+          : t("organizeNoMatches");
+        setNotice(summary);
+        setError(result.failures.length > 0
+          ? t("organizeFailures", { count: formatNumber(result.failures.length) })
+          : null);
+        if (moved.length > 0) onSuccess(summary);
+        refreshBoth();
+      },
+      [formatNumber, onSuccess, refreshBoth, t],
+    );
+
+    const undoOrganization = useCallback(async () => {
+      const entries = organizeUndoRef.current;
+      if (entries.length === 0 || busy) return;
+      setBusy(true);
+      setError(null);
+      try {
+        const result = await undoOrganizeByKeyword(entries, setTransferTaskId);
+        const restored = result.reports.filter((report) => report.outcome === "moved" && !report.sourceRetained);
+        const remaining = entries.filter((entry) => !restored.some((report) => pathsMatch(report.source, entry.destination)));
+        organizeUndoRef.current = remaining;
+        setOrganizeUndoAvailable(remaining.length > 0);
+        const summary = t("organizedUndo", { count: formatNumber(restored.length) });
+        setNotice(summary);
+        setError(result.failures.length > 0
+          ? t("organizeUndoFailures", { count: formatNumber(result.failures.length) })
+          : null);
+        if (restored.length > 0) onSuccess(summary);
+        refreshBoth();
+      } catch (operationError) {
+        setError(errorMessage(operationError, t("unableOrganizeUndo")));
+      } finally {
+        setBusy(false);
+      }
+    }, [busy, formatNumber, onSuccess, refreshBoth, t]);
+
     const finishReport = useCallback(
       (report: TransferReport, mode: TransferMode | "rename") => {
+        clearOrganizeUndo();
         if (mode === "move" && report.outcome === "moved" && !report.sourceRetained) {
           setClipboard(null);
         }
@@ -745,7 +825,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
         onSuccess(message);
         refreshBoth();
       },
-      [onSuccess, refreshBoth, t],
+      [clearOrganizeUndo, onSuccess, refreshBoth, t],
     );
 
     const performTransfer = useCallback(
@@ -937,6 +1017,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
           setTransferTaskId,
         );
         const completed = result.reports.length;
+        if (completed > 0) clearOrganizeUndo();
         const summary = t("transferredItems", { operation: t(mode === "copy" ? "copied" : "moved"), count: formatNumber(completed) });
         setNotice(summary);
         setError(result.failures.length > 0
@@ -949,7 +1030,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
       } finally {
         setBusy(false);
       }
-    }, [busy, formatNumber, onSuccess, refreshBoth, t]);
+    }, [busy, clearOrganizeUndo, formatNumber, onSuccess, refreshBoth, t]);
 
     const performExternalDrop = useCallback(async (
       paths: readonly string[],
@@ -980,6 +1061,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
             failed += 1;
           }
         }
+        if (completed > 0) clearOrganizeUndo();
         const summary = t("importedItems", { count: formatNumber(completed) });
         setNotice(summary);
         setError(failed > 0 ? t("transferFailures", { count: formatNumber(failed) }) : null);
@@ -988,7 +1070,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
       } finally {
         setBusy(false);
       }
-    }, [busy, formatNumber, onSuccess, refreshBoth, t]);
+    }, [busy, clearOrganizeUndo, formatNumber, onSuccess, refreshBoth, t]);
 
     const performRename = useCallback(
       async (source: string, newName: string, conflict: ConflictStrategy) => {
@@ -1063,6 +1145,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
             }
           }
           const operation = t(clipboard.mode === "copy" ? "copied" : "moved");
+          if (succeeded > 0) clearOrganizeUndo();
           const summary = failed.length > 0
             ? t("partialTransfer", { operation, count: formatNumber(succeeded), failed: formatNumber(failed.length) })
             : t("transferredItems", { operation, count: formatNumber(succeeded) });
@@ -1077,7 +1160,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
           setBusy(false);
         }
       },
-      [active.state.path, busy, clipboard, formatNumber, onSuccess, performTransfer, refreshBoth, t],
+      [active.state.path, busy, clearOrganizeUndo, clipboard, formatNumber, onSuccess, performTransfer, refreshBoth, t],
     );
 
     const openEntry = useCallback(
@@ -1131,9 +1214,93 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
       setRecycleTarget(mutable);
     }, [resolvedSelectedEntries]);
 
+    const beginCreateFolder = useCallback((pane: PaneId) => {
+      if (busy) return;
+      setContextMenu(null);
+      setError(null);
+      setCreateFolderPane(pane);
+      setFolderName("New folder");
+      setFolderAutoOrganize(false);
+      setFolderKeyword("");
+    }, [busy]);
+
+    const createFolder = useCallback(async () => {
+      if (createFolderPane === null || busy) return;
+      const pane = createFolderPane;
+      const target = pane === "left" ? left : right;
+      const name = folderName.trim();
+      if (!name || (folderAutoOrganize && !folderKeyword.trim())) return;
+      setBusy(true);
+      setError(null);
+      try {
+        const path = await createEntry(target.state.path, "directory", name);
+        setCreateFolderPane(null);
+        target.refresh();
+        clearOrganizeUndo();
+        if (folderAutoOrganize) {
+          const result = await organizeByKeyword(target.state.path, path, folderKeyword, setTransferTaskId);
+          finishOrganization(result, path);
+        } else {
+          const message = t("createdFolder", { name });
+          setNotice(message);
+          onSuccess(message);
+        }
+      } catch (operationError) {
+        setError(errorMessage(operationError, t("unableCreateEntry")));
+      } finally {
+        setBusy(false);
+      }
+    }, [
+      busy,
+      clearOrganizeUndo,
+      createFolderPane,
+      finishOrganization,
+      folderAutoOrganize,
+      folderKeyword,
+      folderName,
+      left,
+      onSuccess,
+      right,
+      t,
+    ]);
+
+    const beginOrganize = useCallback((pane: PaneId, entry: DirectoryEntry) => {
+      if (busy || entry.kind !== "directory") return;
+      const target = pane === "left" ? left : right;
+      setContextMenu(null);
+      setError(null);
+      setOrganizeDialog({
+        sourceDirectory: target.state.path,
+        destinationDirectory: entry.path,
+        destinationName: entry.name,
+      });
+      setFolderKeyword("");
+    }, [busy, left, right]);
+
+    const organizeFromDialog = useCallback(async () => {
+      if (!organizeDialog || busy || !folderKeyword.trim()) return;
+      const dialog = organizeDialog;
+      setBusy(true);
+      setError(null);
+      try {
+        const result = await organizeByKeyword(
+          dialog.sourceDirectory,
+          dialog.destinationDirectory,
+          folderKeyword,
+          setTransferTaskId,
+        );
+        setOrganizeDialog(null);
+        finishOrganization(result, dialog.destinationDirectory);
+      } catch (operationError) {
+        setError(errorMessage(operationError, t("unableOrganize")));
+      } finally {
+        setBusy(false);
+      }
+    }, [busy, finishOrganization, folderKeyword, organizeDialog, t]);
+
     const createNewEntry = useCallback(async (
       pane: PaneId,
-      kind: "directory" | "text_file" | "empty_file",
+      kind: "text_file" | "empty_file",
     ) => {
       if (busy) return;
       const target = pane === "left" ? left : right;
@@ -1147,7 +1314,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
         setRenameTarget({
           path,
           name,
-          kind: kind === "directory" ? "directory" : "file",
+          kind: "file",
           extension: kind === "text_file" ? "txt" : null,
           size: 0,
           modifiedUnixMs: null,
@@ -1242,6 +1409,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
           }
         }
         const summary = t("recycledItems", { count: formatNumber(succeeded) });
+        if (succeeded > 0) clearOrganizeUndo();
         setNotice(summary);
         setRecycleTarget(failed);
         setError(failed.length > 0 ? t("recycleFailures", { count: formatNumber(failed.length) }) : null);
@@ -1252,7 +1420,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
       } finally {
         setBusy(false);
       }
-    }, [busy, formatNumber, onSuccess, recycleTarget, refreshBoth, t]);
+    }, [busy, clearOrganizeUndo, formatNumber, onSuccess, recycleTarget, refreshBoth, t]);
 
     const moveSelection = useCallback(
       (direction: DirectoryNavigationDirection, extend = false) => {
@@ -1467,6 +1635,9 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
       recycleSelection() {
         void beginRecycle();
       },
+      undo() {
+        void undoOrganization();
+      },
       togglePreview() {
         setPreviewOpen((current) => !current);
       },
@@ -1590,6 +1761,9 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
             <button className="icon-button" type="button" title={t("refresh")} aria-label={t("refresh")} onClick={active.refresh}>
               <RefreshCw size={15} />
             </button>
+            <button className="icon-button" type="button" title={t("newFolder")} aria-label={t("newFolder")} disabled={busy} onClick={() => beginCreateFolder(activePane)}>
+              <FolderPlus size={15} />
+            </button>
             <button className="icon-button" type="button" title={t("copy")} aria-label={t("copy")} disabled={selectedCount === 0} onClick={() => void copyOrCut("copy")}>
               <Copy size={15} />
             </button>
@@ -1601,6 +1775,9 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
             </button>
             <button className="icon-button cancel-button" type="button" title={t("cancelFileOperation")} aria-label={t("cancelFileOperation")} disabled={transferTaskId === null} onClick={() => transferTaskId !== null && void cancelFileOperation(transferTaskId)}>
               <Square size={13} fill="currentColor" />
+            </button>
+            <button className="icon-button" type="button" title={t("undoOrganization")} aria-label={t("undoOrganization")} disabled={!organizeUndoAvailable || busy} onClick={() => void undoOrganization()}>
+              <Undo2 size={15} />
             </button>
             <button className="icon-button" type="button" title={t("rename")} aria-label={t("rename")} disabled={selectedCount !== 1 || !entryCanMutate(selectedEntry)} onClick={() => beginRename()}>
               <FilePenLine size={15} />
@@ -1884,7 +2061,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
 
         {routeVisible && contextMenu ? createPortal((
           <div ref={contextMenuRef} className="explorer-context-menu" role="menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
-            {!menuEntry ? <MenuButton icon={<FolderPlus size={14} />} onClick={() => void createNewEntry(contextMenu.pane, "directory")}>{t("newFolder")}</MenuButton> : null}
+            {!menuEntry ? <MenuButton icon={<FolderPlus size={14} />} onClick={() => beginCreateFolder(contextMenu.pane)}>{t("newFolder")}</MenuButton> : null}
             {!menuEntry ? <MenuButton icon={<FilePlus2 size={14} />} onClick={() => void createNewEntry(contextMenu.pane, "text_file")}>{t("newTextDocument")}</MenuButton> : null}
             {!menuEntry ? <MenuButton icon={<FilePlus2 size={14} />} onClick={() => void createNewEntry(contextMenu.pane, "empty_file")}>{t("newEmptyFile")}</MenuButton> : null}
             {!menuEntry ? <span className="menu-separator" /> : null}
@@ -1894,6 +2071,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
               <>
                 <MenuButton icon={<FolderInput size={14} />} onClick={() => { void left.openPath(menuEntry.path); setActivePane("left"); setContextMenu(null); }}>{t("openLeftPane")}</MenuButton>
                 <MenuButton icon={<FolderInput size={14} />} onClick={() => { void right.openPath(menuEntry.path); setActivePane("right"); setSplit(true); setContextMenu(null); }}>{t("openRightPane")}</MenuButton>
+                <MenuButton icon={<FolderInput size={14} />} onClick={() => beginOrganize(contextMenu.pane, menuEntry)}>{t("customOrganize")}</MenuButton>
               </>
             ) : null}
             <MenuButton icon={<ArrowLeftRight size={14} />} disabled={!comparisonSelection || !onCompareSelection} onClick={() => {
@@ -1927,6 +2105,52 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
               <input autoFocus aria-label={t("newName")} value={renameValue} onChange={(event) => setRenameValue(event.target.value)} />
               {error ? <div className="dialog-error" role="alert">{error}</div> : null}
               <div className="explorer-dialog-actions"><button className="command-button" type="button" onClick={() => setRenameTarget(null)}>{t("cancel")}</button><button className="command-button is-primary" type="submit" disabled={busy || !renameValue.trim()}>{t("rename")}</button></div>
+            </form>
+          </DialogShell>
+        ) : null}
+
+        {routeVisible && createFolderPane !== null ? (
+          <DialogShell title={t("newFolder")} icon={<FolderPlus size={17} />} onClose={() => { if (!busy) setCreateFolderPane(null); }}>
+            <form className="organize-form" onSubmit={(event) => { event.preventDefault(); void createFolder(); }}>
+              <label className="dialog-field">
+                <span>{t("folderName")}</span>
+                <input autoFocus aria-label={t("folderName")} value={folderName} onChange={(event) => setFolderName(event.target.value)} />
+              </label>
+              <label className="dialog-checkbox">
+                <input type="checkbox" checked={folderAutoOrganize} onChange={(event) => setFolderAutoOrganize(event.target.checked)} />
+                <span>{t("autoOrganizeFolder")}</span>
+              </label>
+              {folderAutoOrganize ? (
+                <label className="dialog-field">
+                  <span>{t("organizeKeyword")}</span>
+                  <input aria-label={t("organizeKeyword")} value={folderKeyword} onChange={(event) => setFolderKeyword(event.target.value)} />
+                </label>
+              ) : null}
+              {error ? <div className="dialog-error" role="alert">{error}</div> : null}
+              <div className="explorer-dialog-actions">
+                <button className="command-button" type="button" disabled={busy} onClick={() => setCreateFolderPane(null)}>{t("cancel")}</button>
+                <button className="command-button is-primary" type="submit" disabled={busy || !folderName.trim() || (folderAutoOrganize && !folderKeyword.trim())}>{t("create")}</button>
+              </div>
+            </form>
+          </DialogShell>
+        ) : null}
+
+        {routeVisible && organizeDialog ? (
+          <DialogShell title={t("customOrganize")} icon={<FolderInput size={17} />} onClose={() => { if (!busy) setOrganizeDialog(null); }}>
+            <form className="organize-form" onSubmit={(event) => { event.preventDefault(); void organizeFromDialog(); }}>
+              <div className="dialog-path">
+                <div><strong>{t("organizeDestination")}</strong> {displayPath(organizeDialog.destinationDirectory)}</div>
+                <div><strong>{t("organizeSource")}</strong> {displayPath(organizeDialog.sourceDirectory)}</div>
+              </div>
+              <label className="dialog-field">
+                <span>{t("organizeKeyword")}</span>
+                <input autoFocus aria-label={t("organizeKeyword")} value={folderKeyword} onChange={(event) => setFolderKeyword(event.target.value)} />
+              </label>
+              {error ? <div className="dialog-error" role="alert">{error}</div> : null}
+              <div className="explorer-dialog-actions">
+                <button className="command-button" type="button" disabled={busy} onClick={() => setOrganizeDialog(null)}>{t("cancel")}</button>
+                <button className="command-button is-primary" type="submit" disabled={busy || !folderKeyword.trim()}>{t("organize")}</button>
+              </div>
             </form>
           </DialogShell>
         ) : null}

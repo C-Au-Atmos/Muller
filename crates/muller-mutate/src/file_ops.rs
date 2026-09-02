@@ -84,15 +84,159 @@ pub fn transfer_entry(
     policy: &MutationPolicy,
     cancellation: &CancellationToken,
 ) -> Result<TransferReport, MutationError> {
-    transfer_entry_with_recycler(
+    transfer_entry_with_recycler_named(
         source,
-        destination_directory,
+        TransferDestination {
+            directory: destination_directory,
+            name: None,
+        },
         mode,
         conflict,
         policy,
         cancellation,
         &SystemRecycler,
     )
+}
+
+pub fn transfer_entry_as(
+    source: &Path,
+    destination_directory: &Path,
+    destination_name: &str,
+    mode: TransferMode,
+    conflict: ConflictStrategy,
+    policy: &MutationPolicy,
+    cancellation: &CancellationToken,
+) -> Result<TransferReport, MutationError> {
+    validate_name(destination_name)?;
+    transfer_entry_with_recycler_named(
+        source,
+        TransferDestination {
+            directory: destination_directory,
+            name: Some(OsStr::new(destination_name)),
+        },
+        mode,
+        conflict,
+        policy,
+        cancellation,
+        &SystemRecycler,
+    )
+}
+
+struct TransferDestination<'a> {
+    directory: &'a Path,
+    name: Option<&'a OsStr>,
+}
+
+#[cfg(test)]
+fn transfer_entry_with_recycler(
+    source: &Path,
+    destination_directory: &Path,
+    mode: TransferMode,
+    conflict: ConflictStrategy,
+    policy: &MutationPolicy,
+    cancellation: &CancellationToken,
+    recycler: &impl Recycler,
+) -> Result<TransferReport, MutationError> {
+    transfer_entry_with_recycler_named(
+        source,
+        TransferDestination {
+            directory: destination_directory,
+            name: None,
+        },
+        mode,
+        conflict,
+        policy,
+        cancellation,
+        recycler,
+    )
+}
+
+fn transfer_entry_with_recycler_named(
+    source: &Path,
+    destination: TransferDestination<'_>,
+    mode: TransferMode,
+    conflict: ConflictStrategy,
+    policy: &MutationPolicy,
+    cancellation: &CancellationToken,
+    recycler: &impl Recycler,
+) -> Result<TransferReport, MutationError> {
+    let source = policy.validate_entry(source)?;
+    let destination_directory = policy.validate_directory(destination.directory)?;
+    let source_name = source
+        .file_name()
+        .ok_or_else(|| operation_error(&source, "cannot transfer a filesystem root"))?;
+    let requested_name = destination.name.unwrap_or(source_name);
+    let requested_destination = destination_directory.join(requested_name);
+    if source.is_dir() && path_is_same_or_descendant(&destination_directory, &source) {
+        return Err(operation_error(
+            &source,
+            "cannot copy or move a directory into itself",
+        ));
+    }
+    if mode == TransferMode::Move && same_path(&source, &requested_destination) {
+        return Ok(skipped_report(source.clone(), source));
+    }
+
+    let snapshot = snapshot_tree(&source, policy, cancellation)?;
+    let (destination, replaced) =
+        resolve_destination(&source, requested_destination, conflict, policy)?;
+    if destination == source {
+        return Ok(skipped_report(source.clone(), source));
+    }
+    if mode == TransferMode::Move {
+        match try_direct_move(&source, &destination, replaced) {
+            Ok(warning) => {
+                return Ok(TransferReport {
+                    source,
+                    destination,
+                    outcome: TransferOutcome::Moved,
+                    replaced,
+                    warning,
+                    source_retained: false,
+                });
+            }
+            Err(error) if is_cross_device(&error) => {}
+            Err(source_error) => {
+                return Err(MutationError::Operation {
+                    path: source,
+                    message: source_error.to_string(),
+                });
+            }
+        }
+    }
+
+    let staged = unique_sibling(&destination_directory, "stage")?;
+    if let Err(error) = copy_snapshot(&source, &staged, &snapshot, policy, cancellation) {
+        remove_generated_path(&staged);
+        return Err(error);
+    }
+    if cancellation.is_cancelled() {
+        remove_generated_path(&staged);
+        return Err(MutationError::Cancelled);
+    }
+    let mut warning = commit_staged(&staged, &destination, replaced)?;
+
+    let mut source_retained = mode == TransferMode::Copy;
+    if mode == TransferMode::Move
+        && let Err(message) = recycler.recycle(&source)
+    {
+        source_retained = true;
+        warning = Some(format!(
+            "destination was verified, but the source could not be recycled: {message}"
+        ));
+    }
+    Ok(TransferReport {
+        source,
+        destination,
+        outcome: if mode == TransferMode::Copy {
+            TransferOutcome::Copied
+        } else {
+            TransferOutcome::Moved
+        },
+        replaced,
+        warning,
+        source_retained,
+    })
 }
 
 pub fn rename_entry(
@@ -167,93 +311,6 @@ pub fn recycle_entry(
     cancellation: &CancellationToken,
 ) -> Result<PathBuf, MutationError> {
     recycle_entry_with(expectation, policy, cancellation, &SystemRecycler)
-}
-
-fn transfer_entry_with_recycler(
-    source: &Path,
-    destination_directory: &Path,
-    mode: TransferMode,
-    conflict: ConflictStrategy,
-    policy: &MutationPolicy,
-    cancellation: &CancellationToken,
-    recycler: &impl Recycler,
-) -> Result<TransferReport, MutationError> {
-    let source = policy.validate_entry(source)?;
-    let destination_directory = policy.validate_directory(destination_directory)?;
-    let source_name = source
-        .file_name()
-        .ok_or_else(|| operation_error(&source, "cannot transfer a filesystem root"))?;
-    let requested_destination = destination_directory.join(source_name);
-    if source.is_dir() && path_is_same_or_descendant(&destination_directory, &source) {
-        return Err(operation_error(
-            &source,
-            "cannot copy or move a directory into itself",
-        ));
-    }
-    if mode == TransferMode::Move && same_path(&source, &requested_destination) {
-        return Ok(skipped_report(source.clone(), source));
-    }
-
-    let snapshot = snapshot_tree(&source, policy, cancellation)?;
-    let (destination, replaced) =
-        resolve_destination(&source, requested_destination, conflict, policy)?;
-    if destination == source {
-        return Ok(skipped_report(source.clone(), source));
-    }
-    if mode == TransferMode::Move {
-        match try_direct_move(&source, &destination, replaced) {
-            Ok(warning) => {
-                return Ok(TransferReport {
-                    source,
-                    destination,
-                    outcome: TransferOutcome::Moved,
-                    replaced,
-                    warning,
-                    source_retained: false,
-                });
-            }
-            Err(error) if is_cross_device(&error) => {}
-            Err(source_error) => {
-                return Err(MutationError::Operation {
-                    path: source,
-                    message: source_error.to_string(),
-                });
-            }
-        }
-    }
-
-    let staged = unique_sibling(&destination_directory, "stage")?;
-    if let Err(error) = copy_snapshot(&source, &staged, &snapshot, policy, cancellation) {
-        remove_generated_path(&staged);
-        return Err(error);
-    }
-    if cancellation.is_cancelled() {
-        remove_generated_path(&staged);
-        return Err(MutationError::Cancelled);
-    }
-    let mut warning = commit_staged(&staged, &destination, replaced)?;
-
-    let mut source_retained = mode == TransferMode::Copy;
-    if mode == TransferMode::Move
-        && let Err(message) = recycler.recycle(&source)
-    {
-        source_retained = true;
-        warning = Some(format!(
-            "destination was verified, but the source could not be recycled: {message}"
-        ));
-    }
-    Ok(TransferReport {
-        source,
-        destination,
-        outcome: if mode == TransferMode::Copy {
-            TransferOutcome::Copied
-        } else {
-            TransferOutcome::Moved
-        },
-        replaced,
-        warning,
-        source_retained,
-    })
 }
 
 fn recycle_entry_with(
