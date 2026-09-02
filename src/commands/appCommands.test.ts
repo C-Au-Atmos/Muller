@@ -29,6 +29,8 @@ describe("application keymap", () => {
     expect(resolveAppCommand({ key: "ArrowRight" })).toBe("moveRight");
     expect(resolveAppCommand({ key: "ArrowLeft", ctrlKey: true })).toBe("activateLeftPane");
     expect(resolveAppCommand({ key: "ArrowRight", ctrlKey: true })).toBe("activateRightPane");
+    expect(resolveAppCommand({ key: "ArrowLeft", altKey: true })).toBe("goBack");
+    expect(resolveAppCommand({ key: "ArrowRight", altKey: true })).toBe("goForward");
     expect(resolveAppCommand({ key: "PageUp" })).toBe("movePagePrevious");
     expect(resolveAppCommand({ key: "ArrowDown", ctrlKey: true })).toBeNull();
     expect(resolveAppCommand({ key: "ArrowDown", altKey: true })).toBe("nextDifference");
@@ -44,5 +46,6 @@ describe("application keymap", () => {
     expect(resolveAppCommand({ key: "F5" })).toBe("refresh");
     expect(resolveAppCommand({ key: " " })).toBe("togglePreview");
     expect(resolveAppCommand({ key: "a", ctrlKey: true })).toBe("selectAll");
+    expect(resolveAppCommand({ key: "z", ctrlKey: true })).toBe("undo");
   });
 });

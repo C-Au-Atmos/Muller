@@ -312,6 +312,7 @@ export function App({ initialPath }: AppProps) {
     totalEntries: 0,
     searchBoth: false,
     canSearchBoth: false,
+    canUndo: false,
   });
   const [browseAddress, setBrowseAddress] = useState(initialPath);
   const [minSize, setMinSize] = useState("1024");
@@ -809,11 +810,24 @@ export function App({ initialPath }: AppProps) {
     flowRef.current?.setState(visualState);
   }, [visualState]);
 
+  const navigate = useCallback((direction: "enter" | "back") => {
+    const nextDepth = direction === "enter" ? depth + 1 : Math.max(0, depth - 1);
+    setDepth(nextDepth);
+    flowRef.current?.navigate(direction, nextDepth);
+  }, [depth]);
+
   useEffect(() => {
     const handleKeyboard = (event: KeyboardEvent) => {
       const command = resolveAppCommand(event);
       if (!command) return;
       const target = event.target;
+      if (
+        (command === "goBack" || command === "goForward") &&
+        target instanceof HTMLElement &&
+        target.closest(".workspace-tab")
+      ) {
+        return;
+      }
       if (
         target instanceof HTMLElement &&
         target.closest('[role="dialog"], [role="menu"]')
@@ -874,11 +888,17 @@ export function App({ initialPath }: AppProps) {
         "renameSelection",
         "recycleSelection",
         "goUp",
+        "goBack",
+        "goForward",
+        "undo",
         "refresh",
         "togglePreview",
         "selectAll",
       ]).has(command);
       if (fileCommand && !addressMode && !(activeTool === "duplicates" && command === "selectAll")) return;
+      if (command === "goBack" && !explorerNavigation.canBack) return;
+      if (command === "goForward" && !explorerNavigation.canForward) return;
+      if (command === "undo" && (!explorerMode || !browseNavigation.canUndo)) return;
       const paneCommand =
         command === "activateLeftPane" || command === "activateRightPane";
       if (paneCommand && (!addressMode || !explorerNavigation.split)) return;
@@ -995,6 +1015,17 @@ export function App({ initialPath }: AppProps) {
         case "goUp":
           browseRef.current?.up();
           break;
+        case "goBack":
+          explorerRef.current?.back();
+          navigate("back");
+          break;
+        case "goForward":
+          explorerRef.current?.forward();
+          navigate("enter");
+          break;
+        case "undo":
+          browseRef.current?.undo();
+          break;
         case "refresh":
           if (activeTool === "compare") compareRef.current?.refresh();
           else browseRef.current?.refresh();
@@ -1025,8 +1056,14 @@ export function App({ initialPath }: AppProps) {
     cancelScan,
     dispatchWorkspace,
     explorerMode,
+    browseNavigation.canUndo,
+    browseNavigation.canBack,
+    browseNavigation.canForward,
+    compareNavigation.canBack,
+    compareNavigation.canForward,
     isThisPc,
     moveDuplicateSelection,
+    navigate,
     openDuplicateSearch,
     play,
     scanActive,
@@ -1072,12 +1109,6 @@ export function App({ initialPath }: AppProps) {
     });
     return () => { current = false; };
   }, [browseNavigation.path, explorerMode, filterOpen, isThisPc]);
-
-  const navigate = (direction: "enter" | "back") => {
-    const nextDepth = direction === "enter" ? depth + 1 : Math.max(0, depth - 1);
-    setDepth(nextDepth);
-    flowRef.current?.navigate(direction, nextDepth);
-  };
 
   const handleStartScan = (event: FormEvent) => {
     event.preventDefault();

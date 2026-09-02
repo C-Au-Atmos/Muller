@@ -10,6 +10,9 @@ interface MockPayload {
   item?: string[];
   input?: string;
   path?: string;
+  directory?: string;
+  kind?: string;
+  name?: string;
   message?: string;
   behavior?: "hide" | "quit";
   enabled?: boolean;
@@ -30,7 +33,11 @@ interface MockPayload {
     rightRoot?: string;
     roots?: string[];
     recursive?: boolean;
+    sourceDirectory?: string;
+    keyword?: string;
+    entries?: { source: string; destination: string }[];
   };
+  entries?: { source: string; destination: string }[];
   sessionId?: number;
   taskId?: number;
   offset?: number;
@@ -64,6 +71,9 @@ interface MockState {
     destinationDirectory: string;
     mode: string;
   }[];
+  createEntryRequests: { directory: string; kind: string; name: string }[];
+  organizeRequests: { sourceDirectory: string; destinationDirectory: string; keyword: string }[];
+  organizeUndoRequests: { source: string; destination: string }[][];
   extractRequests: { archive: string; destinationDirectory: string; mode: string }[];
   nativeDragPaths: string[][];
   fileDiffRequests: { leftPath: string; rightPath: string }[];
@@ -127,6 +137,9 @@ async function installDesktopMock(
       searchCalls: [],
       expandedSearchCalls: [],
       transferRequests: [],
+      createEntryRequests: [],
+      organizeRequests: [],
+      organizeUndoRequests: [],
       extractRequests: [],
       nativeDragPaths: [],
       fileDiffRequests: [],
@@ -414,6 +427,47 @@ async function installDesktopMock(
             mode: request?.mode ?? "",
           });
           return { reports: [{ outcome: request?.mode ?? "copy" }], failures: [] };
+        }
+        if (command === "create_entry") {
+          state.createEntryRequests.push({
+            directory: payload.directory ?? "",
+            kind: payload.kind ?? "",
+            name: payload.name ?? "",
+          });
+          return `${payload.directory ?? "D:\\Muller"}\\${payload.name ?? "New folder"}`;
+        }
+        if (command === "organize_by_keyword") {
+          const request = payload.request;
+          const sourceDirectory = request?.sourceDirectory ?? "D:\\Muller";
+          const destinationDirectory = request?.destinationDirectory ?? "D:\\Muller\\Collected";
+          const keyword = request?.keyword ?? "";
+          state.organizeRequests.push({ sourceDirectory, destinationDirectory, keyword });
+          return {
+            reports: [{
+              source: `${sourceDirectory}\\Alpha.txt`,
+              destination: `${destinationDirectory}\\Alpha.txt`,
+              outcome: "moved",
+              replaced: false,
+              warning: null,
+              sourceRetained: false,
+            }],
+            failures: [],
+          };
+        }
+        if (command === "undo_organize_by_keyword") {
+          const entries = payload.request?.entries ?? payload.entries ?? [];
+          state.organizeUndoRequests.push(entries);
+          return {
+            reports: entries.map((entry) => ({
+              source: entry.destination,
+              destination: entry.source,
+              outcome: "moved",
+              replaced: false,
+              warning: null,
+              sourceRetained: false,
+            })),
+            failures: [],
+          };
         }
         if (command === "extract_zip") {
           const request = payload.request;
@@ -1356,6 +1410,111 @@ test("Tab switches file focus between panes without a focus rectangle", async ({
   await expect(viewports.nth(1)).toHaveCSS("outline-style", "none");
   await page.keyboard.press("Shift+Tab");
   await expect(viewports.nth(0)).toBeFocused();
+});
+
+test("new folders can organize matching files and Ctrl+Z restores the last organization", async ({ page }) => {
+  await installDesktopMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "New folder", exact: true }).first().click();
+  const dialog = page.getByRole("dialog", { name: "New folder" });
+  await dialog.getByRole("textbox", { name: "Folder name" }).fill("Collected");
+  await dialog.getByRole("checkbox", { name: "Automatically organize matching files" }).check();
+  await dialog.getByRole("textbox", { name: "Keyword" }).fill("Alpha");
+  await dialog.getByRole("button", { name: "Create", exact: true }).click();
+
+  await expect.poll(async () => (await mockState(page)).createEntryRequests).toContainEqual({
+    directory: "D:\\Muller",
+    kind: "directory",
+    name: "Collected",
+  });
+  await expect.poll(async () => (await mockState(page)).organizeRequests).toContainEqual({
+    sourceDirectory: "D:\\Muller",
+    destinationDirectory: "D:\\Muller\\Collected",
+    keyword: "Alpha",
+  });
+  await expect(page.getByRole("status").first()).toContainText("Moved 1 matching files into D:\\Muller\\Collected");
+
+  const undo = page.getByRole("button", { name: "Undo file organization", exact: true });
+  await expect(undo).toBeEnabled();
+  await page.keyboard.press("Control+z");
+  await expect.poll(async () => (await mockState(page)).organizeUndoRequests).toContainEqual([{
+    source: "D:\\Muller\\Alpha.txt",
+    destination: "D:\\Muller\\Collected\\Alpha.txt",
+  }]);
+  await expect(page.getByRole("status").first()).toContainText("Restored 1 organized files");
+  await expect(undo).toBeDisabled();
+});
+
+test("directory context menus expose custom keyword organization", async ({ page }) => {
+  await installDesktopMock(page);
+  await page.goto("/");
+
+  const destination = page.locator(".directory-list-viewport").first().locator(".directory-row:not(.is-placeholder)", { hasText: "Destination" });
+  await destination.click({ button: "right" });
+  const menu = page.getByRole("menu");
+  await menu.getByRole("menuitem", { name: "Custom organize", exact: true }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Custom organize" });
+  await expect(dialog).toContainText("Destination");
+  await dialog.getByRole("textbox", { name: "Keyword" }).fill("alpha");
+  await dialog.getByRole("button", { name: "Organize", exact: true }).click();
+
+  await expect.poll(async () => (await mockState(page)).organizeRequests).toContainEqual({
+    sourceDirectory: "D:\\Muller",
+    destinationDirectory: "D:\\Muller\\Destination",
+    keyword: "alpha",
+  });
+  await expect(page.getByRole("status").first()).toContainText("Moved 1 matching files into D:\\Muller\\Destination");
+});
+
+test("Alt+Arrow navigates browse and compare history while preserving edit and tab shortcuts", async ({ page }) => {
+  await installDesktopMock(page);
+  await page.goto("/");
+
+  const viewport = page.locator(".directory-list-viewport").first();
+  await viewport.locator(".directory-row:not(.is-placeholder)", { hasText: "Destination" }).dblclick();
+  await expect.poll(async () => (await mockState(page)).directoryQueries.at(-1)).toBe("D:\\Muller\\Destination");
+
+  await page.keyboard.press("Alt+ArrowLeft");
+  await expect.poll(async () => (await mockState(page)).directoryQueries.at(-1)).toBe("D:\\Muller");
+  await page.keyboard.press("Alt+ArrowRight");
+  await expect.poll(async () => (await mockState(page)).directoryQueries.at(-1)).toBe("D:\\Muller\\Destination");
+
+  const address = page.getByRole("combobox", { name: "Current directory" });
+  await page.locator(".breadcrumb-address__edit").click();
+  await expect(address).toBeFocused();
+  const beforeEdit = (await mockState(page)).directoryQueries.length;
+  await page.keyboard.press("Alt+ArrowLeft");
+  await page.waitForTimeout(80);
+  expect((await mockState(page)).directoryQueries.length).toBe(beforeEdit);
+  await address.press("Escape");
+
+  await page.keyboard.press("Control+t");
+  const tabs = page.locator(".workspace-tab");
+  await expect(tabs).toHaveCount(2);
+  await page.locator(".breadcrumb-address__edit").click();
+  await page.getByRole("combobox", { name: "Current directory" }).fill("D:\\Desktop");
+  await page.getByRole("combobox", { name: "Current directory" }).press("Enter");
+  await expect.poll(async () => (await mockState(page)).directoryQueries.at(-1)).toBe("D:\\Desktop");
+
+  const tabLabels = () => tabs.evaluateAll((elements) => elements.map((element) => element.textContent?.trim() ?? ""));
+  await expect.poll(tabLabels).toEqual(["Destination", "Desktop"]);
+  await tabs.first().focus();
+  await page.keyboard.press("Alt+ArrowRight");
+  await expect.poll(tabLabels).toEqual(["Desktop", "Destination"]);
+});
+
+test("Alt+Arrow navigates the compare workspace history", async ({ page }) => {
+  await installDesktopMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Compare", exact: true }).click();
+  const compareViewport = page.locator(".compare-workspace .directory-list-viewport").first();
+  await compareViewport.locator(".directory-row:not(.is-placeholder)", { hasText: "Destination" }).dblclick();
+  await expect.poll(async () => (await mockState(page)).directoryQueries.at(-1)).toBe("D:\\Muller\\Destination");
+  await page.keyboard.press("Alt+ArrowLeft");
+  await expect.poll(async () => (await mockState(page)).directoryQueries.at(-1)).toBe("D:\\Muller");
 });
 
 test("keyboard row navigation moves the focus surface with a spring", async ({ page }) => {

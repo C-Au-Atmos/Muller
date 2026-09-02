@@ -73,6 +73,47 @@ export async function transferDirectoryEntries(
   }
 }
 
+export async function organizeByKeyword(
+  sourceDirectory: string,
+  destinationDirectory: string,
+  keyword: string,
+  onTaskId?: (taskId: number | null) => void,
+): Promise<BatchTransferReport> {
+  requireDesktop();
+  nextTaskId = (nextTaskId + 1) % Number.MAX_SAFE_INTEGER;
+  const taskId = nextTaskId || 1;
+  onTaskId?.(taskId);
+  try {
+    return await invoke<BatchTransferReport>("organize_by_keyword", {
+      request: { taskId, sourceDirectory, destinationDirectory, keyword },
+    });
+  } finally {
+    onTaskId?.(null);
+  }
+}
+
+export interface OrganizeUndoEntry {
+  source: string;
+  destination: string;
+}
+
+export async function undoOrganizeByKeyword(
+  entries: readonly OrganizeUndoEntry[],
+  onTaskId?: (taskId: number | null) => void,
+): Promise<BatchTransferReport> {
+  requireDesktop();
+  nextTaskId = (nextTaskId + 1) % Number.MAX_SAFE_INTEGER;
+  const taskId = nextTaskId || 1;
+  onTaskId?.(taskId);
+  try {
+    return await invoke<BatchTransferReport>("undo_organize_by_keyword", {
+      request: { taskId, entries },
+    });
+  } finally {
+    onTaskId?.(null);
+  }
+}
+
 export async function cancelFileOperation(taskId: number): Promise<boolean> {
   if (!isTauri()) return false;
   return invoke("cancel_file_operation", { taskId });
@@ -117,9 +158,9 @@ export async function openNativePath(
 
 export type CreateEntryKind = "directory" | "text_file" | "empty_file";
 
-export async function createEntry(directory: string, kind: CreateEntryKind): Promise<string> {
+export async function createEntry(directory: string, kind: CreateEntryKind, name?: string): Promise<string> {
   requireDesktop();
-  return invoke<string>("create_entry", { directory, kind });
+  return invoke<string>("create_entry", { directory, kind, name });
 }
 
 export interface DirectoryStatistics {
