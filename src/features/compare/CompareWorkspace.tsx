@@ -310,6 +310,7 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
       totalEntries: 0,
       searchBoth: false,
       canSearchBoth: true,
+      canUndo: false,
     });
     const [browserComparisonSelection, setBrowserComparisonSelection] = useState<BrowseComparisonRequest | null>(null);
     const previousFolderStatus = useRef(folderDiff.state.status);

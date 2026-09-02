@@ -11,7 +11,7 @@ use muller_core::CancellationToken;
 use muller_mutate::{
     ConflictStrategy, EntryExpectation, MutationPolicy, TransferMode, TransferReport,
     recycle_entry as recycle_entry_core, rename_entry as rename_entry_core,
-    transfer_entry as transfer_entry_core,
+    transfer_entry as transfer_entry_core, transfer_entry_as as transfer_entry_as_core,
 };
 use serde::{Deserialize, Serialize};
 
@@ -42,6 +42,29 @@ pub struct TransferDirectoryEntriesRequest {
     destination_directory: PathBuf,
     mode: TransferMode,
     conflict: ConflictStrategy,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OrganizeByKeywordRequest {
+    task_id: u64,
+    source_directory: PathBuf,
+    destination_directory: PathBuf,
+    keyword: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OrganizeUndoEntry {
+    source: PathBuf,
+    destination: PathBuf,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UndoOrganizeRequest {
+    task_id: u64,
+    entries: Vec<OrganizeUndoEntry>,
 }
 
 #[derive(Debug, Serialize)]
@@ -207,6 +230,40 @@ pub async fn transfer_directory_entries(
 }
 
 #[tauri::command]
+pub async fn organize_by_keyword(
+    manager: tauri::State<'_, FileOperationManager>,
+    request: OrganizeByKeywordRequest,
+) -> Result<BatchTransferReport, String> {
+    let manager = manager.inner().clone();
+    let cancellation = manager.begin(request.task_id)?;
+    let task_id = request.task_id;
+    let result = run_blocking(move || {
+        organize_files_by_keyword(
+            &request.source_directory,
+            &request.destination_directory,
+            &request.keyword,
+            &cancellation,
+        )
+    })
+    .await;
+    manager.finish(task_id);
+    result
+}
+
+#[tauri::command]
+pub async fn undo_organize_by_keyword(
+    manager: tauri::State<'_, FileOperationManager>,
+    request: UndoOrganizeRequest,
+) -> Result<BatchTransferReport, String> {
+    let manager = manager.inner().clone();
+    let cancellation = manager.begin(request.task_id)?;
+    let task_id = request.task_id;
+    let result = run_blocking(move || undo_organized_files(request.entries, &cancellation)).await;
+    manager.finish(task_id);
+    result
+}
+
+#[tauri::command]
 pub fn cancel_file_operation(
     manager: tauri::State<'_, FileOperationManager>,
     task_id: u64,
@@ -243,7 +300,11 @@ pub async fn recycle_entry(expectation: EntryExpectation) -> Result<PathBuf, Str
 }
 
 #[tauri::command]
-pub async fn create_entry(directory: PathBuf, kind: CreateEntryKind) -> Result<PathBuf, String> {
+pub async fn create_entry(
+    directory: PathBuf,
+    kind: CreateEntryKind,
+    name: Option<String>,
+) -> Result<PathBuf, String> {
     run_blocking(move || {
         let directory = canonical_directory(&directory)?;
         let (stem, extension) = match kind {
@@ -251,7 +312,17 @@ pub async fn create_entry(directory: PathBuf, kind: CreateEntryKind) -> Result<P
             CreateEntryKind::TextFile => ("New Text Document", ".txt"),
             CreateEntryKind::EmptyFile => ("New file", ""),
         };
-        let path = unique_destination(&directory, stem, extension);
+        let path = match name {
+            Some(name) => {
+                validate_entry_name(&name)?;
+                let path = directory.join(name);
+                if path.exists() {
+                    return Err(format!("destination already exists: {}", path.display()));
+                }
+                path
+            }
+            None => unique_destination(&directory, stem, extension),
+        };
         match kind {
             CreateEntryKind::Directory => fs::create_dir(&path),
             CreateEntryKind::TextFile | CreateEntryKind::EmptyFile => File::create(&path).map(drop),
@@ -393,6 +464,213 @@ fn canonical_directory(path: &Path) -> Result<PathBuf, String> {
         return Err(format!("{} is not a writable directory", path.display()));
     }
     fs::canonicalize(path).map_err(|error| format!("cannot resolve {}: {error}", path.display()))
+}
+
+fn organize_files_by_keyword(
+    source_directory: &Path,
+    destination_directory: &Path,
+    keyword: &str,
+    cancellation: &CancellationToken,
+) -> Result<BatchTransferReport, String> {
+    let source_directory = canonical_directory(source_directory)?;
+    let destination_directory = canonical_directory(destination_directory)?;
+    let keyword = keyword.trim();
+    if keyword.is_empty() {
+        return Err("keyword cannot be empty".to_owned());
+    }
+    if same_path(&source_directory, &destination_directory)
+        || !path_is_same_or_descendant(&destination_directory, &source_directory)
+    {
+        return Err("the destination directory must be inside the source directory".to_owned());
+    }
+
+    let (sources, mut failures) = collect_keyword_matches(
+        &source_directory,
+        &destination_directory,
+        keyword,
+        cancellation,
+    )?;
+    let mut reports = Vec::with_capacity(sources.len());
+    for source in sources {
+        if cancellation.is_cancelled() {
+            return Err("file organization cancelled".to_owned());
+        }
+        match transfer_entry_core(
+            &source,
+            &destination_directory,
+            TransferMode::Move,
+            ConflictStrategy::KeepBoth,
+            &MutationPolicy::default(),
+            cancellation,
+        ) {
+            Ok(report) => reports.push(report),
+            Err(error) => failures.push(TransferFailure {
+                source,
+                message: error.to_string(),
+            }),
+        }
+    }
+    Ok(BatchTransferReport { reports, failures })
+}
+
+fn collect_keyword_matches(
+    source_directory: &Path,
+    destination_directory: &Path,
+    keyword: &str,
+    cancellation: &CancellationToken,
+) -> Result<(Vec<PathBuf>, Vec<TransferFailure>), String> {
+    let needle = keyword.to_lowercase();
+    let mut stack = vec![source_directory.to_path_buf()];
+    let mut matches = Vec::new();
+    let mut failures = Vec::new();
+    while let Some(directory) = stack.pop() {
+        if cancellation.is_cancelled() {
+            return Err("file organization cancelled".to_owned());
+        }
+        let entries = match fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if same_path(&directory, source_directory) => {
+                return Err(format!("cannot read {}: {error}", directory.display()));
+            }
+            Err(error) => {
+                failures.push(TransferFailure {
+                    source: directory,
+                    message: format!("cannot read directory: {error}"),
+                });
+                continue;
+            }
+        };
+        for entry in entries {
+            if cancellation.is_cancelled() {
+                return Err("file organization cancelled".to_owned());
+            }
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    failures.push(TransferFailure {
+                        source: directory.clone(),
+                        message: format!("cannot inspect directory entry: {error}"),
+                    });
+                    continue;
+                }
+            };
+            let path = entry.path();
+            if path_is_same_or_descendant(&path, destination_directory) {
+                continue;
+            }
+            let metadata = match fs::symlink_metadata(&path) {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    failures.push(TransferFailure {
+                        source: path,
+                        message: format!("cannot inspect entry: {error}"),
+                    });
+                    continue;
+                }
+            };
+            if metadata.file_type().is_symlink() {
+                continue;
+            }
+            if metadata.is_dir() {
+                stack.push(path);
+            } else if metadata.is_file()
+                && path
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().to_lowercase().contains(&needle))
+            {
+                matches.push(path);
+            }
+        }
+    }
+    matches.sort_by(|left, right| left.to_string_lossy().cmp(&right.to_string_lossy()));
+    Ok((matches, failures))
+}
+
+fn undo_organized_files(
+    entries: Vec<OrganizeUndoEntry>,
+    cancellation: &CancellationToken,
+) -> Result<BatchTransferReport, String> {
+    let mut reports = Vec::with_capacity(entries.len());
+    let mut failures = Vec::new();
+    for entry in entries.into_iter().rev() {
+        if cancellation.is_cancelled() {
+            return Err("file organization undo cancelled".to_owned());
+        }
+        let Some(parent) = entry.source.parent() else {
+            failures.push(TransferFailure {
+                source: entry.destination,
+                message: "the original path has no parent directory".to_owned(),
+            });
+            continue;
+        };
+        let Some(name) = entry.source.file_name().and_then(|value| value.to_str()) else {
+            failures.push(TransferFailure {
+                source: entry.destination,
+                message: "the original file name is not valid Unicode".to_owned(),
+            });
+            continue;
+        };
+        match transfer_entry_as_core(
+            &entry.destination,
+            parent,
+            name,
+            TransferMode::Move,
+            ConflictStrategy::Fail,
+            &MutationPolicy::default(),
+            cancellation,
+        ) {
+            Ok(report) => reports.push(report),
+            Err(error) => failures.push(TransferFailure {
+                source: entry.destination,
+                message: error.to_string(),
+            }),
+        }
+    }
+    Ok(BatchTransferReport { reports, failures })
+}
+
+fn validate_entry_name(name: &str) -> Result<(), String> {
+    let path = Path::new(name);
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains('\0')
+        || path.components().count() != 1
+        || !matches!(path.components().next(), Some(Component::Normal(_)))
+    {
+        return Err("the new name is invalid".to_owned());
+    }
+    #[cfg(windows)]
+    {
+        if name.contains(['<', '>', ':', '"', '/', '\\', '|', '?', '*'])
+            || name.ends_with(['.', ' '])
+        {
+            return Err("the new name is invalid".to_owned());
+        }
+    }
+    Ok(())
+}
+
+fn same_path(left: &Path, right: &Path) -> bool {
+    path_key(left) == path_key(right)
+}
+
+fn path_is_same_or_descendant(path: &Path, parent: &Path) -> bool {
+    let path = path_key(path);
+    let parent = path_key(parent).trim_end_matches(['\\', '/']).to_owned();
+    path == parent
+        || path
+            .strip_prefix(&parent)
+            .is_some_and(|rest| rest.starts_with(['\\', '/']))
+}
+
+fn path_key(path: &Path) -> String {
+    let value = path.to_string_lossy().replace('/', "\\");
+    if cfg!(windows) {
+        value.to_lowercase()
+    } else {
+        value
+    }
 }
 
 fn unique_destination(directory: &Path, stem: &str, extension: &str) -> PathBuf {
@@ -886,7 +1164,8 @@ mod tests {
 
     use super::{
         ArchiveRequest, ExtractArchiveRequest, ExtractDestinationMode, FileOperationManager,
-        collect_directory_statistics, create_zip_archive, extract_zip_archive, unique_destination,
+        OrganizeUndoEntry, collect_directory_statistics, create_zip_archive, extract_zip_archive,
+        organize_files_by_keyword, undo_organized_files, unique_destination,
         validate_archive_relative,
     };
 
@@ -927,6 +1206,115 @@ mod tests {
                 .expect("file name"),
             "New Text Document (3).txt"
         );
+    }
+
+    #[test]
+    fn keyword_organization_moves_recursive_matches_and_undoes_them() {
+        let fixture = tempdir().expect("fixture");
+        let source = fixture.path().join("source");
+        let nested = source.join("nested");
+        let destination = source.join("Collected");
+        fs::create_dir_all(&nested).expect("source directories");
+        fs::create_dir(&destination).expect("destination directory");
+        fs::write(source.join("Report.txt"), b"root").expect("root match");
+        fs::write(nested.join("weekly-report.md"), b"nested").expect("nested match");
+        fs::write(nested.join("notes.txt"), b"other").expect("non-match");
+        fs::write(destination.join("Report.txt"), b"existing").expect("destination entry");
+
+        let result = organize_files_by_keyword(
+            &source,
+            &destination,
+            "REPORT",
+            &CancellationToken::default(),
+        )
+        .expect("organize files");
+        assert_eq!(result.reports.len(), 2);
+        assert!(result.failures.is_empty());
+        assert!(!source.join("Report.txt").exists());
+        assert!(!nested.join("weekly-report.md").exists());
+        assert!(nested.join("notes.txt").exists());
+        assert!(destination.join("Report.txt").exists());
+        assert!(destination.join("Report - Copy.txt").exists());
+        assert!(destination.join("weekly-report.md").exists());
+
+        let undo = result
+            .reports
+            .iter()
+            .map(|report| OrganizeUndoEntry {
+                source: report.source.clone(),
+                destination: report.destination.clone(),
+            })
+            .collect();
+        let undone = undo_organized_files(undo, &CancellationToken::default()).expect("undo");
+        assert_eq!(undone.reports.len(), 2);
+        assert!(undone.failures.is_empty());
+        assert!(source.join("Report.txt").exists());
+        assert!(nested.join("weekly-report.md").exists());
+        assert!(!destination.join("Report - Copy.txt").exists());
+    }
+
+    #[test]
+    fn keyword_organization_keeps_existing_destination_files() {
+        let fixture = tempdir().expect("fixture");
+        let source = fixture.path().join("source");
+        let destination = source.join("Collected");
+        fs::create_dir_all(&destination).expect("source directories");
+        fs::write(source.join("invoice.pdf"), b"new").expect("source match");
+        fs::write(destination.join("invoice.pdf"), b"old").expect("existing destination");
+
+        let result = organize_files_by_keyword(
+            &source,
+            &destination,
+            "invoice",
+            &CancellationToken::default(),
+        )
+        .expect("organize files");
+        assert_eq!(result.reports.len(), 1);
+        assert!(result.failures.is_empty());
+        assert_eq!(
+            fs::read(destination.join("invoice.pdf")).expect("old file"),
+            b"old"
+        );
+        assert_eq!(
+            fs::read(destination.join("invoice - Copy.pdf")).expect("copied file"),
+            b"new"
+        );
+        assert!(!source.join("invoice.pdf").exists());
+    }
+
+    #[test]
+    fn keyword_organization_undo_does_not_overwrite_an_external_file() {
+        let fixture = tempdir().expect("fixture");
+        let source = fixture.path().join("source");
+        let destination = source.join("Collected");
+        fs::create_dir_all(&destination).expect("source directories");
+        fs::write(source.join("invoice.pdf"), b"organized source").expect("source match");
+
+        let result = organize_files_by_keyword(
+            &source,
+            &destination,
+            "invoice",
+            &CancellationToken::default(),
+        )
+        .expect("organize files");
+        let undo = result
+            .reports
+            .iter()
+            .map(|report| OrganizeUndoEntry {
+                source: report.source.clone(),
+                destination: report.destination.clone(),
+            })
+            .collect();
+        fs::write(source.join("invoice.pdf"), b"external file").expect("external file");
+
+        let undone = undo_organized_files(undo, &CancellationToken::default()).expect("undo");
+        assert!(undone.reports.is_empty());
+        assert_eq!(undone.failures.len(), 1);
+        assert_eq!(
+            fs::read(source.join("invoice.pdf")).expect("external file remains"),
+            b"external file"
+        );
+        assert!(destination.join("invoice.pdf").exists());
     }
 
     #[test]

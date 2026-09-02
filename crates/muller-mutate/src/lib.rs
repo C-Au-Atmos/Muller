@@ -18,7 +18,7 @@ pub use document::{EditableDocument, EditableDocumentInfo, MAX_EDITABLE_BYTES, o
 pub use error::MutationError;
 pub use file_ops::{
     ConflictStrategy, EntryExpectation, EntryKind, TransferMode, TransferOutcome, TransferReport,
-    recycle_entry, rename_entry, transfer_entry,
+    recycle_entry, rename_entry, transfer_entry, transfer_entry_as,
 };
 pub use fingerprint::{FileFingerprint, fingerprint_file, parse_hash_hex};
 pub use policy::MutationPolicy;

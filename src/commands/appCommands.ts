@@ -29,7 +29,10 @@ export type AppCommandId =
   | "findInDirectory"
   | "selectAll"
   | "activateLeftPane"
-  | "activateRightPane";
+  | "activateRightPane"
+  | "goBack"
+  | "goForward"
+  | "undo";
 
 interface KeyDescriptor extends ImeEventDescriptor {
   key: string;
@@ -59,6 +62,8 @@ const APP_KEYMAP: readonly CommandBinding[] = [
   { command: "moveRight", key: "ArrowRight" },
   { command: "activateLeftPane", key: "ArrowLeft", ctrlKey: true },
   { command: "activateRightPane", key: "ArrowRight", ctrlKey: true },
+  { command: "goBack", key: "ArrowLeft", altKey: true },
+  { command: "goForward", key: "ArrowRight", altKey: true },
   { command: "movePageNext", key: "PageDown" },
   { command: "movePagePrevious", key: "PageUp" },
   { command: "openSelection", key: "Enter" },
@@ -71,6 +76,7 @@ const APP_KEYMAP: readonly CommandBinding[] = [
   { command: "refresh", key: "F5" },
   { command: "togglePreview", key: " " },
   { command: "selectAll", key: "a", ctrlKey: true },
+  { command: "undo", key: "z", ctrlKey: true },
 ];
 
 export function resolveAppCommand(event: KeyDescriptor): AppCommandId | null {

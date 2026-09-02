@@ -31,8 +31,8 @@ use explorer::{
 };
 use file_operations::{
     FileOperationManager, cancel_file_operation, create_entry, create_zip, directory_statistics,
-    extract_zip, open_native_path, open_terminal, recycle_entry, rename_entry,
-    transfer_directory_entries, transfer_entry,
+    extract_zip, open_native_path, open_terminal, organize_by_keyword, recycle_entry, rename_entry,
+    transfer_directory_entries, transfer_entry, undo_organize_by_keyword,
 };
 use lifecycle::{
     CloseBehavior, LifecycleState, get_autostart_status, get_close_behavior, is_autostart_args,
@@ -249,6 +249,8 @@ pub fn run() {
             list_directory_extensions,
             transfer_entry,
             transfer_directory_entries,
+            organize_by_keyword,
+            undo_organize_by_keyword,
             cancel_file_operation,
             rename_entry,
             recycle_entry,

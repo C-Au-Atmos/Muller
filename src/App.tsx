@@ -312,6 +312,7 @@ export function App({ initialPath }: AppProps) {
     totalEntries: 0,
     searchBoth: false,
     canSearchBoth: false,
+    canUndo: false,
   });
   const [browseAddress, setBrowseAddress] = useState(initialPath);
   const [minSize, setMinSize] = useState("1024");
@@ -815,6 +816,13 @@ export function App({ initialPath }: AppProps) {
       if (!command) return;
       const target = event.target;
       if (
+        (command === "goBack" || command === "goForward") &&
+        target instanceof HTMLElement &&
+        target.closest(".workspace-tab")
+      ) {
+        return;
+      }
+      if (
         target instanceof HTMLElement &&
         target.closest('[role="dialog"], [role="menu"]')
       ) {
@@ -874,11 +882,17 @@ export function App({ initialPath }: AppProps) {
         "renameSelection",
         "recycleSelection",
         "goUp",
+        "goBack",
+        "goForward",
+        "undo",
         "refresh",
         "togglePreview",
         "selectAll",
       ]).has(command);
       if (fileCommand && !addressMode && !(activeTool === "duplicates" && command === "selectAll")) return;
+      if (command === "goBack" && !explorerNavigation.canBack) return;
+      if (command === "goForward" && !explorerNavigation.canForward) return;
+      if (command === "undo" && (!explorerMode || !browseNavigation.canUndo)) return;
       const paneCommand =
         command === "activateLeftPane" || command === "activateRightPane";
       if (paneCommand && (!addressMode || !explorerNavigation.split)) return;
@@ -995,6 +1009,15 @@ export function App({ initialPath }: AppProps) {
         case "goUp":
           browseRef.current?.up();
           break;
+        case "goBack":
+          explorerRef.current?.back();
+          break;
+        case "goForward":
+          explorerRef.current?.forward();
+          break;
+        case "undo":
+          browseRef.current?.undo();
+          break;
         case "refresh":
           if (activeTool === "compare") compareRef.current?.refresh();
           else browseRef.current?.refresh();
@@ -1025,6 +1048,11 @@ export function App({ initialPath }: AppProps) {
     cancelScan,
     dispatchWorkspace,
     explorerMode,
+    browseNavigation.canUndo,
+    browseNavigation.canBack,
+    browseNavigation.canForward,
+    compareNavigation.canBack,
+    compareNavigation.canForward,
     isThisPc,
     moveDuplicateSelection,
     openDuplicateSearch,
