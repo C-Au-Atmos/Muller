@@ -31,7 +31,7 @@ Keyword-based file organization and Windows-style directory navigation release.
   organization, context-menu organization, recursive matching, Chinese names,
   mixed case, nested directories, conflicts, `Ctrl+Z`, and navigation in single,
   dual-pane, and Compare workspaces.
-- Frontend tests: 76 passed; Rust workspace tests: 115 passed; Edge E2E tests:
+- Frontend tests: 76 passed; Rust workspace tests: 125 passed; Edge E2E tests:
   87 passed, including 4 targeted V0.1.4 scenarios.
 
 ## [0.1.3] - 2026-08-25
