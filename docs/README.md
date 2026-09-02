@@ -12,6 +12,13 @@ Stage 资料已经归档，不再与活动版本混放。
 
 ## 活动版本
 
+- [V0.1.4](V0.1.4/01-original-input.md)
+  - [原始输入](V0.1.4/01-original-input.md)
+  - [评审记录](V0.1.4/02-review.md)
+  - [执行计划](V0.1.4/03-execution.md)
+
+## 历史版本
+
 - [V0.1.3](V0.1.3/01-original-input.md)
   - [原始输入](V0.1.3/01-original-input.md)
   - [评审记录](V0.1.3/02-review.md)

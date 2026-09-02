@@ -2,6 +2,38 @@
 
 All notable changes to Muller are documented in this file.
 
+## [0.1.4] - 2026-09-03
+
+Keyword-based file organization and Windows-style directory navigation release.
+
+### Added
+
+- New folders can optionally collect matching files from the current directory
+  tree using a user-provided keyword.
+- Existing directories expose a custom organization action from their context
+  menu.
+- The latest successful organization operation can be undone with `Ctrl+Z`,
+  while conflicts and failed items remain protected and visible.
+- `Alt+Left Arrow` and `Alt+Right Arrow` navigate backward and forward in the
+  active Browse or Compare pane.
+
+### Changed
+
+- Organization scans match file names recursively without case sensitivity,
+  exclude the destination directory tree, skip directories, and use keep-both
+  conflict handling without overwriting existing files.
+- Organization progress reports successful, skipped, and failed items while
+  continuing independent file operations.
+
+### Verification
+
+- Windows 11 10.0.26200 x64 actual-device verification passed for new-folder
+  organization, context-menu organization, recursive matching, Chinese names,
+  mixed case, nested directories, conflicts, `Ctrl+Z`, and navigation in single,
+  dual-pane, and Compare workspaces.
+- Frontend tests: 76 passed; Rust workspace tests: 115 passed; Edge E2E tests:
+  87 passed, including 4 targeted V0.1.4 scenarios.
+
 ## [0.1.3] - 2026-08-25
 
 Windows lifecycle, diagnostics, and IME reliability release.

@@ -77,7 +77,7 @@
 
 | 日期 | 提交/PR | 检查结果 | 记录人 |
 |---|---|---|---|
-| `2026-09-03` | `da0eb6c`、`b9b6c13` | 自动化门禁全部通过；Windows 11 专业工作站版 10.0.26200（64 位）、WebView2 151.0.4129.107/152.0.4191.53，使用 `D:\Muller\test-results\windows-0.1.4-actual-20260902` 隔离夹具。`muller.exe` 调试验收产物 SHA-256 为 `D0A4CCBFF7DB06228E2EFEE13E43BB3F7CB113DC636578589B96D7D13591D1CA`：新建目录自动收纳递归移动 4 个 Alpha 文件并由 `Ctrl+Z` 恢复；右键“自定义吸取”移动 2 个 Beta 文件，冲突保留原文件并由 `Ctrl+Z` 恢复；单栏、双栏和比较工作区的 `Alt+左/右箭头` 均完成往返验证。`src-tauri/Cargo.toml`、`tauri.conf.json` 和 `package.json` 尚未切换 0.1.4，待 release 阶段更新。` | `Codex` |
+| `2026-09-03` | `da0eb6c`、`b9b6c13` | 自动化门禁全部通过；Windows 11 专业工作站版 10.0.26200（64 位）、WebView2 151.0.4129.107/152.0.4191.53，使用 `D:\Muller\test-results\windows-0.1.4-actual-20260902` 隔离夹具。`muller.exe` 调试验收产物 SHA-256 为 `D0A4CCBFF7DB06228E2EFEE13E43BB3F7CB113DC636578589B96D7D13591D1CA`：新建目录自动收纳递归移动 4 个 Alpha 文件并由 `Ctrl+Z` 恢复；右键“自定义吸取”移动 2 个 Beta 文件，冲突保留原文件并由 `Ctrl+Z` 恢复；单栏、双栏和比较工作区的 `Alt+左/右箭头` 均完成往返验证。release 阶段将版本元数据、更新日志与候选构建同步为 0.1.4。` | `Codex` |
 
 <a id="req-0-1-4-002"></a>
 
