@@ -88,7 +88,7 @@
 - 原始输入：[`01-original-input.md#req-0-1-4-002`](01-original-input.md#req-0-1-4-002)
 - 评审记录：[`02-review.md#req-0-1-4-002`](02-review.md#req-0-1-4-002)
 - 关联 Issue/PR：`None`
-- 实现提交：`da0eb6c`
+- 实现提交：`da0eb6c`、`1616cf4`
 
 ### 技术设计
 
@@ -131,4 +131,4 @@
 
 | 日期 | 提交/PR | 检查结果 | 记录人 |
 |---|---|---|---|
-| `2026-09-02` | `da0eb6c` | `npm run lint`、`npm test`（76/76）、`npm run build`、完整 Edge E2E（87/87）通过；Windows 实机键盘验收待补充 | `Codex` |
+| `2026-09-02` | `da0eb6c`、`1616cf4` | `npm run lint`、`npm test`（76/76）、`npm run build`、完整 Edge E2E（87/87）通过；Windows 实机键盘验收待补充 | `Codex` |
