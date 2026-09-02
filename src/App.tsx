@@ -810,6 +810,12 @@ export function App({ initialPath }: AppProps) {
     flowRef.current?.setState(visualState);
   }, [visualState]);
 
+  const navigate = useCallback((direction: "enter" | "back") => {
+    const nextDepth = direction === "enter" ? depth + 1 : Math.max(0, depth - 1);
+    setDepth(nextDepth);
+    flowRef.current?.navigate(direction, nextDepth);
+  }, [depth]);
+
   useEffect(() => {
     const handleKeyboard = (event: KeyboardEvent) => {
       const command = resolveAppCommand(event);
@@ -1011,9 +1017,11 @@ export function App({ initialPath }: AppProps) {
           break;
         case "goBack":
           explorerRef.current?.back();
+          navigate("back");
           break;
         case "goForward":
           explorerRef.current?.forward();
+          navigate("enter");
           break;
         case "undo":
           browseRef.current?.undo();
@@ -1055,6 +1063,7 @@ export function App({ initialPath }: AppProps) {
     compareNavigation.canForward,
     isThisPc,
     moveDuplicateSelection,
+    navigate,
     openDuplicateSearch,
     play,
     scanActive,
@@ -1100,12 +1109,6 @@ export function App({ initialPath }: AppProps) {
     });
     return () => { current = false; };
   }, [browseNavigation.path, explorerMode, filterOpen, isThisPc]);
-
-  const navigate = (direction: "enter" | "back") => {
-    const nextDepth = direction === "enter" ? depth + 1 : Math.max(0, depth - 1);
-    setDepth(nextDepth);
-    flowRef.current?.navigate(direction, nextDepth);
-  };
 
   const handleStartScan = (event: FormEvent) => {
     event.preventDefault();
