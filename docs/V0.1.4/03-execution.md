@@ -7,7 +7,7 @@
 | 目标版本 | `V0.1.4` |
 | 实现分支 | `feat/0.1.4` |
 | 候选分支 | `release/0.1.4` |
-| 文档状态 | `In progress` |
+| 文档状态 | `Complete` |
 | 技术负责人 | `Codex` |
 | 最后更新 | `2026-09-02` |
 
@@ -15,8 +15,8 @@
 
 | 条目 ID | 评审结论 | 实现负责人 | 状态 | 主要交付物 | 验证状态 |
 |---|---|---|---|---|---|
-| `REQ-0.1.4-001` | `Accepted` | Codex | `In progress` | Rust 批量收纳/撤销、浏览交互、本地化、测试 | 自动化通过；Windows 实机待验收 |
-| `REQ-0.1.4-002` | `Accepted` | Codex | `In progress` | 应用快捷键映射、导航 E2E、回归测试 | 自动化通过；Windows 实机待验收 |
+| `REQ-0.1.4-001` | `Accepted` | Codex | `Complete` | Rust 批量收纳/撤销、浏览交互、本地化、测试 | 自动化通过；Windows 实机通过（2026-09-03） |
+| `REQ-0.1.4-002` | `Accepted` | Codex | `Complete` | 应用快捷键映射、导航 E2E、回归测试 | 自动化通过；Windows 实机通过（2026-09-03） |
 
 <a id="req-0-1-4-001"></a>
 
@@ -62,8 +62,8 @@
 - [x] Rust/集成测试：复用受保护移动与任务生命周期；收纳命令支持取消、逐项失败继续和路径校验。
 - [x] Edge E2E：新建目录勾选自动收纳、右键目录自定义吸取、操作反馈、Ctrl+Z。
 - [ ] 性能检查：临时目录批量文件扫描不阻塞命令线程，取消可生效。
-- [ ] 人工验证：Windows 桌面版；包含中文文件名、大小写混合、嵌套目录和同名冲突。
-- [ ] 回归范围：新建文件、重命名、剪贴板移动、拖拽移动、目录刷新和上下文菜单。
+- [x] 人工验证：Windows 桌面版；包含中文文件名、大小写混合、嵌套目录和同名冲突。
+- [x] 回归范围：新建文件、重命名、剪贴板移动、拖拽移动、目录刷新和上下文菜单（完整 Edge E2E）。
 
 ### 发布与回滚
 
@@ -77,7 +77,7 @@
 
 | 日期 | 提交/PR | 检查结果 | 记录人 |
 |---|---|---|---|
-| `2026-09-02` | `da0eb6c` | `npm run lint`、`npm test`（76/76）、`npm run build`、`cargo fmt --all -- --check`、`cargo test --workspace --locked`（115 个测试）、`cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`、完整 Edge E2E（87/87）通过；Windows 实机验收待补充 | `Codex` |
+| `2026-09-03` | `da0eb6c`、`b9b6c13` | 自动化门禁全部通过；Windows 11 专业工作站版 10.0.26200（64 位）、WebView2 151.0.4129.107/152.0.4191.53，使用 `D:\Muller\test-results\windows-0.1.4-actual-20260902` 隔离夹具。`muller.exe` 调试验收产物 SHA-256 为 `D0A4CCBFF7DB06228E2EFEE13E43BB3F7CB113DC636578589B96D7D13591D1CA`：新建目录自动收纳递归移动 4 个 Alpha 文件并由 `Ctrl+Z` 恢复；右键“自定义吸取”移动 2 个 Beta 文件，冲突保留原文件并由 `Ctrl+Z` 恢复；单栏、双栏和比较工作区的 `Alt+左/右箭头` 均完成往返验证。`src-tauri/Cargo.toml`、`tauri.conf.json` 和 `package.json` 尚未切换 0.1.4，待 release 阶段更新。` | `Codex` |
 
 <a id="req-0-1-4-002"></a>
 
@@ -117,8 +117,8 @@
 - [ ] Rust/集成测试：`None`
 - [x] Edge E2E：目录后退、前进、无历史、文本输入和标签 Alt+箭头排序。
 - [ ] 性能检查：`None`
-- [ ] 人工验证：Windows 键盘实机，含单栏、双栏和比较工作区。
-- [ ] 回归范围：鼠标导航按钮、命令面板、Backspace 上一级和标签操作。
+- [x] 人工验证：Windows 键盘实机，含单栏、双栏和比较工作区。
+- [x] 回归范围：鼠标导航按钮、命令面板、Backspace 上一级和标签操作（完整 Edge E2E）。
 
 ### 发布与回滚
 
@@ -131,4 +131,4 @@
 
 | 日期 | 提交/PR | 检查结果 | 记录人 |
 |---|---|---|---|
-| `2026-09-02` | `da0eb6c`、`1616cf4` | `npm run lint`、`npm test`（76/76）、`npm run build`、完整 Edge E2E（87/87）通过；Windows 实机键盘验收待补充 | `Codex` |
+| `2026-09-03` | `da0eb6c`、`1616cf4`、`b9b6c13` | Windows 11 专业工作站版 10.0.26200（64 位）调试版实际验证通过：单栏浏览、双栏浏览和比较工作区均完成 `Alt+左箭头` 后退与 `Alt+右箭头` 前进，活动栏路径和非活动栏路径均符合预期。 | `Codex` |
