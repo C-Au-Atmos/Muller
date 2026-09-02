@@ -2,6 +2,66 @@
 
 All notable changes to Muller are documented in this file.
 
+## [0.1.3] - 2026-08-25
+
+Windows lifecycle, diagnostics, and IME reliability release.
+
+### Added
+
+- Settings can now choose whether closing the main window hides Muller to the
+  system tray or quits; the choice is persisted and hiding remains the default.
+- Optional per-user Windows sign-in startup launches Muller hidden, reflects
+  the actual Windows registration, refreshes stale executable paths, and cleans
+  up Muller-created entries during NSIS uninstall.
+- Single-instance startup coordination restores the existing main window for a
+  repeated manual launch instead of opening a duplicate instance.
+- Persistent local diagnostics use `INFO` by default, offer an opt-in `DEBUG`
+  setting and log-folder shortcut, and rotate `muller.log` at 5 MiB while
+  retaining at most four archives (about 25 MiB total).
+
+### Changed
+
+- Restoring default settings now also selects hide-to-tray, disables Windows
+  sign-in startup, and disables detailed debug logging.
+
+### Fixed
+
+- Browse search now keeps IME pre-edit text local, ignores composition and
+  WebView2 key-code `229` candidate keys, and submits final text only once across
+  current-folder, recursive, all-drive, dual-pane, and shared search fields.
+  This addresses the reported Microsoft Pinyin query flood and WeChat Input
+  blocked-input event path.
+- Window restoration now requests Windows attention when foreground-activation
+  restrictions prevent a normal focus handoff.
+
+### Privacy
+
+- Diagnostic logs stay on the local device and are never uploaded. Muller's
+  first-party diagnostic events use runtime allowlists that exclude search
+  text, IME data, paths, file names and contents, clipboard data, and raw
+  process arguments or working directories.
+
+### Upgrade notes
+
+- Upgrading from 0.1.2 requires no manual data migration; existing workspace,
+  theme, and interface preferences remain compatible. The previous default
+  close behavior (hide to tray) is unchanged, while sign-in startup and detailed
+  debug logging start disabled.
+- Normal `INFO` diagnostics are written after upgrade even when detailed debug
+  logging is off. Use Settings > Diagnostics to change the level or open the
+  local log folder. `MULLER_LOG=debug|trace` can override the level for one run.
+- If an enabled startup registration points to an older or moved executable,
+  launch 0.1.3 once to refresh it to the current path. Portable builds have no
+  NSIS uninstall hook, so disable sign-in startup before deleting the executable.
+
+### Known limits
+
+- Installed-build validation with real Microsoft Pinyin and WeChat Input remains
+  pending; Edge composition-event automation is not a substitute for that test.
+- Windows installed-build checks remain pending for login/upgrade/uninstall,
+  true multi-process and foreground restrictions, log creation/restart/rotation
+  and unwritable-directory fallback, and close/logoff/shutdown behavior.
+
 ## [0.1.2] - 2026-08-09
 
 Workspace and preview refinement release.
