@@ -77,7 +77,8 @@
 
 | 日期 | 提交/PR | 检查结果 | 记录人 |
 |---|---|---|---|
-| `2026-09-03` | `da0eb6c`、`b9b6c13` | 自动化门禁全部通过；Windows 11 专业工作站版 10.0.26200（64 位）、WebView2 151.0.4129.107/152.0.4191.53，使用 `D:\Muller\test-results\windows-0.1.4-actual-20260902` 隔离夹具。`muller.exe` 调试验收产物 SHA-256 为 `D0A4CCBFF7DB06228E2EFEE13E43BB3F7CB113DC636578589B96D7D13591D1CA`：新建目录自动收纳递归移动 4 个 Alpha 文件并由 `Ctrl+Z` 恢复；右键“自定义吸取”移动 2 个 Beta 文件，冲突保留原文件并由 `Ctrl+Z` 恢复；单栏、双栏和比较工作区的 `Alt+左/右箭头` 均完成往返验证。release 阶段将版本元数据、更新日志与候选构建同步为 0.1.4。` | `Codex` |
+| `2026-09-03` | `da0eb6c`、`b9b6c13` | 自动化门禁全部通过；Windows 11 专业工作站版 10.0.26200（64 位）、WebView2 151.0.4129.107/152.0.4191.53，使用 `D:\Muller\test-results\windows-0.1.4-actual-20260902` 隔离夹具。`muller.exe` 调试验收产物 SHA-256 为 `D0A4CCBFF7DB06228E2EFEE13E43BB3F7CB113DC636578589B96D7D13591D1CA`：新建目录自动收纳递归移动 4 个 Alpha 文件并由 `Ctrl+Z` 恢复；右键“自定义吸取”移动 2 个 Beta 文件，冲突保留原文件并由 `Ctrl+Z` 恢复；单栏、双栏和比较工作区的 `Alt+左/右箭头` 均完成往返验证。release 阶段已将版本元数据、更新日志与候选构建同步为 0.1.4。` | `Codex` |
+| `2026-09-03` | `96ce7b8` | `npm run lint`、`npm test`（76/76）、`npm run build`、`cargo fmt --all -- --check`、`cargo test --workspace --locked`（115 个测试）、`cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`、完整 Edge E2E（87/87）通过；`npm run tauri -- build --bundles nsis` 成功生成 `Muller_0.1.4_x64-setup.exe` 和 release `muller.exe`。Windows 启动冒烟通过，窗口标题为 `Muller` 且进程响应正常；安装包 SHA-256 为 `8132B4A36159B7B9416FED39438629982F7701A95C53198AAEF41A5ACFA34BF7`，portable SHA-256 为 `27CAB6D8CDEC0F9C4EAAF5558C38B6A1E21EA901F1382A4347A5C5EE1D52A9ED`。` | `Codex` |
 
 <a id="req-0-1-4-002"></a>
 
