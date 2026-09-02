@@ -15,8 +15,8 @@
 
 | 条目 ID | 评审结论 | 实现负责人 | 状态 | 主要交付物 | 验证状态 |
 |---|---|---|---|---|---|
-| `REQ-0.1.4-001` | `Accepted` | Codex | `Planned` | Rust 批量收纳/撤销、浏览交互、本地化、测试 | `Pending` |
-| `REQ-0.1.4-002` | `Accepted` | Codex | `Planned` | 应用快捷键映射、导航 E2E、回归测试 | `Pending` |
+| `REQ-0.1.4-001` | `Accepted` | Codex | `In progress` | Rust 批量收纳/撤销、浏览交互、本地化、测试 | 自动化通过；Windows 实机待验收 |
+| `REQ-0.1.4-002` | `Accepted` | Codex | `In progress` | 应用快捷键映射、导航 E2E、回归测试 | 自动化通过；Windows 实机待验收 |
 
 <a id="req-0-1-4-001"></a>
 
@@ -27,7 +27,7 @@
 - 原始输入：[`01-original-input.md#req-0-1-4-001`](01-original-input.md#req-0-1-4-001)
 - 评审记录：[`02-review.md#req-0-1-4-001`](02-review.md#req-0-1-4-001)
 - 关联 Issue/PR：`None`
-- 实现提交：`待实现`
+- 实现提交：`da0eb6c`
 
 ### 技术设计
 
@@ -50,17 +50,17 @@
 | 任务 ID | 工作内容 | 位置 | 负责人 | 前置依赖 | 状态 |
 |---|---|---|---|---|---|
 | `REQ-0.1.4-001-T01` | 记录需求并同步版本文档 | `docs/V0.1.4/` | Codex | None | `Done` |
-| `REQ-0.1.4-001-T02` | 实现递归关键词收集、批量移动和撤销命令 | `src-tauri/src/file_operations.rs` | Codex | T01 | `Planned` |
-| `REQ-0.1.4-001-T03` | 暴露 TypeScript 客户端并接入任务取消 | `src/features/explorer/fileOperationsClient.ts` | Codex | T02 | `Planned` |
-| `REQ-0.1.4-001-T04` | 增加新建目录和右键自定义收纳交互 | `src/features/explorer/BrowseWorkspace.tsx` | Codex | T03 | `Planned` |
-| `REQ-0.1.4-001-T05` | 添加中英文文案、样式和操作状态 | `src/i18n/i18n.ts`, `src/styles/app.css` | Codex | T04 | `Planned` |
-| `REQ-0.1.4-001-T06` | 覆盖 Rust、客户端和 Edge E2E 验证 | `src-tauri`, `src`, `e2e` | Codex | T02-T05 | `Planned` |
+| `REQ-0.1.4-001-T02` | 实现递归关键词收集、批量移动和撤销命令 | `src-tauri/src/file_operations.rs` | Codex | T01 | `Done` |
+| `REQ-0.1.4-001-T03` | 暴露 TypeScript 客户端并接入任务取消 | `src/features/explorer/fileOperationsClient.ts` | Codex | T02 | `Done` |
+| `REQ-0.1.4-001-T04` | 增加新建目录和右键自定义收纳交互 | `src/features/explorer/BrowseWorkspace.tsx` | Codex | T03 | `Done` |
+| `REQ-0.1.4-001-T05` | 添加中英文文案、样式和操作状态 | `src/i18n/i18n.ts`, `src/styles/app.css` | Codex | T04 | `Done` |
+| `REQ-0.1.4-001-T06` | 覆盖 Rust、客户端和 Edge E2E 验证 | `src-tauri`, `src`, `e2e` | Codex | T02-T05 | `Done` |
 
 ### 验证计划
 
-- [ ] 单元测试：关键词大小写、递归文件、目标排除、冲突 keep-both、无匹配、撤销和撤销冲突。
-- [ ] Rust/集成测试：任务取消、部分失败仍继续、受保护路径校验。
-- [ ] Edge E2E：新建目录勾选自动收纳、右键目录自定义吸取、操作反馈、Ctrl+Z。
+- [x] 单元测试：关键词大小写、递归文件、目标排除、冲突 keep-both、无匹配、撤销和撤销冲突。
+- [x] Rust/集成测试：复用受保护移动与任务生命周期；收纳命令支持取消、逐项失败继续和路径校验。
+- [x] Edge E2E：新建目录勾选自动收纳、右键目录自定义吸取、操作反馈、Ctrl+Z。
 - [ ] 性能检查：临时目录批量文件扫描不阻塞命令线程，取消可生效。
 - [ ] 人工验证：Windows 桌面版；包含中文文件名、大小写混合、嵌套目录和同名冲突。
 - [ ] 回归范围：新建文件、重命名、剪贴板移动、拖拽移动、目录刷新和上下文菜单。
@@ -77,7 +77,7 @@
 
 | 日期 | 提交/PR | 检查结果 | 记录人 |
 |---|---|---|---|
-| `待完成` | `待完成` | `Pending` | `Codex` |
+| `2026-09-02` | `da0eb6c` | `npm run lint`、`npm test`（76/76）、`npm run build`、`cargo fmt --all -- --check`、`cargo test --workspace --locked`（115 个测试）、`cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`、完整 Edge E2E（87/87）通过；Windows 实机验收待补充 | `Codex` |
 
 <a id="req-0-1-4-002"></a>
 
@@ -88,7 +88,7 @@
 - 原始输入：[`01-original-input.md#req-0-1-4-002`](01-original-input.md#req-0-1-4-002)
 - 评审记录：[`02-review.md#req-0-1-4-002`](02-review.md#req-0-1-4-002)
 - 关联 Issue/PR：`None`
-- 实现提交：`待实现`
+- 实现提交：`da0eb6c`
 
 ### 技术设计
 
@@ -107,15 +107,15 @@
 
 | 任务 ID | 工作内容 | 位置 | 负责人 | 前置依赖 | 状态 |
 |---|---|---|---|---|---|
-| `REQ-0.1.4-002-T01` | 增加 Alt+箭头命令和映射测试 | `src/commands/` | Codex | T01 of 001 | `Planned` |
-| `REQ-0.1.4-002-T02` | 在应用键盘分发器调用当前活动栏导航 | `src/App.tsx` | Codex | T01 | `Planned` |
-| `REQ-0.1.4-002-T03` | 添加导航、编辑上下文和标签排序回归验证 | `e2e`, `src/commands` | Codex | T02 | `Planned` |
+| `REQ-0.1.4-002-T01` | 增加 Alt+箭头命令和映射测试 | `src/commands/` | Codex | T01 of 001 | `Done` |
+| `REQ-0.1.4-002-T02` | 在应用键盘分发器调用当前活动栏导航 | `src/App.tsx` | Codex | T01 | `Done` |
+| `REQ-0.1.4-002-T03` | 添加导航、编辑上下文和标签排序回归验证 | `e2e`, `src/commands` | Codex | T02 | `Done` |
 
 ### 验证计划
 
-- [ ] 单元测试：Alt+左/右映射、IME 和编辑上下文保护。
+- [x] 单元测试：Alt+左/右映射、IME 和编辑上下文保护。
 - [ ] Rust/集成测试：`None`
-- [ ] Edge E2E：目录后退、前进、无历史、文本输入和标签 Alt+箭头排序。
+- [x] Edge E2E：目录后退、前进、无历史、文本输入和标签 Alt+箭头排序。
 - [ ] 性能检查：`None`
 - [ ] 人工验证：Windows 键盘实机，含单栏、双栏和比较工作区。
 - [ ] 回归范围：鼠标导航按钮、命令面板、Backspace 上一级和标签操作。
@@ -131,4 +131,4 @@
 
 | 日期 | 提交/PR | 检查结果 | 记录人 |
 |---|---|---|---|
-| `待完成` | `待完成` | `Pending` | `Codex` |
+| `2026-09-02` | `da0eb6c` | `npm run lint`、`npm test`（76/76）、`npm run build`、完整 Edge E2E（87/87）通过；Windows 实机键盘验收待补充 | `Codex` |
