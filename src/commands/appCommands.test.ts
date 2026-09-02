@@ -15,6 +15,14 @@ describe("application keymap", () => {
     expect(resolveAppCommand({ key: "Escape" })).toBe("cancelScan");
   });
 
+  it("does not resolve application commands while an IME owns the key event", () => {
+    expect(resolveAppCommand({ key: "Enter", isComposing: true })).toBeNull();
+    expect(resolveAppCommand({ key: "Escape", isComposing: true })).toBeNull();
+    expect(resolveAppCommand({ key: "Escape", keyCode: 229 })).toBeNull();
+    expect(resolveAppCommand({ key: "ArrowDown", keyCode: 229 })).toBeNull();
+    expect(resolveAppCommand({ key: "f", ctrlKey: true, keyCode: 229 })).toBeNull();
+  });
+
   it("maps list navigation without stealing modified arrows", () => {
     expect(resolveAppCommand({ key: "ArrowDown" })).toBe("moveNext");
     expect(resolveAppCommand({ key: "ArrowLeft" })).toBe("moveLeft");

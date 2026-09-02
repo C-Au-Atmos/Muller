@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 interface MockChannel {
   onmessage: (message: unknown) => void;
@@ -10,6 +10,9 @@ interface MockPayload {
   item?: string[];
   input?: string;
   path?: string;
+  message?: string;
+  behavior?: "hide" | "quit";
+  enabled?: boolean;
   onEvent?: MockChannel;
   request?: {
     path?: string;
@@ -29,6 +32,7 @@ interface MockPayload {
     recursive?: boolean;
   };
   sessionId?: number;
+  taskId?: number;
   offset?: number;
   query?: string;
   positions?: number[];
@@ -36,11 +40,20 @@ interface MockPayload {
 
 interface MockState {
   audioStarts: number;
+  autostartEnabled: boolean;
+  closeBehavior: "hide" | "quit";
+  debugLoggingEnabled: boolean;
+  debugLoggingFailure: "none" | "before-write" | "after-write";
+  diagnosticsStatusError: string | null;
+  diagnosticLogs: string[];
+  openedNativePaths: string[];
   windowCommands: string[];
   windowMaximized: boolean;
   completionInputs: string[];
   directoryQueries: string[];
+  cancelledQueries: number[];
   closedSessions: number[];
+  cancelledScans: number[];
   locateCalls: { prefix: string; startAfter: number | null }[];
   searchCalls: { sessionId: number; query: string }[];
   expandedSearchCalls: { roots: string[]; query: string; recursive: boolean }[];
@@ -96,11 +109,20 @@ async function installDesktopMock(
     ];
     const state: MockState = {
       audioStarts: 0,
+      autostartEnabled: false,
+      closeBehavior: "hide",
+      debugLoggingEnabled: false,
+      debugLoggingFailure: "none",
+      diagnosticsStatusError: null,
+      diagnosticLogs: [],
+      openedNativePaths: [],
       windowCommands: [],
       windowMaximized: false,
       completionInputs: [],
       directoryQueries: [],
+      cancelledQueries: [],
       closedSessions: [],
+      cancelledScans: [],
       locateCalls: [],
       searchCalls: [],
       expandedSearchCalls: [],
@@ -191,6 +213,58 @@ async function installDesktopMock(
         callbacks.delete(id);
       },
       invoke(command, payload) {
+        if (command === "get_close_behavior") {
+          return { behavior: state.closeBehavior };
+        }
+        if (command === "set_close_behavior") {
+          state.closeBehavior = payload.behavior ?? "hide";
+          return { behavior: state.closeBehavior };
+        }
+        if (command === "get_autostart_status") {
+          return { enabled: state.autostartEnabled, error: null };
+        }
+        if (command === "set_autostart_enabled") {
+          state.autostartEnabled = payload.enabled === true;
+          return { enabled: state.autostartEnabled, error: null };
+        }
+        if (command === "get_diagnostics_status") {
+          return {
+            debugEnabled: state.debugLoggingEnabled,
+            effectiveLevel: state.debugLoggingEnabled ? "debug" : "info",
+            logDirectory: "C:\\Users\\test\\AppData\\Local\\app.muller.desktop\\logs",
+            error: state.diagnosticsStatusError
+              ? { code: state.diagnosticsStatusError }
+              : null,
+          };
+        }
+        if (command === "set_debug_logging") {
+          const failure = state.debugLoggingFailure;
+          state.debugLoggingFailure = "none";
+          if (failure === "before-write") {
+            return Promise.reject(new Error("diagnostics persistence failed"));
+          }
+          state.debugLoggingEnabled = payload.enabled === true;
+          if (failure === "after-write") {
+            return Promise.reject(new Error("diagnostics response was lost"));
+          }
+          return {
+            debugEnabled: state.debugLoggingEnabled,
+            effectiveLevel: state.debugLoggingEnabled ? "debug" : "info",
+            logDirectory: "C:\\Users\\test\\AppData\\Local\\app.muller.desktop\\logs",
+            error: null,
+          };
+        }
+        if (command === "get_diagnostics_log_directory") {
+          return "C:\\Users\\test\\AppData\\Local\\app.muller.desktop\\logs";
+        }
+        if (command === "plugin:log|log") {
+          if (typeof payload.message === "string") state.diagnosticLogs.push(payload.message);
+          return null;
+        }
+        if (command === "open_native_path") {
+          if (typeof payload.path === "string") state.openedNativePaths.push(payload.path);
+          return "opened";
+        }
         if (command === "plugin:window|is_maximized") {
           return Promise.resolve(state.windowMaximized);
         }
@@ -274,6 +348,10 @@ async function installDesktopMock(
           });
           return { taskId: nextTaskId };
         }
+        if (command === "cancel_directory_query") {
+          if (typeof payload.taskId === "number") state.cancelledQueries.push(payload.taskId);
+          return null;
+        }
         if (command === "read_directory_page") {
           const pageEntries = searchEntriesBySession.get(payload.sessionId ?? 0) ?? entries;
           return {
@@ -314,6 +392,17 @@ async function installDesktopMock(
         if (command === "close_directory_session") {
           if (typeof payload.sessionId === "number") state.closedSessions.push(payload.sessionId);
           return null;
+        }
+        if (command === "start_scan") {
+          const nextTaskId = ++taskId;
+          queueMicrotask(() => {
+            payload.onEvent?.onmessage({ type: "started", taskId: nextTaskId });
+          });
+          return { taskId: nextTaskId };
+        }
+        if (command === "cancel_scan") {
+          if (typeof payload.taskId === "number") state.cancelledScans.push(payload.taskId);
+          return { taskId: payload.taskId ?? 0, cancelled: true };
         }
         if (command === "transfer_directory_entries") {
           const request = payload.request;
@@ -379,6 +468,76 @@ async function mockState(page: Page): Promise<MockState> {
   return page.evaluate(() => (
     globalThis as typeof globalThis & { __muller710: MockState }
   ).__muller710);
+}
+
+async function startComposition(input: Locator): Promise<void> {
+  await input.evaluate((element) => {
+    element.dispatchEvent(new CompositionEvent("compositionstart", {
+      bubbles: true,
+      composed: true,
+    }));
+  });
+}
+
+async function inputCompositionValue(
+  input: Locator,
+  value: string,
+  isComposing: boolean,
+): Promise<void> {
+  await input.evaluate((element, payload) => {
+    const setValue = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )?.set?.bind(element);
+    if (!setValue) throw new Error("Native input value setter is unavailable");
+    setValue(payload.value);
+    element.dispatchEvent(new InputEvent("input", {
+      bubbles: true,
+      composed: true,
+      data: payload.value,
+      inputType: payload.isComposing ? "insertCompositionText" : "insertText",
+      isComposing: payload.isComposing,
+    }));
+  }, { value, isComposing });
+}
+
+async function endComposition(input: Locator, value: string): Promise<void> {
+  await input.evaluate((element, finalValue) => {
+    const setValue = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )?.set?.bind(element);
+    if (!setValue) throw new Error("Native input value setter is unavailable");
+    setValue(finalValue);
+    element.dispatchEvent(new CompositionEvent("compositionend", {
+      bubbles: true,
+      composed: true,
+      data: finalValue,
+    }));
+  }, value);
+  await inputCompositionValue(input, value, false);
+}
+
+async function dispatchImeKey(
+  input: Locator,
+  key: string,
+  options: { isComposing?: boolean; keyCode?: number } = {},
+): Promise<boolean> {
+  return input.evaluate((element, payload) => {
+    const event = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      isComposing: payload.isComposing,
+      key: payload.key,
+    });
+    if (payload.keyCode !== undefined) {
+      Object.defineProperty(event, "keyCode", { configurable: true, value: payload.keyCode });
+      Object.defineProperty(event, "which", { configurable: true, value: payload.keyCode });
+    }
+    element.dispatchEvent(event);
+    return event.defaultPrevented;
+  }, { key, ...options });
 }
 
 async function expectNoIntersection(page: Page, first: string, second: string): Promise<void> {
@@ -741,6 +900,76 @@ test("standard density keeps the five-row workspace chrome within its intended s
   await expect(page.getByRole("button", { name: "Close" })).toBeVisible();
 });
 
+test("desktop lifecycle and diagnostic settings update native state and restore defaults", async ({ page }) => {
+  await installDesktopMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open settings" }).click();
+
+  const hide = page.getByRole("radio", { name: "Hide to system tray" });
+  const quit = page.getByRole("radio", { name: "Quit Muller" });
+  const autostart = page.getByRole("checkbox", { name: "Start Muller when I sign in to Windows" });
+  const debugLogging = page.getByRole("checkbox", { name: "Detailed debug logging" });
+  await expect(hide).toHaveAttribute("aria-checked", "true");
+  await expect(autostart).not.toBeChecked();
+  await expect(debugLogging).not.toBeChecked();
+
+  await quit.click();
+  await autostart.check();
+  await debugLogging.check();
+  await page.getByRole("button", { name: "Open log folder" }).click();
+  await expect.poll(async () => {
+    const state = await mockState(page);
+    return {
+      closeBehavior: state.closeBehavior,
+      autostartEnabled: state.autostartEnabled,
+      debugLoggingEnabled: state.debugLoggingEnabled,
+      openedNativePaths: state.openedNativePaths.length,
+    };
+  }).toEqual({
+    closeBehavior: "quit",
+    autostartEnabled: true,
+    debugLoggingEnabled: true,
+    openedNativePaths: 1,
+  });
+
+  await page.getByRole("button", { name: "Restore defaults" }).click();
+  await expect.poll(async () => {
+    const state = await mockState(page);
+    return {
+      closeBehavior: state.closeBehavior,
+      autostartEnabled: state.autostartEnabled,
+      debugLoggingEnabled: state.debugLoggingEnabled,
+    };
+  }).toEqual({ closeBehavior: "hide", autostartEnabled: false, debugLoggingEnabled: false });
+  await expect(hide).toHaveAttribute("aria-checked", "true");
+  await expect(autostart).not.toBeChecked();
+  await expect(debugLogging).not.toBeChecked();
+});
+
+test("diagnostic setting failures restore or re-read the native truth", async ({ page }) => {
+  await installDesktopMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open settings" }).click();
+  const debugLogging = page.getByRole("checkbox", { name: "Detailed debug logging" });
+
+  await page.evaluate(() => {
+    const runtime = globalThis as typeof globalThis & { __muller710: MockState };
+    runtime.__muller710.debugLoggingFailure = "before-write";
+  });
+  await debugLogging.click();
+  await expect(debugLogging).not.toBeChecked();
+  await expect(page.getByRole("alert")).toContainText("Could not update detailed debug logging");
+
+  await page.evaluate(() => {
+    const runtime = globalThis as typeof globalThis & { __muller710: MockState };
+    runtime.__muller710.debugLoggingFailure = "after-write";
+    runtime.__muller710.diagnosticsStatusError = "diagnostics_file_unavailable";
+  });
+  await debugLogging.check();
+  await expect(debugLogging).toBeChecked();
+  await expect.poll(async () => (await mockState(page)).debugLoggingEnabled).toBe(true);
+});
+
 test("window controls dispatch all three native window operations", async ({ page }) => {
   await installDesktopMock(page);
   await page.goto("/");
@@ -931,6 +1160,152 @@ test("address search is persistent and drive roots navigate up to This PC", asyn
   await expect.poll(async () => (await mockState(page)).directoryQueries).toContain("D:\\");
   await page.getByRole("button", { name: "Up one level", exact: true }).click();
   await expect(page.getByRole("region", { name: "This PC" })).toBeVisible();
+});
+
+test("IME pre-edit stays local and Enter submits only the final search value", async ({ page }) => {
+  await installDesktopMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open settings" }).click();
+  await page.getByRole("checkbox", { name: "Detailed debug logging" }).check();
+  await page.getByRole("button", { name: "Browse", exact: true }).click();
+  await page.keyboard.press("Control+f");
+  const search = page.getByRole("textbox", { name: "Search current directory" });
+  await expect(search).toBeFocused();
+  const before = await mockState(page);
+
+  await startComposition(search);
+  await inputCompositionValue(search, "zhong", true);
+  await page.waitForTimeout(180);
+  await expect(search).toHaveValue("zhong");
+  await expect(search).toBeFocused();
+  let current = await mockState(page);
+  expect(current.searchCalls).toEqual(before.searchCalls);
+  expect(current.expandedSearchCalls).toEqual(before.expandedSearchCalls);
+  expect(current.cancelledQueries).toEqual(before.cancelledQueries);
+  expect(current.closedSessions).toEqual(before.closedSessions);
+
+  expect(await dispatchImeKey(search, "Enter", { isComposing: true })).toBe(false);
+  await expect(search).toBeFocused();
+  expect((await mockState(page)).searchCalls).toEqual(before.searchCalls);
+
+  const finalValue = "\u4e2d";
+  await endComposition(search, finalValue);
+  await expect.poll(async () => (
+    await mockState(page)
+  ).searchCalls.filter((call) => call.query === finalValue).length).toBe(1);
+  await expect(search).toHaveValue(finalValue);
+  await expect(search).toBeFocused();
+
+  await inputCompositionValue(search, finalValue, false);
+  await page.waitForTimeout(180);
+  current = await mockState(page);
+  expect(current.searchCalls.filter((call) => call.query === finalValue)).toHaveLength(1);
+  expect(current.searchCalls.some((call) => call.query === "zhong")).toBe(false);
+  expect(current.diagnosticLogs.some((entry) => entry.includes("event=ime.composition_start"))).toBe(true);
+  expect(current.diagnosticLogs.some((entry) => entry.includes("inputLength="))).toBe(true);
+  expect(current.diagnosticLogs.some((entry) => entry.includes("phase=composition"))).toBe(true);
+  expect(current.diagnosticLogs.join(" ")).not.toContain("zhong");
+  expect(current.diagnosticLogs.join(" ")).not.toContain(finalValue);
+});
+
+test("IME final queries are isolated across recursive global and dual-pane search", async ({ page }) => {
+  await installDesktopMock(page);
+  await page.goto("/");
+  const search = page.getByRole("textbox", { name: "Search current directory" });
+
+  await page.getByRole("button", { name: "Choose search mode" }).click();
+  await page.getByRole("menuitemradio", { name: "Search this folder and all subfolders" }).click();
+  await page.waitForTimeout(180);
+  let before = await mockState(page);
+  await startComposition(search);
+  await inputCompositionValue(search, "digui", true);
+  await page.waitForTimeout(180);
+  expect((await mockState(page)).expandedSearchCalls).toEqual(before.expandedSearchCalls);
+  const recursiveValue = "\u9012\u5f52";
+  await endComposition(search, recursiveValue);
+  await expect.poll(async () => (
+    await mockState(page)
+  ).expandedSearchCalls.filter((call) => call.query === recursiveValue).length).toBe(1);
+
+  await page.getByRole("button", { name: "Choose search mode" }).click();
+  await page.getByRole("menuitemradio", { name: "Search all drives" }).click();
+  await page.waitForTimeout(180);
+  before = await mockState(page);
+  await startComposition(search);
+  await inputCompositionValue(search, "quanpan", true);
+  await page.waitForTimeout(180);
+  expect((await mockState(page)).expandedSearchCalls).toEqual(before.expandedSearchCalls);
+  const globalValue = "\u5168\u76d8";
+  await endComposition(search, globalValue);
+  await expect.poll(async () => (
+    await mockState(page)
+  ).expandedSearchCalls.filter((call) => call.query === globalValue).length).toBe(1);
+
+  await page.getByRole("button", { name: "Choose search mode" }).click();
+  await page.getByRole("menuitemradio", { name: "Search inside this folder only" }).click();
+  await page.waitForTimeout(180);
+  await page.getByRole("button", { name: "Search both panes" }).click();
+  await page.waitForTimeout(180);
+  before = await mockState(page);
+  await startComposition(search);
+  await inputCompositionValue(search, "shuanglan", true);
+  await page.waitForTimeout(180);
+  expect((await mockState(page)).searchCalls).toEqual(before.searchCalls);
+  const bothValue = "\u53cc\u680f";
+  await endComposition(search, bothValue);
+  await expect.poll(async () => new Set((
+    await mockState(page)
+  ).searchCalls.filter((call) => call.query === bothValue).map((call) => call.sessionId)).size).toBe(2);
+});
+
+test("IME 229 Escape preserves the search and does not cancel an active scan", async ({ page }) => {
+  await installDesktopMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Duplicates", exact: true }).click();
+  await page.getByRole("button", { name: "Start duplicate scan" }).click();
+  await expect(page.getByRole("button", { name: "Cancel scan" })).toBeEnabled();
+  await page.getByRole("button", { name: "Browse", exact: true }).click();
+  const search = page.getByRole("textbox", { name: "Search current directory" });
+  await search.fill("Alpha");
+  await expect.poll(async () => (
+    await mockState(page)
+  ).searchCalls.filter((call) => call.query === "alpha").length).toBe(1);
+  await search.focus();
+
+  await startComposition(search);
+  await inputCompositionValue(search, "Alphapin", true);
+  expect(await dispatchImeKey(search, "Escape", { keyCode: 229 })).toBe(false);
+  await page.waitForTimeout(180);
+  await expect(search).toHaveValue("Alphapin");
+  await expect(search).toBeFocused();
+  expect((await mockState(page)).cancelledScans).toEqual([]);
+  expect((await mockState(page)).searchCalls.some((call) => call.query === "alphapin")).toBe(false);
+
+  await endComposition(search, "Alpha");
+  await search.press("Escape");
+  await expect.poll(async () => (await mockState(page)).cancelledScans.length).toBe(1);
+  await expect(search).toHaveValue("");
+});
+
+test("shared directory search keeps IME candidate keys inside the input", async ({ page }) => {
+  await installDesktopMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Duplicates", exact: true }).click();
+  await page.keyboard.press("Control+f");
+  const search = page.getByRole("textbox", { name: "Search duplicate results" });
+  await expect(search).toBeFocused();
+
+  await startComposition(search);
+  await inputCompositionValue(search, "weixin", true);
+  expect(await dispatchImeKey(search, "Enter", { isComposing: true })).toBe(false);
+  expect(await dispatchImeKey(search, "Escape", { isComposing: true })).toBe(false);
+  await expect(search).toHaveValue("weixin");
+  await expect(search).toBeFocused();
+
+  const finalValue = "\u5fae\u4fe1";
+  await endComposition(search, finalValue);
+  await expect(search).toHaveValue(finalValue);
+  await expect(search).toBeFocused();
 });
 
 test("dual-pane search runs both sessions and returns to the active pane", async ({ page }) => {

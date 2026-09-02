@@ -42,4 +42,18 @@ describe("Stage 7.10 preferences", () => {
     expect(parsePreferences(JSON.stringify({ mediaAutoplay: true })).mediaAutoplay).toBe(true);
     expect(parsePreferences(JSON.stringify({ mediaAutoplay: "true" })).mediaAutoplay).toBe(false);
   });
+
+  it("defaults and migrates desktop lifecycle preferences", () => {
+    expect(parsePreferences(null).closeBehavior).toBe("hide");
+    expect(parsePreferences(null).autostartEnabled).toBe(false);
+    expect(parsePreferences(JSON.stringify({ closeBehavior: "quit", autostartEnabled: true }))).toMatchObject({
+      closeBehavior: "quit",
+      autostartEnabled: true,
+    });
+    expect(parsePreferences(JSON.stringify({ closeBehavior: "invalid", autostartEnabled: "true" }))).toMatchObject({
+      closeBehavior: "hide",
+      autostartEnabled: false,
+    });
+    expect(parsePreferences("{broken").closeBehavior).toBe("hide");
+  });
 });

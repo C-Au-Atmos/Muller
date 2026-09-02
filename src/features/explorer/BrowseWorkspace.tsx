@@ -45,6 +45,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { startDrag } from "@crabnebula/tauri-plugin-drag";
 
 import { useAppI18n, type TranslationKey } from "../../i18n/i18n";
+import { isImeCompositionEvent } from "../../input/imeInput";
 import type { DirectoryPresentation } from "../../workspace/workspaceModel";
 import { PreviewPanel } from "../preview/PreviewPanel";
 import {
@@ -552,7 +553,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
     useEffect(() => {
       const handleTypeAhead = (event: KeyboardEvent) => {
         if (
-          event.isComposing
+          isImeCompositionEvent(event)
           || event.ctrlKey
           || event.altKey
           || event.metaKey
