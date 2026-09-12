@@ -3,32 +3,13 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 
 import { formatSpaceBytes, spaceSnifferClient } from "./spaceSnifferClient";
 import type { SpaceNode, SpaceSnifferProps } from "./types";
+import { layoutNodes, type SpaceRect } from "./spaceLayout";
 import "./SpaceSniffer.css";
 
-interface Rect { x: number; y: number; width: number; height: number; node: SpaceNode; }
 interface Point { x: number; y: number; }
 
 const palette = ["#27272a", "#3f3f46", "#52525b", "#27272a", "#454545", "#333338"];
 const nodeBytes = (node: SpaceNode): number => node.bytes ?? node.size ?? 0;
-
-function layoutNodes(nodes: readonly SpaceNode[], width: number, height: number): Rect[] {
-  const positive = nodes.filter((node) => nodeBytes(node) > 0);
-  const total = positive.reduce((sum, node) => sum + nodeBytes(node), 0) || positive.length || 1;
-  const columns = Math.max(1, Math.ceil(Math.sqrt(positive.length)));
-  const columnWidth = width / columns;
-  const rects: Rect[] = [];
-  for (let index = 0; index < positive.length; index += 1) {
-    const node = positive[index];
-    if (!node) continue;
-    const column = index % columns;
-    const columnNodes = positive.slice(column, undefined).filter((_, offset) => offset % columns === 0);
-    const columnTotal = columnNodes.reduce((sum, item) => sum + nodeBytes(item), 0) || total / columns;
-    const rowHeight = height * (nodeBytes(node) / columnTotal);
-    const y = columnNodes.slice(0, Math.floor(index / columns)).reduce((sum, item) => sum + height * (nodeBytes(item) / columnTotal), 0);
-    rects.push({ x: column * columnWidth, y, width: columnWidth, height: Math.max(18, rowHeight), node });
-  }
-  return rects;
-}
 
 function pathParts(path: string): string[] { return path.split(/[\\/]/).filter(Boolean); }
 
@@ -50,27 +31,41 @@ export function SpaceSniffer({ root, client = spaceSnifferClient, onOpenFolder, 
     const element = viewportRef.current;
     if (!element) return;
     const observer = new ResizeObserver(([entry]) => {
-      if (entry) setSize({ width: Math.max(1, entry.contentRect.width), height: Math.max(1, entry.contentRect.height) });
+      if (!entry) return;
+      const next = { width: Math.max(1, entry.contentRect.width), height: Math.max(1, entry.contentRect.height) };
+      setSize((previous) => previous.width === next.width && previous.height === next.height ? previous : next);
     });
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
 
-  const rects = useMemo(() => layoutNodes(activeRoot.children ?? [], size.width, size.height), [activeRoot.children, size.height, size.width]);
+  const rects = useMemo<SpaceRect[]>(() => layoutNodes(activeRoot.children ?? [], size.width, size.height), [activeRoot.children, size.height, size.width]);
+  const selectedIds = useMemo(() => new Set(selected.map((node) => node.id)), [selected]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ratio = window.devicePixelRatio || 1;
-    canvas.width = Math.round(size.width * ratio);
-    canvas.height = Math.round(size.height * ratio);
+    const pixelWidth = Math.max(1, Math.round(size.width * ratio));
+    const pixelHeight = Math.max(1, Math.round(size.height * ratio));
+    if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+    if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
+    canvas.style.width = `${size.width}px`;
+    canvas.style.height = `${size.height}px`;
+  }, [size]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
     const context = canvas.getContext("2d");
     if (!context) return;
+    const ratio = window.devicePixelRatio || 1;
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    context.clearRect(0, 0, size.width, size.height);
     context.fillStyle = "#09090b";
     context.fillRect(0, 0, size.width, size.height);
     rects.forEach((rect, index) => {
-      const isSelected = selected.some((node) => node.id === rect.node.id);
+      const isSelected = selectedIds.has(rect.node.id);
       context.fillStyle = palette[index % palette.length] ?? "#27272a";
       context.fillRect(rect.x + 2, rect.y + 2, Math.max(0, rect.width - 4), Math.max(0, rect.height - 4));
       context.strokeStyle = isSelected ? "#fafafa" : "#71717a";
@@ -85,7 +80,7 @@ export function SpaceSniffer({ root, client = spaceSnifferClient, onOpenFolder, 
         context.fillText(formatSpaceBytes(nodeBytes(rect.node)), rect.x + 10, rect.y + 39, rect.width - 20);
       }
     });
-  }, [rects, selected, size]);
+  }, [rects, selectedIds, size]);
 
   const localPoint = useCallback((event: ReactPointerEvent<HTMLDivElement>): Point => {
     const bounds = event.currentTarget.getBoundingClientRect();
