@@ -394,6 +394,8 @@ fn build_snapshot(
             stack.extend(read_dir.filter_map(Result::ok).map(|entry| entry.path()));
         }
     }
+    changed =
+        changed.saturating_add(old_map.keys().filter(|path| !seen.contains(*path)).count() as u64);
     entries.retain(|entry| seen.contains(&entry.path));
     let snapshot = Snapshot {
         version: INDEX_VERSION,
