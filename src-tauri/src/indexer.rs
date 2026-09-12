@@ -425,6 +425,13 @@ fn persist_snapshot(path: &Path, snapshot: &Snapshot) -> Result<(), String> {
     let temporary = path.with_extension("json.tmp");
     let bytes = serde_json::to_vec(snapshot).map_err(|error| error.to_string())?;
     fs::write(&temporary, bytes).map_err(|error| error.to_string())?;
+    // `rename` replaces an existing destination on Unix, but Windows returns
+    // ERROR_ALREADY_EXISTS. Remove the old snapshot first so repeated builds
+    // work on every supported platform. A future native provider can use
+    // ReplaceFileW for a strictly atomic swap.
+    if path.exists() {
+        fs::remove_file(path).map_err(|error| error.to_string())?;
+    }
     fs::rename(&temporary, path).map_err(|error| error.to_string())
 }
 
@@ -465,5 +472,17 @@ mod tests {
             load_snapshot(&storage).unwrap().entries.len(),
             snapshot.entries.len()
         );
+        let (_, second_changed) = build_snapshot(
+            &[root.path().to_path_buf()],
+            &storage,
+            &CancellationToken::default(),
+            2,
+            &Channel::new(|_| Ok(())),
+        )
+        .unwrap();
+        // Filesystem timestamp precision and directory metadata can vary by
+        // platform; a second scan must still be no more expensive than the
+        // initial snapshot for this fixture.
+        assert!(second_changed <= changed);
     }
 }
