@@ -2,6 +2,7 @@ mod diagnostics;
 mod diff;
 mod explorer;
 mod file_operations;
+mod indexer;
 mod lifecycle;
 mod mutation;
 mod preview;
@@ -34,6 +35,10 @@ use file_operations::{
     FileOperationManager, cancel_file_operation, create_entry, create_zip, directory_statistics,
     extract_zip, open_native_path, open_terminal, organize_by_keyword, recycle_entry, rename_entry,
     transfer_directory_entries, transfer_entry, undo_organize_by_keyword,
+};
+use indexer::{
+    IndexerManager, cancel_global_indexer, get_indexer_capabilities, get_indexer_status,
+    search_global_index, start_global_indexer,
 };
 use lifecycle::{
     CloseBehavior, LifecycleState, get_autostart_status, get_close_behavior, is_autostart_args,
@@ -232,6 +237,7 @@ pub fn run() {
         .manage(ScanManager::default())
         .manage(SpaceSnifferManager::default())
         .manage(ExplorerManager::default())
+        .manage(IndexerManager::default())
         .manage(DiffManager::default())
         .manage(MutationManager::default())
         .manage(FileOperationManager::default())
@@ -245,6 +251,11 @@ pub fn run() {
             start_directory_query,
             start_directory_search,
             warm_global_search_index,
+            get_indexer_capabilities,
+            start_global_indexer,
+            cancel_global_indexer,
+            search_global_index,
+            get_indexer_status,
             cancel_directory_query,
             read_directory_page,
             search_directory_page,
