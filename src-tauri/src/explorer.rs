@@ -14,6 +14,8 @@ use pinyin::ToPinyin as _;
 use serde::{Deserialize, Serialize};
 use tauri::{State, ipc::Channel};
 
+use crate::indexer::search_persistent_index;
+
 const MAX_DIRECTORY_PAGE_SIZE: usize = 512;
 const MAX_SEARCH_RESULTS: usize = 200_000;
 const MAX_SEARCH_INDEX_ENTRIES: usize = 2_000_000;
@@ -210,6 +212,9 @@ struct IndexedDirectoryEntry {
     name_lower: String,
     kind: DirectoryEntryKind,
     extension: Option<String>,
+    size: u64,
+    modified_unix_ms: Option<u64>,
+    hidden: bool,
 }
 
 #[derive(Debug)]
@@ -538,6 +543,7 @@ pub fn start_directory_query(
 #[tauri::command]
 pub fn start_directory_search(
     manager: State<'_, ExplorerManager>,
+    _indexer: State<'_, crate::indexer::IndexerManager>,
     request: StartDirectorySearchRequest,
     on_event: Channel<DirectoryEvent>,
 ) -> StartDirectoryResponse {
@@ -557,7 +563,16 @@ pub fn start_directory_search(
             cancellation.cancel();
         }
         let result = if request.indexed {
-            manager.build_indexed_search_session(&request, &cancellation)
+            match build_persistent_indexed_search_session(&request, &cancellation) {
+                Ok(session) => Ok(session),
+                Err(error) => {
+                    log::debug!(
+                        target: "muller::search",
+                        "event=search.persistent_index_unavailable error={error}; falling back to directory index"
+                    );
+                    manager.build_indexed_search_session(&request, &cancellation)
+                }
+            }
         } else {
             build_search_session(&request, &cancellation)
         };
@@ -960,6 +975,57 @@ fn build_search_session(
     })
 }
 
+fn build_persistent_indexed_search_session(
+    request: &StartDirectorySearchRequest,
+    cancellation: &CancellationToken,
+) -> Result<DirectorySession, DirectoryBuildError> {
+    if cancellation.is_cancelled() {
+        return Err(DirectoryBuildError::Cancelled);
+    }
+    let indexed = search_persistent_index(&request.roots, &request.query, MAX_SEARCH_RESULTS)
+        .map_err(DirectoryBuildError::Message)?;
+    let mut entries = Vec::with_capacity(indexed.len());
+    for entry in indexed {
+        if cancellation.is_cancelled() {
+            return Err(DirectoryBuildError::Cancelled);
+        }
+        let hidden = entry.name.starts_with('.');
+        let path = entry.path;
+        let kind = if entry.is_directory {
+            DirectoryEntryKind::Directory
+        } else {
+            DirectoryEntryKind::File
+        };
+        let extension = path
+            .extension()
+            .map(|value| value.to_string_lossy().to_lowercase());
+        if !matches_directory_filter(
+            kind,
+            extension.as_deref(),
+            entry.modified_unix_ms,
+            request.filter.as_ref(),
+        ) {
+            continue;
+        }
+        let name_lower = entry.name.to_lowercase();
+        entries.push(DirectoryEntry {
+            path: path_for_user(&path),
+            name: entry.name,
+            name_lower,
+            kind,
+            extension,
+            size: entry.size,
+            modified_unix_ms: entry.modified_unix_ms,
+            hidden,
+        });
+    }
+    sort_directory_entries(&mut entries, request.filter.as_ref());
+    Ok(DirectorySession {
+        path: path_for_user(&request.roots[0]),
+        entries,
+    })
+}
+
 fn search_roots_key(roots: &[PathBuf]) -> String {
     let mut values = roots
         .iter()
@@ -1024,6 +1090,10 @@ fn build_search_index(
                     pending.push(path.clone());
                 }
                 let name = entry.file_name().to_string_lossy().into_owned();
+                let metadata = fs::symlink_metadata(&path).ok();
+                let hidden = metadata
+                    .as_ref()
+                    .is_some_and(|metadata| is_hidden(&name, metadata));
                 entries.push(IndexedDirectoryEntry {
                     extension: path
                         .extension()
@@ -1032,6 +1102,13 @@ fn build_search_index(
                     name_lower: name.to_lowercase(),
                     name,
                     kind,
+                    size: if kind == DirectoryEntryKind::File {
+                        metadata.as_ref().map_or(0, fs::Metadata::len)
+                    } else {
+                        0
+                    },
+                    modified_unix_ms: metadata.as_ref().and_then(modified_unix_ms),
+                    hidden,
                 });
                 if entries.len() >= MAX_SEARCH_INDEX_ENTRIES {
                     break;
@@ -1075,12 +1152,10 @@ fn filter_search_index(
         if !indexed.name_lower.contains(&query) {
             continue;
         }
-        let metadata = fs::symlink_metadata(&indexed.path).ok();
-        let modified = metadata.as_ref().and_then(modified_unix_ms);
         if !matches_directory_filter(
             indexed.kind,
             indexed.extension.as_deref(),
-            modified,
+            indexed.modified_unix_ms,
             request.filter.as_ref(),
         ) {
             continue;
@@ -1091,15 +1166,9 @@ fn filter_search_index(
             name_lower: indexed.name_lower.clone(),
             kind: indexed.kind,
             extension: indexed.extension.clone(),
-            size: if indexed.kind == DirectoryEntryKind::File {
-                metadata.as_ref().map_or(0, fs::Metadata::len)
-            } else {
-                0
-            },
-            modified_unix_ms: modified,
-            hidden: metadata
-                .as_ref()
-                .is_some_and(|metadata| is_hidden(&indexed.name, metadata)),
+            size: indexed.size,
+            modified_unix_ms: indexed.modified_unix_ms,
+            hidden: indexed.hidden,
         });
         if entries.len() >= MAX_SEARCH_RESULTS {
             break;

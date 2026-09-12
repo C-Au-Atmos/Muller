@@ -57,6 +57,49 @@ pub struct SearchIndexerRequest {
     pub storage_path: Option<PathBuf>,
 }
 
+/// Query the persisted index for the global explorer search path.
+///
+/// This intentionally returns an error when the snapshot is unavailable or
+/// does not cover any requested root so callers can fall back to the portable
+/// directory walker without changing the UI contract.
+pub(crate) fn search_persistent_index(
+    roots: &[PathBuf],
+    query: &str,
+    limit: usize,
+) -> Result<Vec<IndexerEntry>, String> {
+    if roots.is_empty() {
+        return Err("search requires at least one root".into());
+    }
+    let snapshot = load_snapshot(&default_storage_path()).map_err(|error| error.to_string())?;
+    let normalized_roots = normalize_roots(roots.to_vec());
+    if !snapshot.roots.iter().any(|indexed_root| {
+        normalized_roots
+            .iter()
+            .any(|root| indexed_root.starts_with(root) || root.starts_with(indexed_root))
+    }) {
+        return Err("persistent index does not cover requested roots".into());
+    }
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let limit = limit.clamp(1, MAX_LIMIT);
+    Ok(snapshot
+        .entries
+        .into_iter()
+        .filter(|entry| {
+            normalized_roots
+                .iter()
+                // Snapshot paths and roots are canonicalized during indexing;
+                // avoid a filesystem syscall per candidate on the hot path.
+                .any(|root| entry.path.starts_with(root))
+                && (entry.name.to_lowercase().contains(&query)
+                    || entry.path.to_string_lossy().to_lowercase().contains(&query))
+        })
+        .take(limit)
+        .collect())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IndexerEntry {
@@ -231,25 +274,32 @@ pub fn cancel_global_indexer(manager: State<'_, IndexerManager>, task_id: u64) -
 
 #[tauri::command]
 pub fn search_global_index(request: SearchIndexerRequest) -> Result<Vec<IndexerEntry>, String> {
-    let storage = request.storage_path.unwrap_or_else(default_storage_path);
-    let snapshot = load_snapshot(&storage).map_err(|error| error.to_string())?;
-    let query = request.query.trim().to_lowercase();
-    if query.is_empty() {
-        return Ok(Vec::new());
+    if request.storage_path.is_some() || request.root.is_none() {
+        let storage = request.storage_path.unwrap_or_else(default_storage_path);
+        let snapshot = load_snapshot(&storage).map_err(|error| error.to_string())?;
+        let query = request.query.trim().to_lowercase();
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+        let root = request.root.map(|path| normalize_path(&path));
+        let limit = request.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
+        return Ok(snapshot
+            .entries
+            .into_iter()
+            .filter(|entry| {
+                root.as_ref()
+                    .is_none_or(|prefix| normalize_path(&entry.path).starts_with(prefix))
+                    && (entry.name.to_lowercase().contains(&query)
+                        || entry.path.to_string_lossy().to_lowercase().contains(&query))
+            })
+            .take(limit)
+            .collect());
     }
-    let root = request.root.map(|path| normalize_path(&path));
-    let limit = request.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
-    Ok(snapshot
-        .entries
-        .into_iter()
-        .filter(|entry| {
-            root.as_ref()
-                .is_none_or(|prefix| normalize_path(&entry.path).starts_with(prefix))
-                && (entry.name.to_lowercase().contains(&query)
-                    || entry.path.to_string_lossy().to_lowercase().contains(&query))
-        })
-        .take(limit)
-        .collect())
+    search_persistent_index(
+        &[request.root.expect("root was checked above")],
+        &request.query,
+        request.limit.unwrap_or(DEFAULT_LIMIT),
+    )
 }
 
 #[tauri::command]
