@@ -383,17 +383,15 @@ fn build_snapshot(
         seen.insert(path.clone());
         entries.push(entry);
         scanned = scanned.saturating_add(1);
-        if scanned % 512 == 0 {
+        if scanned.is_multiple_of(512) {
             let _ = channel.send(IndexerEvent::Progress {
                 task_id,
                 scanned,
                 changed,
             });
         }
-        if is_directory {
-            if let Ok(read_dir) = fs::read_dir(&path) {
-                stack.extend(read_dir.filter_map(Result::ok).map(|entry| entry.path()));
-            }
+        if is_directory && let Ok(read_dir) = fs::read_dir(&path) {
+            stack.extend(read_dir.filter_map(Result::ok).map(|entry| entry.path()));
         }
     }
     entries.retain(|entry| seen.contains(&entry.path));
