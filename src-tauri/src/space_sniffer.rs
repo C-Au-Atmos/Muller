@@ -334,13 +334,13 @@ fn run_space_scan_task<F>(
                 states[index].node.partial = partial;
                 if index != 0 {
                     batch.push(states[index].node.clone());
-                    if batch.len() >= request.batch_size() {
-                        if !send(SpaceScanEvent::Batch {
+                    if batch.len() >= request.batch_size()
+                        && !send(SpaceScanEvent::Batch {
                             task_id,
                             items: std::mem::take(&mut batch),
-                        }) {
-                            cancellation.cancel();
-                        }
+                        })
+                    {
+                        cancellation.cancel();
                     }
                 }
             }

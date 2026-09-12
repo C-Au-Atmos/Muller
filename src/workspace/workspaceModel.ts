@@ -1,7 +1,7 @@
 export const WORKSPACE_SCHEMA_VERSION = 3;
 export const MAX_WORKSPACE_TABS = 12;
 
-export type WorkspaceMode = "browse" | "duplicates" | "compare" | "album";
+export type WorkspaceMode = "browse" | "duplicates" | "compare" | "album" | "space";
 export type DirectoryPresentation = "list" | "cubes-grid" | "album";
 export type DateFilterMode = "before" | "after";
 export type VirtualLocation = "this-pc" | null;
@@ -63,6 +63,7 @@ const MODES = new Set<WorkspaceMode>([
   "duplicates",
   "compare",
   "album",
+  "space",
 ]);
 const PRESENTATIONS = new Set<DirectoryPresentation>([
   "list",
