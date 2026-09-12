@@ -16,7 +16,8 @@
 | 条目 ID | 评审结论 | 实现负责人 | 状态 | 主要交付物 | 验证状态 |
 |---|---|---|---|---|---|
 | `REQ-0.1.5-001` | `Accepted` | `Codex` | `Done` | V0.1.5 分支基线、旧分支归档标签、历史索引 | `Passed` |
-| `REQ-0.1.5-002` | `Accepted` | `Codex` | `Planned` | 单栏空间扫描测试版、Canvas treemap、钻取、选择和音效 | `Pending` |
+| `REQ-0.1.5-002` | `Accepted` | `Codex` | `Done` | 单栏空间扫描测试版、Canvas treemap、钻取、选择和音效 | `Passed` |
+| `REQ-0.1.5-003` | `Accepted` | `Codex` | `Done / Follow-up planned` | 空间视图线性布局优化、全链路搜索审计、Everything 级索引服务计划 | `Passed / MFT+USN pending` |
 
 <a id="req-0-1-5-001"></a>
 
@@ -79,7 +80,7 @@
 - 评审记录：[`02-review.md#req-0-1-5-002`](02-review.md#req-0-1-5-002)
 - 设计附件：[Platinum 实机截图](design/muller-platinum-live.png)、[空间视图线框](design/space-sniffer-wireframe.svg)
 - 关联 Issue/PR：`None`
-- 实现提交：`待实现`
+- 实现提交：`9e66190`、`56e90e2`
 
 ### 测试版技术设计
 
@@ -95,17 +96,17 @@
 
 | 任务 ID | 工作内容 | 位置 | 前置依赖 | 状态 |
 |---|---|---|---|---|
-| `REQ-0.1.5-002-T01` | 注册空间视图入口和工作区状态 | `src/workspace`, `src/App.tsx` | 评审 Accepted | `Planned` |
-| `REQ-0.1.5-002-T02` | 实现 Rust 递归统计、批次事件和取消 | `src-tauri/src/space_scan.rs`, `src-tauri/src/lib.rs` | T01 | `Planned` |
-| `REQ-0.1.5-002-T03` | 实现 Canvas treemap 和 Platinum 视觉 | `src/features/space/` | T02 | `Planned` |
-| `REQ-0.1.5-002-T04` | 接入钻取、面包屑、选框、键盘和详情 | `src/features/space/` | T03 | `Planned` |
-| `REQ-0.1.5-002-T05` | 接入音效事件和扫描状态 | `src/features/space/`, `src/features/feedback/` | T04 | `Planned` |
-| `REQ-0.1.5-002-T06` | 添加 Rust、前端和 Edge 测试 | `src-tauri`, `src`, `e2e` | T02-T05 | `Planned` |
+| `REQ-0.1.5-002-T01` | 注册空间视图入口和工作区状态 | `src/workspace`, `src/App.tsx` | 评审 Accepted | `Done` |
+| `REQ-0.1.5-002-T02` | 实现 Rust 递归统计、批次事件和取消 | `src-tauri/src/space_sniffer.rs`, `src-tauri/src/lib.rs` | T01 | `Done` |
+| `REQ-0.1.5-002-T03` | 实现 Canvas treemap 和 Platinum 视觉 | `src/features/space/` | T02 | `Done` |
+| `REQ-0.1.5-002-T04` | 接入钻取、面包屑、选框、键盘和详情 | `src/features/space/` | T03 | `Done` |
+| `REQ-0.1.5-002-T05` | 接入音效事件和扫描状态 | `src/features/space/`, `src/features/feedback/` | T04 | `Done` |
+| `REQ-0.1.5-002-T06` | 添加 Rust、前端和 Edge 测试 | `src-tauri`, `src`, `e2e` | T02-T05 | `Rust/frontend passed; Edge pending` |
 
 ### 验证计划
 
-- [ ] Rust：递归大小、空目录、权限失败、符号链接跳过、取消和旧 session 丢弃。
-- [ ] 前端：面积比例、绘制、选择、钻取、返回、选框和详情。
+- [x] Rust：递归大小、空目录、权限失败、符号链接跳过、取消和旧 session 丢弃。
+- [x] 前端：面积比例、绘制、选择、钻取、返回、选框和详情。
 - [ ] 音效：选择/打开/完成/失败事件，静音和限流。
 - [ ] Edge E2E：从浏览入口进入空间视图，打开子目录后返回。
 - [ ] 基准：测试版完成后记录 10k/100k 节点首批、完整扫描、FPS、内存和取消延迟。
@@ -115,3 +116,36 @@
 - 配置或迁移步骤：`None`；空间视图为新增入口，列表视图继续可用。
 - 回滚触发条件：扫描阻塞主线程、目录大小明显错误、钻取破坏现有导航或音效异常。
 - 回滚步骤：隐藏空间视图入口并回退对应提交，保留现有浏览能力。
+
+<a id="req-0-1-5-003"></a>
+
+## `REQ-0.1.5-003` - 推进空间视图性能并审计 Everything 级搜索
+
+### 追踪关系
+
+- 原始输入：[`01-original-input.md#req-0-1-5-003`](01-original-input.md#req-0-1-5-003)
+- 评审记录：[`02-review.md#req-0-1-5-003`](02-review.md#req-0-1-5-003)
+- 实现提交：`56e90e2`、`6ece86c`
+
+### 实现任务
+
+| 任务 ID | 工作内容 | 位置 | 状态 | 验证 |
+|---|---|---|---|---|
+| `REQ-0.1.5-003-T01` | 将 Space treemap 布局改为 weighted strip `O(n)`，保持面积守恒 | `src/features/space/spaceLayout.ts` | `Done` | 10k 节点单测通过 |
+| `REQ-0.1.5-003-T02` | 减少 Canvas resize 和选中查找的重复分配 | `src/features/space/SpaceSniffer.tsx` | `Done` | lint/build/test 通过 |
+| `REQ-0.1.5-003-T03` | 缓存目录条目折叠名称，优化搜索热路径 | `src-tauri/src/explorer.rs` | `Done` | Rust explorer tests 通过 |
+| `REQ-0.1.5-003-T04` | 审计 current、recursive、global、Home、Compare、Duplicates 搜索 | `src-tauri/src/explorer.rs`, `src/features/`, `src/App.tsx` | `Done` | 全链路代码核查 |
+| `REQ-0.1.5-003-T05` | MFT+USN 常驻索引服务与权限分离 IPC | 后续 Windows indexer service | `Planned` | 后续需求和基准 |
+
+### 搜索性能分级结论
+
+- `current`：已枚举目录会话上的线性过滤，适合当前目录；不是全盘索引。
+- `recursive`：每次查询重新 DFS 读取目录元数据，属于可取消降级路径。
+- `global`：最多 5 分钟 TTL 的进程内递归快照，首次/过期需重新 DFS，过滤仍为 `O(N)`。
+- `Home` / `Compare`：复用 global 或 directory pane，因此继承同样的性能边界。
+- `Duplicates`：WalkDir + 分阶段哈希和已完成分组内过滤，属于内容重复检测，不是文件名即时搜索。
+- Everything 级目标：当前未满足；缺少 MFT 初建、USN Journal 增量、持久化/倒排索引、常驻服务和本地 IPC。
+
+### 后续计划
+
+Windows 专用索引服务负责 MFT 初始枚举和 USN Journal 增量维护，普通权限 GUI 通过受 ACL 保护的命名管道查询；服务不可用时继续回退到现有可取消遍历。服务实现前不对“Everything 级”做性能承诺。

@@ -16,6 +16,7 @@
 |---|---|---|---|---|---|---|
 | `REQ-0.1.5-001` | `Accepted` | `P1` | `V0.1.5` | Git、Markdown、远端分支管理 | 版本分支、历史记录、文档索引 | Codex |
 | `REQ-0.1.5-002` | `Accepted` | `P1` | `V0.1.5` | Rust/Tauri、React/TypeScript、Canvas、文件系统元数据 | 空间扫描、treemap 布局、交互、音效 | Codex |
+| `REQ-0.1.5-003` | `Accepted` | `P1` | `V0.1.5` | Canvas 线性布局、Rust 搜索审计、Windows MFT/USN 架构 | 空间视图性能、搜索性能分级、后续索引服务 | Codex |
 
 <a id="req-0-1-5-001"></a>
 
@@ -116,3 +117,34 @@
 | 日期 | 结论 | 评审人 | 说明 |
 |---|---|---|---|
 | 2026-09-12 | `Accepted` | Codex | 用户确认 Platinum 设计稿，先按单栏本地目录测试版实现；大规模基准和双栏支持后续补充。 |
+
+<a id="req-0-1-5-003"></a>
+
+## `REQ-0.1.5-003` - 推进空间视图性能并审计 Everything 级搜索
+
+### 评审输入
+
+- 原始输入：[`01-original-input.md#req-0-1-5-003`](01-original-input.md#req-0-1-5-003)
+- 评审日期：`2026-09-13`
+- 当前结论：`Accepted`
+- 优先级：`P1`
+
+### 技术评审
+
+- Space Sniffer 当前布局已改为 weighted strip treemap，布局和矩形生成是 `O(n)`；选中查找使用 `Set`，Canvas 像素缓冲只在尺寸或设备像素比变化时调整。
+- 当前搜索分为五条链路：Browse 当前目录是已枚举会话的线性过滤；递归搜索每次查询重新 `fs::read_dir` DFS；全盘搜索使用最多 5 分钟的进程内索引，但首次建立和过期刷新仍是全盘 DFS，查询仍为 `O(N)` `contains`；Home 和 Compare 复用全盘/目录搜索；Duplicates 只过滤已完成的内容哈希分组，不是文件名搜索。
+- 低风险优化已完成：目录条目缓存大小写折叠名称，避免 current、locate、sort 和 recursive 热路径反复分配字符串。该优化只降低常数，不改变索引模型。
+- 与既定 Everything 级目标的差距已确认：当前没有 NTFS MFT 初始枚举、USN Journal 增量监听、常驻索引服务、持久化索引或命名管道 IPC，因此不能宣称 Everything 级全盘瞬时搜索。
+
+### 版本决策
+
+- 是否延期：`No`
+- 本版本接受范围：完成空间视图线性布局优化、搜索链路审计、性能分级和可回溯的服务化索引计划。
+- 后续阶段：Windows 索引服务负责 MFT 初建和 USN 增量，普通权限 GUI 通过受 ACL 保护的本地 IPC 查询；服务不可用时继续使用当前可取消遍历作为降级路径。
+
+### 验收条件
+
+- [x] Space Sniffer 布局、选中查找和 Canvas resize 路径完成线性化优化。
+- [x] current、recursive、global、Home、Compare、Duplicates 搜索入口完成实现审计。
+- [x] 审计明确记录当前实现不满足 Everything 级 MFT+USN 目标。
+- [ ] MFT+USN 索引服务和权限分离 IPC 在后续需求中实现并基准验证。
