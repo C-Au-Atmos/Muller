@@ -22,5 +22,14 @@ describe("layoutNodes", () => {
     const rects = layoutNodes([node("a", 3), node("b", 2), node("empty", 0)], 100, 50);
     expect(rects).toHaveLength(2);
     expect(rects.reduce((sum, rect) => sum + rect.width * rect.height, 0)).toBeCloseTo(5000, 5);
+    for (let left = 0; left < rects.length; left += 1) {
+      for (let right = left + 1; right < rects.length; right += 1) {
+        const a = rects[left]!;
+        const b = rects[right]!;
+        const overlaps = a.x < b.x + b.width - 1e-9 && a.x + a.width > b.x + 1e-9
+          && a.y < b.y + b.height - 1e-9 && a.y + a.height > b.y + 1e-9;
+        expect(overlaps).toBe(false);
+      }
+    }
   });
 });

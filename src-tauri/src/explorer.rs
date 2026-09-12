@@ -115,6 +115,13 @@ pub enum DirectoryEntryKind {
 pub struct DirectoryEntry {
     path: PathBuf,
     name: String,
+    /// Cached case-folded filename used by the hot search/sort paths.
+    ///
+    /// This stays out of the IPC payload because the UI only needs `name`,
+    /// while repeated `to_lowercase()` calls become significant on large
+    /// directory snapshots.
+    #[serde(skip)]
+    name_lower: String,
     kind: DirectoryEntryKind,
     extension: Option<String>,
     size: u64,
@@ -373,7 +380,7 @@ impl ExplorerManager {
         let mut total_entries = 0_usize;
         let mut entries = Vec::with_capacity(limit);
         for entry in &session.entries {
-            if !query.is_empty() && !entry.name.to_lowercase().contains(&query) {
+            if !query.is_empty() && !entry.name_lower.contains(&query) {
                 continue;
             }
             if total_entries >= offset && entries.len() < limit {
@@ -407,7 +414,7 @@ impl ExplorerManager {
         let mut visible_position = 0_usize;
         let mut entries = Vec::with_capacity(requested.len());
         for entry in &session.entries {
-            if !query.is_empty() && !entry.name.to_lowercase().contains(&query) {
+            if !query.is_empty() && !entry.name_lower.contains(&query) {
                 continue;
             }
             if requested.contains(&visible_position) {
@@ -452,7 +459,7 @@ impl ExplorerManager {
         let visible = session
             .entries
             .iter()
-            .filter(|entry| query.is_empty() || entry.name.to_lowercase().contains(&query))
+            .filter(|entry| query.is_empty() || entry.name_lower.contains(&query))
             .enumerate()
             .collect::<Vec<_>>();
         if visible.is_empty() {
@@ -461,10 +468,9 @@ impl ExplorerManager {
         let mut direct = Vec::new();
         let mut phonetic = Vec::new();
         for (position, entry) in visible {
-            let name = entry.name.to_lowercase();
-            if name.starts_with(&prefix) {
+            if entry.name_lower.starts_with(&prefix) {
                 direct.push((position, entry));
-            } else if pinyin_initials(&name).starts_with(&prefix) {
+            } else if pinyin_initials(&entry.name_lower).starts_with(&prefix) {
                 phonetic.push((position, entry));
             }
         }
@@ -795,6 +801,7 @@ fn build_directory_session(
             DirectoryEntryKind::Other
         };
         let name = entry.file_name().to_string_lossy().into_owned();
+        let name_lower = name.to_lowercase();
         let extension = entry_path
             .extension()
             .map(|value| value.to_string_lossy().to_lowercase());
@@ -812,6 +819,7 @@ fn build_directory_session(
             modified_unix_ms: modified,
             hidden: is_hidden(&name, &metadata),
             path: path_for_user(&entry_path),
+            name_lower,
             name,
             kind,
         });
@@ -895,7 +903,8 @@ fn build_search_session(
                     pending.push(entry_path.clone());
                 }
                 let name = entry.file_name().to_string_lossy().into_owned();
-                if !name.to_lowercase().contains(&query) {
+                let name_lower = name.to_lowercase();
+                if !name_lower.contains(&query) {
                     continue;
                 }
                 let metadata = fs::symlink_metadata(&entry_path).ok();
@@ -923,6 +932,7 @@ fn build_search_session(
                         .as_ref()
                         .is_some_and(|metadata| is_hidden(&name, metadata)),
                     path: path_for_user(&entry_path),
+                    name_lower,
                     name,
                     kind,
                 });
@@ -1078,6 +1088,7 @@ fn filter_search_index(
         entries.push(DirectoryEntry {
             path: path_for_user(&indexed.path),
             name: indexed.name.clone(),
+            name_lower: indexed.name_lower.clone(),
             kind: indexed.kind,
             extension: indexed.extension.clone(),
             size: if indexed.kind == DirectoryEntryKind::File {
@@ -1124,7 +1135,7 @@ fn sort_directory_entries(entries: &mut [DirectoryEntry], filter: Option<&Direct
             return kind_order;
         }
         let field_order = match sort_by {
-            DirectorySortField::Name => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+            DirectorySortField::Name => left.name_lower.cmp(&right.name_lower),
             DirectorySortField::Type => left
                 .extension
                 .as_deref()
@@ -1139,7 +1150,7 @@ fn sort_directory_entries(entries: &mut [DirectoryEntry], filter: Option<&Direct
             field_order
         };
         directed
-            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+            .then_with(|| left.name_lower.cmp(&right.name_lower))
             .then_with(|| left.name.cmp(&right.name))
     });
 }
@@ -1164,9 +1175,11 @@ fn build_unc_server_session(
             || path.to_string_lossy().into_owned(),
             |value| value.to_string_lossy().into_owned(),
         );
+        let name_lower = name.to_lowercase();
         entries.push(DirectoryEntry {
             path,
             name,
+            name_lower,
             kind: DirectoryEntryKind::Directory,
             extension: None,
             size: 0,
