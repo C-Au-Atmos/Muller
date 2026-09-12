@@ -6,6 +6,7 @@ mod lifecycle;
 mod mutation;
 mod preview;
 mod scan;
+mod space_sniffer;
 mod startup_gate;
 mod thumbnail;
 mod windows_navigation;
@@ -44,6 +45,7 @@ use mutation::{
 };
 use preview::{PreviewManager, cancel_file_preview, start_file_preview};
 use scan::{ScanManager, cancel_scan, start_scan};
+use space_sniffer::{SpaceSnifferManager, cancel_space_scan, start_space_scan};
 use startup_gate::StartupGate;
 use thumbnail::{
     ShellVisualManager, cancel_image_thumbnail, cancel_shell_visual, start_image_thumbnail,
@@ -228,6 +230,7 @@ pub fn run() {
         .manage(DiagnosticsState::default())
         .manage(LifecycleState::new(launch_is_autostart))
         .manage(ScanManager::default())
+        .manage(SpaceSnifferManager::default())
         .manage(ExplorerManager::default())
         .manage(DiffManager::default())
         .manage(MutationManager::default())
@@ -237,6 +240,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             start_scan,
             cancel_scan,
+            start_space_scan,
+            cancel_space_scan,
             start_directory_query,
             start_directory_search,
             warm_global_search_index,
