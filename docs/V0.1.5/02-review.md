@@ -64,6 +64,7 @@
 ### 评审输入
 
 - 原始输入：[`01-original-input.md#req-0-1-5-002`](01-original-input.md#req-0-1-5-002)
+- Platinum 实机截图：[muller-platinum-live.png](design/muller-platinum-live.png)
 - 设计附件：[Space Sniffer 空间视图线框](design/space-sniffer-wireframe.svg)
 - 交互流程图：[Muller V0.1.5 Space Sniffer Interaction Flow](https://www.figma.com/board/SxWYnaNaS31cnTHtlOLvGY?utm_source=other&utm_content=edit_in_figjam&oai_id=&request_id=948d8780-8eaa-4566-a601-4285c406cf8a)
 - 评审日期：`2026-09-12`
@@ -87,6 +88,7 @@
 - 缓存策略：以规范化路径、文件 ID（可用时）、大小、修改时间和目录版本校验；缓存只用于增量和钻取首屏，不能替代最终扫描。
 - 布局与绘制：使用确定性的 squarified 或 slice-and-dice treemap；布局在 worker 或 Rust 侧计算；Canvas/WebGL 批量绘制方块、1px 光线和 90°正交边界，DOM overlay 提供键盘和 ARIA。
 - 交互：单击选择，双击或 Enter 打开目录，Esc/面包屑返回；拖拽选框命中可见矩形；小块聚合或只显示悬浮详情。
+- 视觉基线：依据 0.1.4 实机 Platinum 截图，使用 `#09090b`、`#121215`、`#151518`、`#27272a`、`#2f2f35` 和 `#ffffff`；方块只做灰阶层次，细线和选框使用白色，状态色仅用于扫描/错误小提示。
 - 音效：复用 `useInterfaceAudio` 的 tick/action/navigate/success/warning 和限流；新增 tile 事件必须去重，扫描异常不得误报成功音效。
 - 性能风险：网络盘、机械盘、权限错误、目录持续变化和百万级文件会产生长尾；必须展示扫描状态，限制并发和内存，并允许立即停止。
 - 测试策略：Rust 统计/取消/错误测试，面积守恒和稳定布局测试，Canvas/WebGL 选框命中测试，音效节流单测，Windows 基准和 Edge E2E。
