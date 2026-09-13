@@ -2,6 +2,65 @@
 
 All notable changes to Muller are documented in this file.
 
+## [0.1.5-beta.3] - 2026-09-13
+
+REQ-0.1.5-005 adds keyboard navigation and interaction polish to the Platinum
+space view.
+
+- Arrow keys select the nearest visible block; Enter opens folders and Escape returns.
+- Optional Target Cursor effect can lock onto controls and the current Canvas block.
+- Space blocks use richer deep-black, low-saturation graphite, blue-black, smoke-purple and warm-black tones.
+- Right-click offers open/enter, locate in browser and copy path for the selected item.
+- Choosing a folder from the left rail while in Space mode keeps the Space view active.
+- Verified lint, 103 frontend tests, production build and the full Edge E2E suite.
+
+## [0.1.5-beta.2] - 2026-09-13
+
+BUG-0.1.5-001 corrects the space map's thin, hard-to-click rectangles and the
+missing updates during scanning.
+
+- Uses squarified byte-proportional rectangles, aggregating small entries into
+  an accessible list. Individual blocks meet a 28px short edge and 1600px² area
+  threshold; an aggregate keeps its true area even when it is subpixel.
+- Restores Platinum gradients, fine white seams, orthogonal light accents and
+  selection corners. Folder contents become interactive tiles after opening.
+- Streams discovered directories and growing totals through coalesced immutable
+  snapshots, animates current geometry, and retains the last result on stop.
+- Keeps drill-down history and scan sessions isolated; respects reduced motion
+  and preserves distinct names in Windows case-sensitive directories.
+- Verified 102 frontend, 153 Rust and 96 Edge tests, with focused regressions for
+  live Canvas changes, cancellation, small-item access and folder navigation.
+
+The beta.1 native MFT/USN filename index remains available. Directory space is
+still measured separately; fast scans finish immediately without artificial delay.
+
+## [0.1.5-beta.1] - 2026-09-13
+
+Windows test build for REQ-0.1.5-002/004: Platinum Space Sniffer view and native
+NTFS filename indexing. Enable "NTFS fast index" in the address bar to launch
+the isolated indexer through UAC; the desktop GUI keeps normal privileges.
+
+- Enumerates MFT records with FSCTL_ENUM_USN_DATA, then replays USN changes for
+  creates, deletes, file renames and parent-directory renames. Invalid journal
+  checkpoints trigger a rebuild or an explicit fallback state.
+- Uses a local, user-restricted named pipe with process identity checks; the
+  helper only reads filesystem metadata and exits with its parent process.
+- Browse, Home and Compare searches share the native provider, bounded query
+  snapshots and paged metadata loading. Missing coverage falls back to the
+  portable walker. Portable snapshots are cached in memory for queries.
+- Includes the existing Canvas space map with selection, folder drill-down,
+  breadcrumbs, interface sounds and linear weighted-strip layout.
+- Space scans now emit file tiles in addition to folder totals; intermediate
+  breadcrumbs restore the correct directory and keep Escape navigation working.
+- Verified 148 Rust tests, 86 frontend tests and 93 Edge E2E tests, plus a real
+  NTFS helper probe covering initial enumeration and USN lifecycle changes.
+
+Beta limits: the native index lives in memory and rebuilds on activation;
+additional hard-link names are not fully enumerated. USN must already be
+enabled. Filename indexing does not compute recursive directory byte totals;
+the space view continues to scan logical sizes separately. Name queries scan
+cached names; this build does not claim parity with every Everything feature.
+
 ## [0.1.4] - 2026-09-03
 
 Keyword-based file organization and Windows-style directory navigation release.
