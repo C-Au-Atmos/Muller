@@ -294,6 +294,7 @@ export function App({ initialPath }: AppProps) {
   const [extensionOptions, setExtensionOptions] = useState<DirectoryExtensionCount[]>([]);
   const [spaceRoot, setSpaceRoot] = useState<SpaceNode | null>(null);
   const [spaceProgress, setSpaceProgress] = useState<SpaceScanProgress>({ scanned: 0, total: null, phase: "idle" });
+  const [spaceRefreshToken, setSpaceRefreshToken] = useState(0);
   const spaceScanController = useRef<AbortController | null>(null);
   const [spaceScanError, setSpaceScanError] = useState<string | null>(null);
   const [extensionsLoading, setExtensionsLoading] = useState(false);
@@ -445,7 +446,7 @@ export function App({ initialPath }: AppProps) {
       controller.abort();
       if (spaceScanController.current === controller) spaceScanController.current = null;
     };
-  }, [activeTab.path, activeTool, isThisPc, systemRoute]);
+  }, [activeTab.path, activeTool, isThisPc, systemRoute, spaceRefreshToken]);
   const filterCount = activeTab.filter.extensions.length + (activeTab.filter.date ? 1 : 0);
   const directoryFilter = useMemo<DirectoryQueryFilter>(() => {
     const date = activeTab.filter.date;
@@ -1409,7 +1410,10 @@ export function App({ initialPath }: AppProps) {
       return;
     }
     if (action === "recycle") {
-      void Promise.all(items.map((entry) => recycleEntry(entry))).catch(() => undefined);
+      if (items.length === 0 || !window.confirm(`${t("recycleSelected")} (${items.length})`)) return;
+      void Promise.all(items.map((entry) => recycleEntry(entry)))
+        .then(() => setSpaceRefreshToken((value) => value + 1))
+        .catch(() => undefined);
       return;
     }
     if (action === "new-folder" || action === "new-text-document" || action === "new-empty-file") {
