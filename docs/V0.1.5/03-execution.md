@@ -19,6 +19,7 @@
 | `REQ-0.1.5-002` | `Accepted` | `Codex` | `Done` | 单栏空间扫描测试版、Canvas treemap、钻取、选择和音效 | `Passed` |
 | `REQ-0.1.5-003` | `Accepted` | `Codex` | `Done / native follow-up implemented in REQ-0.1.5-004` | 空间视图线性布局优化、全链路历史搜索审计、后续原生索引计划 | `Passed; MFT/USN implementation and probe recorded in REQ-0.1.5-004` |
 | `REQ-0.1.5-004` | `Accepted` | `Codex` | `Done / beta.1 delivered` | MFT/USN provider、隔离 helper、索引控制及最终测试 EXE/SHA256 | `148 Rust + 86 frontend + 93 Edge and quality gates passed; final native probe/GUI/space recheck passed` |
+| `BUG-0.1.5-001` | `Accepted` | `Codex` | `In progress / beta.2` | 真实渐进扫描、紧凑方块、微小项汇总入口、SVG 细白边线与直角高亮 | `Pending final verification` |
 
 <a id="req-0-1-5-001"></a>
 
@@ -269,6 +270,7 @@
 - T01：Rust 发现/增长/完成节点按批 upsert，传递扫描状态与 partial，按时间或批量限频；测试 Done 前增长、取消和无重复累计。
 - T02：client 使用路径索引维护树并合并批次，App 首批挂载地图，progress 显示实际已统计大小/状态；覆盖会话隔离与取消竞争。
 - T03：squarified 布局、微小项汇总、Platinum 画布/信息栏，按稳定 ID 在 Canvas 插值，命中当前帧，减少动画配置生效；扫描快照不得清空钻取历史。
+- T03 补充验收：独立方块的短边至少 `28 CSS px` 且面积至少 `1600 CSS px²`；任一低于门槛的项按实际字节合并，并通过可点击列表入口查看、选择和打开成员。绘制保留真实占比，不为了可点击性夸大独立项或汇总项的面积。边线对照 [已批准 SVG](design/space-sniffer-wireframe.svg)，采用细白光线与 90° 直角选择高亮，覆盖普通、悬浮和选中状态。
 - T04：自动化回归以及实际 Windows 截图对照；扫描未结束时能够观察多个不同的真实字节数和矩形面积，最终结果与字节总量一致。
 - T05：相关门禁及完整里程碑检查，依次 req → feat → release，生成 beta.2 EXE/manifest/SHA256 和实测图；不提升 master。
 - 回滚：保留 beta.1 二进制及构建提交；停止当前扫描并退出 beta.2，后续代码通过普通反向提交撤销，不改写文件内容或 Git 历史。
