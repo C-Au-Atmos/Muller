@@ -1,0 +1,7 @@
+.target-cursor { position: fixed; z-index: 2147483647; pointer-events: none; box-sizing: border-box; opacity: 0; color: #c9d1d3; transition: opacity .16s ease, left .12s ease, top .12s ease, width .12s ease, height .12s ease; }
+.target-cursor.is-visible { opacity: .72; }
+.target-cursor i { position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; border-radius: 50%; background: currentColor; transform: translate(-50%,-50%); }
+.target-cursor b { position: absolute; width: 9px; height: 9px; border-color: currentColor; border-style: solid; opacity: .8; }
+.target-cursor b:nth-of-type(1) { left: 0; top: 0; border-width: 1px 0 0 1px; } .target-cursor b:nth-of-type(2) { right: 0; top: 0; border-width: 1px 1px 0 0; } .target-cursor b:nth-of-type(3) { right: 0; bottom: 0; border-width: 0 1px 1px 0; } .target-cursor b:nth-of-type(4) { left: 0; bottom: 0; border-width: 0 0 1px 1px; }
+.target-cursor.is-locked { color: #9eb8b5; opacity: .9; } .target-cursor.is-locked b { width: 13px; height: 13px; }
+.target-cursor.is-reduced { transition: none; } .target-cursor.is-reduced b { transition: none; }

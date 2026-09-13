@@ -352,6 +352,9 @@ export function SettingsPage({ preferences, onChange, onReset }: SettingsPagePro
         <div className="settings-row"><div><strong>{t("motion")}</strong></div><Segmented value={preferences.motion} label={t("motion")} options={[
           { value: "system", label: t("themeSystem") }, { value: "full", label: t("motionFull") }, { value: "reduced", label: t("motionReduced") },
         ]} onChange={(motion) => onChange({ motion })} /></div>
+        <div className="settings-row"><div><strong>Target Cursor</strong><small>空间方块与控件的目标定位光标</small></div><Segmented value={preferences.cursorEffect} label="Target Cursor" options={[
+          { value: "system", label: "系统光标" }, { value: "target", label: "Target" },
+        ]} onChange={(cursorEffect) => onChange({ cursorEffect })} /></div>
         <div className="settings-row settings-row--delay"><div><strong>{t("hoverDelay")}</strong><small>{preferences.hoverDelayMs}</small></div><Segmented value={delayPreset} label={t("hoverDelay")} options={[
           { value: "0", label: t("immediate") }, { value: "40", label: t("subtle") }, { value: "150", label: t("gentle") }, { value: "custom", label: t("custom") },
         ]} onChange={(preset) => preset !== "custom" && onChange({ hoverDelayMs: Number(preset) })} /><input aria-label={t("hoverDelay")} type="range" min="0" max="300" value={preferences.hoverDelayMs} style={rangeStyle(preferences.hoverDelayMs, 0, 300)} onChange={(event) => onChange({ hoverDelayMs: Number(event.target.value) })} /></div>

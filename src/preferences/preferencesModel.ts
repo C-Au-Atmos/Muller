@@ -8,6 +8,7 @@ export type AppTheme = "system" | "dark" | "light" | "platinum" | "custom";
 export type AppDensity = "compact" | "standard";
 export type SidebarMode = "option" | "line" | "classic";
 export type MotionPreference = "system" | "full" | "reduced";
+export type CursorEffect = "system" | "target";
 export type CloseBehavior = "hide" | "quit";
 
 export interface AppPreferencesV1 {
@@ -25,6 +26,7 @@ export interface AppPreferencesV1 {
   mediaAutoplay: boolean;
   hoverDelayMs: number;
   motion: MotionPreference;
+  cursorEffect: CursorEffect;
   closeBehavior: CloseBehavior;
   /** Cached UI value only; Windows registration is the source of truth. */
   autostartEnabled: boolean;
@@ -45,6 +47,7 @@ export const DEFAULT_PREFERENCES: AppPreferencesV1 = {
   mediaAutoplay: false,
   hoverDelayMs: 40,
   motion: "system",
+  cursorEffect: "system",
   closeBehavior: "hide",
   autostartEnabled: false,
 };
@@ -95,6 +98,7 @@ export function parsePreferences(serialized: string | null, legacyWorkspace?: st
     mediaAutoplay: typeof raw.mediaAutoplay === "boolean" ? raw.mediaAutoplay : false,
     hoverDelayMs: clamp(Number(raw.hoverDelayMs ?? 40) || 0, 0, 300),
     motion: member(raw.motion, ["system", "full", "reduced"], "system"),
+    cursorEffect: member(raw.cursorEffect, ["system", "target"], "system"),
     closeBehavior: member(raw.closeBehavior, ["hide", "quit"], "hide"),
     autostartEnabled: typeof raw.autostartEnabled === "boolean" ? raw.autostartEnabled : false,
   };
