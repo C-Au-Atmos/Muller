@@ -1369,7 +1369,7 @@ export function App({ initialPath }: AppProps) {
     const items = (selection.length > 0 ? selection : node ? [node] : []).map((entry) => ({
       path: entry.path,
       name: entry.name,
-      kind: entry.kind,
+      kind: entry.kind === "folder" ? "directory" : "file",
       extension: entry.extension ?? null,
       size: entry.bytes ?? entry.size ?? 0,
       modifiedUnixMs: entry.modifiedAt ?? null,
