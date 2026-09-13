@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">
+  <defs>
+    <linearGradient id="tile1" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#27272a"/><stop offset="1" stop-color="#18181b"/></linearGradient>
+    <linearGradient id="tile2" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#202023"/><stop offset="1" stop-color="#121215"/></linearGradient>
+    <linearGradient id="tile3" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#303035"/><stop offset="1" stop-color="#1b1b1f"/></linearGradient>
+    <filter id="whiteGlow"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <style>
+      .ui{font-family:Inter,'Muller UI','Segoe UI',sans-serif;fill:#fafafa}.mono{font-family:'Muller Mono',Consolas,monospace}.muted{fill:#a1a1aa}.dim{fill:#66666e}.tiny{font-size:12px}.small{font-size:14px}.body{font-size:17px}.head{font-size:22px;font-weight:600}.metric{font-size:28px;font-weight:600}.hair{stroke:#2f2f35;stroke-width:1}.seam{stroke:rgba(255,255,255,.45);stroke-width:1.3;fill:none}.focus{stroke:#fff;stroke-width:2.4;fill:none;filter:url(#whiteGlow)}
+    </style>
+  </defs>
+  <rect width="1600" height="1000" fill="#09090b"/>
+  <!-- actual Muller Platinum shell -->
+  <rect x="0" y="0" width="1600" height="42" fill="#0f0f11" stroke="#2f2f35"/>
+  <rect x="0" y="42" width="1600" height="52" fill="#121215" stroke="#2f2f35"/>
+  <rect x="0" y="94" width="1600" height="48" fill="#151518" stroke="#2f2f35"/>
+  <rect x="0" y="142" width="211" height="832" fill="#0f0f11" stroke="#2f2f35"/>
+  <rect x="211" y="142" width="1389" height="832" fill="#09090b"/>
+  <rect x="0" y="974" width="1600" height="26" fill="#0f0f11" stroke="#2f2f35"/>
+  <rect x="0" y="0" width="211" height="42" fill="#0f0f11"/>
+  <text x="22" y="27" class="ui head">Muller</text>
+  <text x="24" y="75" class="dim tiny">位置</text>
+  <rect x="18" y="88" width="172" height="38" rx="5" fill="#27272a" stroke="#3f3f46"/>
+  <text x="44" y="112" class="ui small">此电脑</text>
+  <text x="232" y="70" class="muted small">‹</text><text x="273" y="70" class="muted small">›</text><text x="313" y="70" class="muted small">↑</text>
+  <text x="364" y="71" class="dim tiny">浏览</text><text x="420" y="71" class="ui small">此电脑</text>
+  <rect x="232" y="102" width="78" height="32" rx="5" fill="#151518" stroke="#3f3f46"/><text x="254" y="123" class="ui small">浏览</text>
+  <rect x="318" y="102" width="100" height="32" rx="5" fill="#151518" stroke="#3f3f46"/><text x="335" y="123" class="ui small">重复文件</text>
+  <rect x="426" y="102" width="74" height="32" rx="5" fill="#151518" stroke="#3f3f46"/><text x="445" y="123" class="ui small">比较</text>
+  <rect x="508" y="102" width="74" height="32" rx="5" fill="#151518" stroke="#3f3f46"/><text x="528" y="123" class="ui small">相册</text>
+  <rect x="594" y="102" width="38" height="32" rx="5" fill="#151518" stroke="#3f3f46"/><text x="607" y="123" class="ui small">▦</text>
+  <rect x="642" y="102" width="38" height="32" rx="5" fill="#27272a" stroke="#fff"/><text x="655" y="123" class="ui small">▥</text>
+  <rect x="1440" y="102" width="128" height="32" rx="5" fill="#151518" stroke="#3f3f46"/><text x="1474" y="123" class="ui small">筛选器</text>
+  <text x="26" y="171" class="dim tiny">位置</text><rect x="18" y="190" width="174" height="38" rx="5" fill="#27272a" stroke="#3f3f46"/><text x="44" y="214" class="ui small">此电脑</text>
+  <text x="237" y="176" class="ui head">空间视图</text><text x="386" y="176" class="dim small">此电脑 · 1.84 TB 已扫描</text>
+  <rect x="1260" y="158" width="130" height="26" rx="13" fill="#151518" stroke="#2f2f35"/><circle cx="1278" cy="171" r="4" fill="#3fc070"/><text x="1290" y="175" class="dim tiny">扫描中 68%</text>
+  <rect x="1404" y="158" width="76" height="26" rx="4" fill="#151518" stroke="#3f3f46"/><text x="1420" y="175" class="muted tiny">暂停</text>
+
+  <!-- main map -->
+  <rect x="232" y="202" width="1134" height="704" fill="#121215" stroke="#2f2f35"/>
+  <text x="254" y="233" class="dim tiny">面积 = logical bytes · 白线 = 层级边界 · 白框 = 当前选择</text>
+  <rect x="254" y="254" width="660" height="410" fill="url(#tile1)" stroke="#2f2f35"/>
+  <text x="278" y="288" class="ui head">Projects</text><text x="278" y="314" class="muted small">812 GB · 31%</text>
+  <rect x="914" y="254" width="218" height="248" fill="url(#tile2)" stroke="#2f2f35"/>
+  <text x="936" y="288" class="ui body">Media</text><text x="936" y="312" class="muted small">412 GB · 16%</text>
+  <rect x="1132" y="254" width="212" height="248" fill="url(#tile3)" stroke="#2f2f35"/>
+  <text x="1154" y="288" class="ui body">Archive</text><text x="1154" y="312" class="muted small">304 GB · 12%</text>
+  <rect x="914" y="502" width="430" height="162" fill="#18181b" stroke="#2f2f35"/>
+  <text x="936" y="536" class="ui body">Build cache</text><text x="936" y="560" class="muted small">218 GB · 8%</text>
+  <rect x="254" y="664" width="284" height="218" fill="#202023" stroke="#2f2f35"/>
+  <text x="278" y="698" class="ui body">Downloads</text><text x="278" y="722" class="muted small">140 GB · 5%</text>
+  <rect x="538" y="664" width="228" height="218" fill="#151518" stroke="#2f2f35"/>
+  <text x="562" y="698" class="ui body">Pictures</text><text x="562" y="722" class="muted small">96 GB · 4%</text>
+  <rect x="766" y="664" width="248" height="218" fill="#27272a" stroke="#2f2f35"/>
+  <text x="790" y="698" class="ui body">Documents</text><text x="790" y="722" class="muted small">82 GB · 3%</text>
+  <rect x="1014" y="664" width="330" height="218" fill="#1b1b1f" stroke="#2f2f35"/>
+  <text x="1038" y="698" class="ui body">Other</text><text x="1038" y="722" class="muted small">76 GB · 3%</text>
+  <!-- Platinum seams and orthogonal corner accents -->
+  <path d="M914 254V664M1132 254V502M254 664H1344M538 664V882M766 664V882M1014 664V882M914 502H1344" class="seam"/>
+  <path d="M282 344h596v28h-92v42h92" class="seam" opacity=".7"/>
+  <path d="M1014 664h330v218h-330z" class="focus"/>
+  <path d="M1028 664h18v18M1326 664h18v18M1028 882h18v-18M1326 882h18v-18" class="focus"/>
+  <circle cx="876" cy="372" r="3" fill="#fff" filter="url(#whiteGlow)"/>
+
+  <!-- inspector -->
+  <rect x="1384" y="202" width="184" height="704" fill="#121215" stroke="#2f2f35"/>
+  <text x="1404" y="240" class="ui body">选中项</text>
+  <rect x="1404" y="262" width="144" height="86" fill="#27272a" stroke="#fff"/>
+  <text x="1418" y="292" class="ui body">Other</text><text x="1418" y="318" class="dim tiny">文件夹 · 已选中</text>
+  <text x="1404" y="388" class="dim tiny">大小</text><text x="1404" y="420" class="ui metric">76 GB</text>
+  <text x="1404" y="456" class="dim tiny">占当前目录</text><text x="1404" y="480" class="muted small">3.0%</text>
+  <text x="1404" y="528" class="dim tiny">内容</text><text x="1404" y="552" class="muted small">2,814 文件</text><text x="1404" y="576" class="muted small">48 文件夹</text>
+  <rect x="1404" y="614" width="144" height="34" rx="4" fill="#fff"/><text x="1446" y="636" fill="#09090b" class="small">打开</text>
+  <rect x="1404" y="658" width="144" height="34" rx="4" fill="#151518" stroke="#3f3f46"/><text x="1446" y="680" class="muted small">定位</text>
+  <text x="1404" y="754" class="dim tiny">音效</text><text x="1404" y="778" class="muted tiny">选择 · 打开 · 完成</text>
+  <text x="1404" y="822" class="dim tiny">键盘</text><text x="1404" y="846" class="muted tiny">Enter 打开 · Esc 返回</text>
+
+  <text x="18" y="992" class="dim tiny">BROWSE</text><text x="76" y="992" class="dim tiny">空间视图</text><text x="1394" y="992" class="dim tiny">LEFT 栏 · 已选择 1 项</text>
+</svg>

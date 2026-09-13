@@ -85,6 +85,7 @@ import {
 } from "./features/explorer/BrowseWorkspace";
 import { DirectorySearchBar } from "./features/explorer/DirectorySearchBar";
 import { ImeAwareSearchInput } from "./features/explorer/ImeAwareSearchInput";
+import { NativeIndexerControl } from "./features/explorer/NativeIndexerControl";
 import { listDirectoryExtensions, warmGlobalSearchIndex, type DirectoryExtensionCount } from "./features/explorer/explorerClient";
 import { openNativePath } from "./features/explorer/fileOperationsClient";
 import { displayPath } from "./features/explorer/pathDisplay";
@@ -92,6 +93,9 @@ import { ThisPcWorkspace } from "./features/explorer/ThisPcWorkspace";
 import type { DirectoryEntry, DirectoryQueryFilter, DirectorySearchMode, FileClipboardState } from "./features/explorer/types";
 import { WorkspaceFilterMenu } from "./features/filter/WorkspaceFilterMenu";
 import { HomeDashboard } from "./features/home/HomeDashboard";
+import { SpaceSniffer } from "./features/space/SpaceSniffer";
+import { spaceSnifferClient } from "./features/space/spaceSnifferClient";
+import type { SpaceNode } from "./features/space/types";
 import {
   FlowBorder,
   type FlowBorderHandle,
@@ -244,7 +248,7 @@ export function App({ initialPath }: AppProps) {
   });
   const [fileClipboard, setFileClipboard] = useState<FileClipboardState | null>(null);
   const activeTool = activeTab.mode;
-  const explorerTool = activeTool === "browse" || activeTool === "album";
+  const explorerTool = activeTool === "browse" || activeTool === "album" || activeTool === "space";
   const activePage = systemRoute === "workspace" ? activeTool : systemRoute;
   const flowRef = useRef<FlowBorderHandle>(null);
   const browseRef = useRef<BrowseWorkspaceHandle>(null);
@@ -278,6 +282,8 @@ export function App({ initialPath }: AppProps) {
   const [shellLocations, setShellLocations] = useState<ShellLocation[]>([]);
   const [logicalDrives, setLogicalDrives] = useState<LogicalDrive[]>([]);
   const [extensionOptions, setExtensionOptions] = useState<DirectoryExtensionCount[]>([]);
+  const [spaceRoot, setSpaceRoot] = useState<SpaceNode | null>(null);
+  const [spaceScanError, setSpaceScanError] = useState<string | null>(null);
   const [extensionsLoading, setExtensionsLoading] = useState(false);
   const [compareNavigation, setCompareNavigation] = useState<CompareNavigationState>({
     activePane: "left",
@@ -385,9 +391,28 @@ export function App({ initialPath }: AppProps) {
     ? scanSessionState
     : EMPTY_SCAN_STATE;
   const previousScanStatus = useRef(scanSessionState.status);
-  const explorerMode = systemRoute === "workspace" && explorerTool;
+  const explorerMode = systemRoute === "workspace" && (activeTool === "browse" || activeTool === "album");
   const isThisPc = activeTab.virtualLocation === "this-pc";
   const addressMode = explorerMode || (systemRoute === "workspace" && activeTool === "compare");
+  useEffect(() => {
+    if (systemRoute !== "workspace" || activeTool !== "space" || isThisPc || !activeTab.path.trim()) {
+      setSpaceRoot(null);
+      setSpaceScanError(null);
+      return;
+    }
+    const controller = new AbortController();
+    setSpaceRoot(null);
+    setSpaceScanError(null);
+    void spaceSnifferClient.scan(activeTab.path, controller.signal)
+      .then((root) => {
+        if (!controller.signal.aborted) setSpaceRoot(root);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setSpaceScanError(error instanceof Error ? error.message : String(error));
+      });
+    return () => controller.abort();
+  }, [activeTab.path, activeTool, isThisPc, systemRoute]);
   const filterCount = activeTab.filter.extensions.length + (activeTab.filter.date ? 1 : 0);
   const directoryFilter = useMemo<DirectoryQueryFilter>(() => {
     const date = activeTab.filter.date;
@@ -1659,6 +1684,7 @@ export function App({ initialPath }: AppProps) {
             <div className="stage7-context-path"><span>{activePage.toUpperCase()}</span><strong>{activePage === "settings" ? t("preferences") : displayPath(activeTab.path)}</strong></div>
           )}
           <div className="address-actions">
+            <NativeIndexerControl roots={globalSearchRoots} onAction={() => play("action")} />
             {explorerMode && !isThisPc ? <SpecularButton compact className={activePathIsFavorite ? "is-active" : ""} title={activePathIsFavorite ? t("unpinSidebar") : t("pinSidebar")} aria-label={activePathIsFavorite ? t("unpinSidebar") : t("pinSidebar")} aria-pressed={activePathIsFavorite} onClick={toggleFavorite}>{activePathIsFavorite ? <PinOff size={16} /> : <Pin size={16} />}</SpecularButton> : null}
             <SpecularButton compact className={explorerNavigation.split && addressMode && !isThisPc ? "is-active" : ""} title={t("splitView")} aria-label={t("splitView")} disabled={!addressMode || isThisPc || activeTool === "album"} aria-pressed={addressMode && !isThisPc && explorerNavigation.split} onClick={() => explorerRef.current?.toggleSplit()}><Columns2 size={16} /></SpecularButton>
             <SpecularButton
@@ -1768,7 +1794,22 @@ export function App({ initialPath }: AppProps) {
           <SettingsPage preferences={preferences} onChange={updatePreferences} onReset={resetPreferences} />
         ) : null}
 
-        {explorerTool && !isThisPc ? (
+        {activeTool === "space" && !isThisPc ? (
+          spaceRoot ? (
+            <SpaceSniffer
+              key={activeTab.id}
+              root={spaceRoot}
+              client={spaceSnifferClient}
+              onSoundEvent={(event) => play(event === "open" ? "navigate" : event === "select" ? "action" : "navigate")}
+            />
+          ) : (
+            <section className="result-pane" aria-live="polite">
+              <div className="scan-progress-row">
+                <span className="scan-status is-scanning">{spaceScanError ?? "Scanning space…"}</span>
+              </div>
+            </section>
+          )
+        ) : explorerTool && !isThisPc ? (
           <BrowseWorkspace
             key={activeTab.id}
             ref={browseRef}
@@ -2119,6 +2160,8 @@ export function App({ initialPath }: AppProps) {
             ? effectiveScanRoots.map(displayPath).join("; ")
             : activePage === "compare"
               ? displayPath(compareNavigation.path)
+              : activePage === "space"
+                ? displayPath(activeTab.path)
               : activePage === "home"
                 ? "Muller"
               : activePage === "settings"
@@ -2130,6 +2173,8 @@ export function App({ initialPath }: AppProps) {
             ? t(scanStatusKey(scanState.status))
             : activePage === "compare"
               ? t("pane", { name: compareNavigation.activePane.toUpperCase() })
+              : activePage === "space"
+                ? (spaceScanError ?? "SPACE MAP")
               : activePage === "home"
                 ? t("homeDashboard")
               : activePage === "settings"
@@ -2143,6 +2188,8 @@ export function App({ initialPath }: AppProps) {
               ? compareNavigation.editing
                 ? t("editableMerge")
                 : t("readOnlyComparison")
+              : activePage === "space"
+                ? t("noSelection")
               : activePage === "settings"
                   ? t("settings")
                 : activePage === "home"

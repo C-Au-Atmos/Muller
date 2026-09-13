@@ -12,13 +12,17 @@ Stage 资料已经归档，不再与活动版本混放。
 
 ## 活动版本
 
+- [V0.1.5](V0.1.5/01-original-input.md)
+  - [原始输入](V0.1.5/01-original-input.md)
+  - [评审记录](V0.1.5/02-review.md)
+  - [执行计划](V0.1.5/03-execution.md)
+
+## 历史版本
+
 - [V0.1.4](V0.1.4/01-original-input.md)
   - [原始输入](V0.1.4/01-original-input.md)
   - [评审记录](V0.1.4/02-review.md)
   - [执行计划](V0.1.4/03-execution.md)
-
-## 历史版本
-
 - [V0.1.3](V0.1.3/01-original-input.md)
   - [原始输入](V0.1.3/01-original-input.md)
   - [评审记录](V0.1.3/02-review.md)
@@ -26,6 +30,7 @@ Stage 资料已经归档，不再与活动版本混放。
 
 ## 历史归档
 
+- [分支历史索引](archive/branch-history.md)：已清理版本的阶段分支尖端、归档标签和提交 SHA。
 - [起始开发归档](archive/initial-development/)：起始产品设计、Stage 计划与报告、
   历史设计稿、技术路线图及首次发布资料。
 
