@@ -93,3 +93,4 @@ button.space-sniffer__crumb:hover, .space-sniffer__crumb.is-current { color: var
 .space-sniffer__context-menu { position: fixed; z-index: 30; min-width: 148px; padding: 5px; border: 1px solid #3f464a; background: rgba(13,16,18,.96); box-shadow: 0 12px 30px #0009, inset 0 1px #ffffff12; }
 .space-sniffer__context-menu button { display: block; width: 100%; padding: 7px 10px; border: 0; color: #cdd4d5; background: transparent; font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
 .space-sniffer__context-menu button:hover, .space-sniffer__context-menu button:focus-visible { color: #f0f3f3; background: #263238; outline: none; }
+.space-sniffer__context-menu .menu-separator { display: block; height: 1px; margin: 4px 2px; background: rgba(255,255,255,.12); }
