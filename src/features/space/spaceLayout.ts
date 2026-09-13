@@ -9,6 +9,67 @@ export interface SpaceRect {
   members?: readonly SpaceNode[];
 }
 
+export type SpaceDirection = "left" | "right" | "up" | "down";
+
+/**
+ * Pick the next visible tile in a direction from the current tile.
+ *
+ * Space maps are not a grid: a tile can be much wider or taller than its
+ * neighbours and the squarified rows change orientation as they recurse. A
+ * centre-point/Euclidean sort therefore makes an arrow key jump diagonally to
+ * a small tile. Navigation first keeps candidates whose perpendicular
+ * projection overlaps the source (the same visual row/column), then measures
+ * the edge distance in the requested direction. Candidates outside that beam
+ * use the sum of the forward and perpendicular distances as a deterministic
+ * fallback. `source` may be a grouped member; in that case its aggregate
+ * rectangle is used as the origin.
+ */
+export function findDirectionalSpaceRect(
+  rects: readonly SpaceRect[],
+  source: SpaceNode | undefined,
+  direction: SpaceDirection,
+): SpaceRect | undefined {
+  if (!source || !rects.length) return undefined;
+  const sourceRect = rects.find((rect) => rect.node.id === source.id || rect.members?.some((member) => member.id === source.id));
+  if (!sourceRect) return undefined;
+
+  const horizontal = direction === "left" || direction === "right";
+  const sign = direction === "left" || direction === "up" ? -1 : 1;
+  const sourceStart = horizontal ? sourceRect.x : sourceRect.y;
+  const sourceEnd = horizontal ? sourceRect.x + sourceRect.width : sourceRect.y + sourceRect.height;
+  const sourcePerpStart = horizontal ? sourceRect.y : sourceRect.x;
+  const sourcePerpEnd = horizontal ? sourceRect.y + sourceRect.height : sourceRect.x + sourceRect.width;
+  const sourceCenter = (sourceStart + sourceEnd) / 2;
+  const sourcePerpCenter = (sourcePerpStart + sourcePerpEnd) / 2;
+
+  const candidates = rects.flatMap((rect) => {
+    if (rect === sourceRect || rect.node.id === source.id || rect.members?.some((member) => member.id === source.id)) return [];
+    if (rect.width <= 1e-6 || rect.height <= 1e-6) return [];
+    const start = horizontal ? rect.x : rect.y;
+    const end = horizontal ? rect.x + rect.width : rect.y + rect.height;
+    const perpStart = horizontal ? rect.y : rect.x;
+    const perpEnd = horizontal ? rect.y + rect.height : rect.x + rect.width;
+    const center = (start + end) / 2;
+    const forwardDistance = (center - sourceCenter) * sign;
+    // A tile whose centre is exactly aligned with the source is not in a
+    // direction. This also avoids selecting the source again during an
+    // in-flight layout interpolation when two centres briefly coincide.
+    if (forwardDistance <= 1e-6) return [];
+    const overlap = Math.max(0, Math.min(sourcePerpEnd, perpEnd) - Math.max(sourcePerpStart, perpStart));
+    const perpendicularGap = Math.max(0, Math.max(sourcePerpStart, perpStart) - Math.min(sourcePerpEnd, perpEnd));
+    const edgeDistance = sign > 0 ? Math.max(0, start - sourceEnd) : Math.max(0, sourceStart - end);
+    return [{ rect, aligned: overlap > 1e-6, edgeDistance, perpendicularGap, forwardDistance, perpendicularCenterDistance: Math.abs((perpStart + perpEnd) / 2 - sourcePerpCenter) }];
+  });
+  candidates.sort((a, b) => {
+    if (a.aligned !== b.aligned) return a.aligned ? -1 : 1;
+    if (a.aligned) {
+      return a.edgeDistance - b.edgeDistance || a.perpendicularCenterDistance - b.perpendicularCenterDistance || a.forwardDistance - b.forwardDistance || a.rect.node.id.localeCompare(b.rect.node.id);
+    }
+    return (a.forwardDistance + a.perpendicularGap) - (b.forwardDistance + b.perpendicularGap) || a.forwardDistance - b.forwardDistance || a.perpendicularGap - b.perpendicularGap || a.rect.node.id.localeCompare(b.rect.node.id);
+  });
+  return candidates[0]?.rect;
+}
+
 export const spaceNodeBytes = (node: SpaceNode): number => {
   const value = node.bytes ?? node.size ?? 0;
   return Number.isFinite(value) && value > 0 ? value : 0;
