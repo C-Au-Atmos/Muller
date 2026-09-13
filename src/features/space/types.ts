@@ -35,6 +35,35 @@ export interface SpaceSnifferClient {
   openFolder?: (node: SpaceNode, signal?: AbortSignal, onProgress?: SpaceScanProgressCallback) => Promise<SpaceNode>;
 }
 
+/** Operations shared with the browse context menu.
+ *
+ * Space view deliberately omits compare and split-pane actions, while the
+ * remaining operations are surfaced through the host so they use the same
+ * native file-operation pipeline as BrowseWorkspace.
+ */
+export type SpaceContextAction =
+  | "open"
+  | "open-with"
+  | "locate"
+  | "copy"
+  | "cut"
+  | "paste"
+  | "copy-name"
+  | "copy-path"
+  | "open-terminal"
+  | "extract-current"
+  | "extract-named"
+  | "extract-choose"
+  | "compress-zip"
+  | "rename"
+  | "recycle"
+  | "properties"
+  | "refresh"
+  | "new-folder"
+  | "new-text-document"
+  | "new-empty-file"
+  | "custom-organize";
+
 export interface SpaceSnifferProps {
   root: SpaceNode;
   progress?: SpaceScanProgress;
@@ -43,6 +72,6 @@ export interface SpaceSnifferProps {
   onOpenFolder?: (node: SpaceNode) => void;
   onSelectionChange?: (nodes: readonly SpaceNode[]) => void;
   onSoundEvent?: (event: "hover" | "select" | "open") => void;
-  onContextAction?: (action: "open" | "copy-path" | "locate", node: SpaceNode) => void;
+  onContextAction?: (action: SpaceContextAction, node: SpaceNode | null, selection?: readonly SpaceNode[]) => void;
   className?: string;
 }

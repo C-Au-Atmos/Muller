@@ -88,7 +88,16 @@ import { DirectorySearchBar } from "./features/explorer/DirectorySearchBar";
 import { ImeAwareSearchInput } from "./features/explorer/ImeAwareSearchInput";
 import { NativeIndexerControl } from "./features/explorer/NativeIndexerControl";
 import { listDirectoryExtensions, warmGlobalSearchIndex, type DirectoryExtensionCount } from "./features/explorer/explorerClient";
-import { openNativePath } from "./features/explorer/fileOperationsClient";
+import {
+  createEntry,
+  createZip,
+  extractZip,
+  openNativePath,
+  openTerminal,
+  recycleEntry,
+  renameEntry,
+  transferEntry,
+} from "./features/explorer/fileOperationsClient";
 import { displayPath } from "./features/explorer/pathDisplay";
 import { ThisPcWorkspace } from "./features/explorer/ThisPcWorkspace";
 import type { DirectoryEntry, DirectoryQueryFilter, DirectorySearchMode, FileClipboardState } from "./features/explorer/types";
@@ -96,7 +105,7 @@ import { WorkspaceFilterMenu } from "./features/filter/WorkspaceFilterMenu";
 import { HomeDashboard } from "./features/home/HomeDashboard";
 import { SpaceSniffer } from "./features/space/SpaceSniffer";
 import { spaceSnifferClient } from "./features/space/spaceSnifferClient";
-import type { SpaceNode, SpaceScanProgress } from "./features/space/types";
+import type { SpaceContextAction, SpaceNode, SpaceScanProgress } from "./features/space/types";
 import {
   FlowBorder,
   type FlowBorderHandle,
@@ -1356,14 +1365,73 @@ export function App({ initialPath }: AppProps) {
     });
     if (mode === "album" || mode === "browse") browseRef.current?.navigateActive(location.target.path);
   };
-  const handleSpaceContextAction = useCallback((action: "open" | "copy-path" | "locate", node: SpaceNode) => {
-    if (action === "copy-path") { void navigator.clipboard?.writeText(node.path); return; }
-    if (action === "open") { void openNativePath(node.path).catch(() => undefined); return; }
-    const separator = Math.max(node.path.lastIndexOf("\\"), node.path.lastIndexOf("/"));
-    const parent = separator > 0 ? node.path.slice(0, separator) : node.path;
-    dispatchWorkspace({ type: "update-active", patch: { mode: "browse", path: parent, title: parent, virtualLocation: null } });
-    browseRef.current?.navigateActive(parent);
-  }, [dispatchWorkspace]);
+  const handleSpaceContextAction = useCallback((action: SpaceContextAction, node: SpaceNode | null, selection: readonly SpaceNode[] = []) => {
+    const items = (selection.length > 0 ? selection : node ? [node] : []).map((entry) => ({
+      path: entry.path,
+      name: entry.name,
+      kind: entry.kind,
+      extension: entry.extension ?? null,
+      size: entry.bytes ?? entry.size ?? 0,
+      modifiedUnixMs: entry.modifiedAt ?? null,
+      hidden: false,
+    }));
+    const parentOf = (path: string) => {
+      const separator = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
+      return separator > 0 ? path.slice(0, separator) : path;
+    };
+    const target = node?.path ?? activeTab.path;
+    const destination = node?.kind === "folder" ? node.path : parentOf(target);
+    if (action === "copy-path") { if (node) void navigator.clipboard?.writeText(node.path); return; }
+    if (action === "copy-name") { if (node) void navigator.clipboard?.writeText(node.name); return; }
+    if (action === "open") { if (node) void openNativePath(node.path).catch(() => undefined); return; }
+    if (action === "open-with") { if (node) void openNativePath(node.path, true).catch(() => undefined); return; }
+    if (action === "locate") {
+      const parent = parentOf(target);
+      dispatchWorkspace({ type: "update-active", patch: { mode: "browse", path: parent, title: parent, virtualLocation: null } });
+      browseRef.current?.navigateActive(parent);
+      return;
+    }
+    if (action === "copy" || action === "cut") {
+      if (items.length > 0) setFileClipboard({ mode: action === "copy" ? "copy" : "move", entries: items });
+      return;
+    }
+    if (action === "paste") {
+      const clipboard = fileClipboard;
+      if (!clipboard) return;
+      void Promise.all(clipboard.entries.map((entry) => transferEntry(entry.path, destination, clipboard.mode, "keep_both"))).catch(() => undefined);
+      return;
+    }
+    if (action === "open-terminal") { void openTerminal(destination).catch(() => undefined); return; }
+    if (action === "rename") {
+      if (!node) return;
+      const nextName = window.prompt(t("newName"), node.name)?.trim();
+      if (nextName) void renameEntry(node.path, nextName, "fail").catch(() => undefined);
+      return;
+    }
+    if (action === "recycle") {
+      void Promise.all(items.map((entry) => recycleEntry(entry))).catch(() => undefined);
+      return;
+    }
+    if (action === "new-folder" || action === "new-text-document" || action === "new-empty-file") {
+      const kind = action === "new-folder" ? "directory" : action === "new-text-document" ? "text_file" : "empty_file";
+      void createEntry(destination, kind).catch(() => undefined);
+      return;
+    }
+    if (action === "compress-zip") {
+      if (items.length > 0) void createZip(items.map((entry) => entry.path), destination).catch(() => undefined);
+      return;
+    }
+    if (action === "extract-current" || action === "extract-named") {
+      if (node?.kind === "file") void extractZip(node.path, destination, action === "extract-current" ? "current" : "named").catch(() => undefined);
+      return;
+    }
+    if (action === "extract-choose" || action === "custom-organize" || action === "properties" || action === "refresh") {
+      // These actions require a browse dialog (destination chooser, organizer,
+      // properties, or refresh). Keep the request observable for the host shell;
+      // BrowseWorkspace can consume it without duplicating native operations.
+      window.dispatchEvent(new CustomEvent(`muller:space-${action}`, { detail: { node, selection: items, path: destination } }));
+    }
+  }, [activeTab.path, dispatchWorkspace, fileClipboard, setFileClipboard, t]);
   const openDrive = (path: string) => {
     dispatchWorkspace({
       type: "update-active",

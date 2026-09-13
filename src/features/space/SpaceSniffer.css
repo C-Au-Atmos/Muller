@@ -35,7 +35,7 @@ button.space-sniffer__crumb { cursor: pointer; }
 button.space-sniffer__crumb:hover, .space-sniffer__crumb.is-current { color: var(--space-text); }
 .space-sniffer__crumb-separator { padding: 0 5px; color: #45454e; font-size: 10px; }
 .space-sniffer__notice { margin: 0 20px 12px; padding: 8px 12px; border: 1px solid #785a40; color: #d6b48f; font-size: 12px; }
-.space-sniffer__body { display: grid; grid-template-columns: minmax(0, 1fr) 208px; flex: 1; min-height: 0; gap: 16px; padding: 0 20px 20px; }
+.space-sniffer__body { display: grid; grid-template-columns: minmax(0, 1fr) 10px var(--space-details-width, 248px); flex: 1; min-height: 0; gap: 6px; padding: 0 20px 20px; }
 .space-sniffer__map { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-width: 0; min-height: 0; padding: 0 17px; border: 1px solid var(--space-border); background: var(--space-panel); }
 .space-sniffer__legend { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 16px; min-height: 43px; padding: 9px 0; color: #85858f; font-size: 10px; }
 .space-sniffer__legend span + span::before { content: ""; display: inline-block; width: 14px; height: 1px; margin: 0 6px 3px 0; background: #ffffff60; }
@@ -44,6 +44,9 @@ button.space-sniffer__crumb:hover, .space-sniffer__crumb.is-current { color: var
 .space-sniffer__canvas { display: block; width: 100%; height: 100%; }
 .space-sniffer__marquee { position: absolute; z-index: 2; pointer-events: none; border: 1px solid var(--space-selection); background: rgb(250 250 250 / 10%); box-shadow: 0 0 9px #ffffff25; }
 .space-sniffer__map-footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 38px; color: #71717a; font-size: 10px; }
+.space-sniffer__resize-handle { position: relative; min-width: 10px; cursor: col-resize; touch-action: none; }
+.space-sniffer__resize-handle::before { content: ""; position: absolute; inset: 0 4px; border-left: 1px solid transparent; border-right: 1px solid transparent; transition: border-color .12s, background .12s; }
+.space-sniffer__resize-handle:hover::before, .space-sniffer__resize-handle:focus-visible::before { border-color: #a1a1aa66; background: #ffffff0b; outline: none; }
 .space-sniffer__hint { text-align: right; }
 .space-sniffer__group-toggle { padding: 4px 0; border: 0; color: #c2c2ca; background: transparent; font: inherit; text-align: left; cursor: pointer; }
 .space-sniffer__group-toggle span { margin-left: 8px; color: #71717a; }
@@ -68,12 +71,13 @@ button.space-sniffer__crumb:hover, .space-sniffer__crumb.is-current { color: var
 .space-sniffer__group-list { margin-top: 20px; border-top: 1px solid var(--space-border); }
 .space-sniffer__group-list p { color: #85858f; font-size: 11px; line-height: 1.7; }
 .space-sniffer__group-list button { display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 9px 0; border: 0; border-bottom: 1px solid #2f2f35; color: #d4d4d8; background: transparent; font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
-.space-sniffer__group-list button:hover { color: #fff; background: #27272a; }
+.space-sniffer__group-list button:hover, .space-sniffer__group-list button:focus-visible { color: #fff; background: #27272a; outline: none; }
+.space-sniffer__group-list button.is-selected { color: #fff; background: #303037; box-shadow: inset 2px 0 #fff; }
 .space-sniffer__group-list button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .space-sniffer__group-list button small { flex-shrink: 0; color: #85858f; font-size: 10px; }
 @keyframes space-pulse { 50% { opacity: .4; } }
-@container (max-width: 850px) { .space-sniffer__body { grid-template-columns: minmax(0,1fr) 180px; gap: 12px; padding: 0 14px 14px; } .space-sniffer__map { padding: 0 12px; } .space-sniffer__toolbar { padding: 14px; } .space-sniffer__title { font-size: 18px; } .space-sniffer__hint { display: none; } }
-@container (max-width: 620px) { .space-sniffer__body { grid-template-columns: minmax(0,1fr); } .space-sniffer__details { max-height: 180px; padding: 12px; } .space-sniffer__body:has(.space-sniffer__selection-card) { grid-template-rows: minmax(140px,1fr) auto; } .space-sniffer__details:not(:has(.space-sniffer__selection-card)) { display: none; } .space-sniffer__metrics { gap: 4px; margin: 12px 0; } .space-sniffer__keyboard { display: none; } }
+@container (max-width: 850px) { .space-sniffer__body { grid-template-columns: minmax(0,1fr) 10px minmax(180px, var(--space-details-width, 208px)); gap: 4px; padding: 0 14px 14px; } .space-sniffer__map { padding: 0 12px; } .space-sniffer__toolbar { padding: 14px; } .space-sniffer__title { font-size: 18px; } .space-sniffer__hint { display: none; } }
+@container (max-width: 620px) { .space-sniffer__body { grid-template-columns: minmax(0,1fr); } .space-sniffer__resize-handle { display: none; } .space-sniffer__details { max-height: 180px; padding: 12px; } .space-sniffer__body:has(.space-sniffer__selection-card) { grid-template-rows: minmax(140px,1fr) auto; } .space-sniffer__details:not(:has(.space-sniffer__selection-card)) { display: none; } .space-sniffer__metrics { gap: 4px; margin: 12px 0; } .space-sniffer__keyboard { display: none; } }
 @media (prefers-reduced-motion: reduce) { .space-sniffer__scan-state i, .space-sniffer__discovery { animation: none; } }
 /* Override the shell's generic blue tabindex ring with the Platinum focus line. */
 .space-sniffer .space-sniffer__viewport:focus { outline: none; }
@@ -89,3 +93,4 @@ button.space-sniffer__crumb:hover, .space-sniffer__crumb.is-current { color: var
 .space-sniffer__context-menu { position: fixed; z-index: 30; min-width: 148px; padding: 5px; border: 1px solid #3f464a; background: rgba(13,16,18,.96); box-shadow: 0 12px 30px #0009, inset 0 1px #ffffff12; }
 .space-sniffer__context-menu button { display: block; width: 100%; padding: 7px 10px; border: 0; color: #cdd4d5; background: transparent; font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
 .space-sniffer__context-menu button:hover, .space-sniffer__context-menu button:focus-visible { color: #f0f3f3; background: #263238; outline: none; }
+.space-sniffer__context-menu .menu-separator { display: block; height: 1px; margin: 4px 2px; background: rgba(255,255,255,.12); }
