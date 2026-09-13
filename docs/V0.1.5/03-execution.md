@@ -20,7 +20,7 @@
 | `REQ-0.1.5-003` | `Accepted` | `Codex` | `Done / native follow-up implemented in REQ-0.1.5-004` | 空间视图线性布局优化、全链路历史搜索审计、后续原生索引计划 | `Passed; MFT/USN implementation and probe recorded in REQ-0.1.5-004` |
 | `REQ-0.1.5-004` | `Accepted` | `Codex` | `Done / beta.1 delivered` | MFT/USN provider、隔离 helper、索引控制及最终测试 EXE/SHA256 | `148 Rust + 86 frontend + 93 Edge and quality gates passed; final native probe/GUI/space recheck passed` |
 | `BUG-0.1.5-001` | `Accepted` | `Codex` | `beta.2 delivered; native in-progress capture pending` | 真实渐进扫描、紧凑方块、微小项汇总入口、SVG 细白边线与直角高亮 | `102 frontend + 153 Rust + 96 Edge passed; EXE/hash and actual selection screenshot recorded` |
-| `REQ-0.1.5-005` | `Accepted` | `Codex` | `Done / beta.3 delivered` | 方向键空间选框、可选 Target Cursor、黑透色阶、右键文件操作、测试版 EXE | `103 frontend + 101 Rust + 97 Edge; EXE/hash recorded` |
+| `REQ-0.1.5-005` | `Accepted` | `Codex` | `Done / beta.3 delivered` | 方向键空间选框、可选 Target Cursor、黑透色阶、右键文件操作、测试版 EXE | `108 frontend + 101 Rust + 97 Edge; EXE/hash recorded` |
 
 <a id="req-0-1-5-001"></a>
 
@@ -376,10 +376,10 @@
 |---|---|
 | 文件 | `D:\Muller\release\0.1.5-beta.3\Muller-0.1.5-beta.3-x64.exe` |
 | 安装包 | `Muller-0.1.5-beta.3-x64-setup.exe`（NSIS） |
-| 源分支 / 提交 | `release/0.1.5` / `73a82ad` |
-| 直接运行 EXE | 11,220,992 字节，SHA256 `3e319247b2a3bee4f99856fcd51803a7a9a7137ad3141a5f04515d16a72fc086` |
-| NSIS 安装包 | 4,868,505 字节，SHA256 `2bfadc2a3d008a3d5edba25fb8d986e3fdd75d93b770f8ca2e90e67462b1b81d` |
-| 验证 | 103 前端、101 Rust（1 ignored）、97 Edge；lint/build/fmt/clippy 通过 |
+| 源分支 / 提交 | `release/0.1.5` / `1497dc5` |
+| 直接运行 EXE | 11,221,504 字节，SHA256 `4f75bc480f45c6bc75d3fd6017b78b988263eb98244307c7d4531ee013674c2f` |
+| NSIS 安装包 | 4,869,655 字节，SHA256 `0e9f960bd9356d6d03849d0fcd26fc65eb625be2a62699785962a3035248f3b2` |
+| 验证 | 108 前端、101 Rust（1 ignored）、97 Edge；lint/build/fmt/clippy 通过 |
 
 说明：默认 Tauri 构建的 MSI 目标受 WiX 预发布版本规则限制，本次采用可直接运行 EXE 与 NSIS 安装包交付；beta.2 测试包继续保留。右键本轮交付打开/定位/复制路径核心菜单，重命名和属性列为后续扩展。
 
