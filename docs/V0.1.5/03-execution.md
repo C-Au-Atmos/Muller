@@ -149,3 +149,16 @@
 ### 后续计划
 
 Windows 专用索引服务负责 MFT 初始枚举和 USN Journal 增量维护，普通权限 GUI 通过受 ACL 保护的命名管道查询；服务不可用时继续回退到现有可取消遍历。服务实现前不对“Everything 级”做性能承诺。
+
+<a id="req-0-1-5-004"></a>
+
+## `REQ-0.1.5-004` - 实现 MFT/USN 原生索引并交付测试版 EXE
+
+- 状态：In progress；评审 Accepted，用户已授权实现和本地测试版构建。
+- T01：实现 Windows MFT/USN 卷 provider、file ID 树、增量重放和日志恢复，覆盖二进制解析边界和生命周期测试。
+- T02：实现同 EXE 提权索引进程、本机用户受限命名管道、普通权限 GUI 查询与状态协议。
+- T03：接通 Browse/Home/Compare 全盘搜索，复用结果分页、筛选和取消；内存查询及按页元数据加载。
+- T04：增加原生索引启用入口和实际状态，明确降级原因；保留已有空间视图。
+- T05：测试 fmt/test/clippy、lint/frontend/build、Edge E2E；执行真实 NTFS 枚举与变更验证并记录性能证据。
+- T06：从 master 基线建立 release/0.1.5，合入已验证 feat/0.1.5；更新测试版元数据并构建独立 GUI EXE，提供哈希与运行说明，推送 req/feat/release；master 不参与此次测试版交付。
+- 回滚：停止按需索引进程并回退原生索引相关提交；不改写文件内容和现有系统 USN 日志，不强制推送。
