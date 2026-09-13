@@ -19,7 +19,7 @@
 | `REQ-0.1.5-002` | `Accepted` | `Codex` | `Done` | 单栏空间扫描测试版、Canvas treemap、钻取、选择和音效 | `Passed` |
 | `REQ-0.1.5-003` | `Accepted` | `Codex` | `Done / native follow-up implemented in REQ-0.1.5-004` | 空间视图线性布局优化、全链路历史搜索审计、后续原生索引计划 | `Passed; MFT/USN implementation and probe recorded in REQ-0.1.5-004` |
 | `REQ-0.1.5-004` | `Accepted` | `Codex` | `Done / beta.1 delivered` | MFT/USN provider、隔离 helper、索引控制及最终测试 EXE/SHA256 | `148 Rust + 86 frontend + 93 Edge and quality gates passed; final native probe/GUI/space recheck passed` |
-| `BUG-0.1.5-001` | `Accepted` | `Codex` | `Pending native GUI verification/packaging` | 真实渐进扫描、紧凑方块、微小项汇总入口、SVG 细白边线与直角高亮 | `102 frontend + 153 Rust + 96 Edge and quality gates passed; final EXE GUI/packaging pending` |
+| `BUG-0.1.5-001` | `Accepted` | `Codex` | `beta.2 delivered; native in-progress capture pending` | 真实渐进扫描、紧凑方块、微小项汇总入口、SVG 细白边线与直角高亮 | `102 frontend + 153 Rust + 96 Edge passed; EXE/hash and actual selection screenshot recorded` |
 
 <a id="req-0-1-5-001"></a>
 
@@ -265,8 +265,9 @@
 
 ## `BUG-0.1.5-001` - 空间视图布局与渐进渲染修复
 
+- 交付状态：`0.1.5-beta.2 delivered / native in-progress capture pending`。代码及测试包已交付；T04 的最终 EXE 连续扫描截图仍待补齐，其余已记录的验证见下表。
 - 原始反馈：[01-original-input.md](01-original-input.md#bug-0-1-5-001)。评审：[02-review.md](02-review.md#bug-0-1-5-001)，Accepted。
-- 状态：`Pending native GUI verification/packaging`；实现提交 `546f843`，目标测试包 `0.1.5-beta.2`，保留 beta.1 以供追溯。
+- 实现提交 `546f843`；实机检查后 `f8585e2` 移除无法单独操作的预览子格，采用 SVG 开放式直角装饰线，真实子项在钻取后操作。测试包 `0.1.5-beta.2` 已交付，保留 beta.1 以供追溯。
 - T01：Rust 发现/增长/完成节点按批 upsert，传递扫描状态与 partial，按时间或批量限频；测试 Done 前增长、取消和无重复累计。
 - T02：client 使用路径索引维护树并合并批次，App 首批挂载地图，progress 显示实际已统计大小/状态；覆盖会话隔离与取消竞争。
 - T03：squarified 布局、微小项汇总、Platinum 画布/信息栏，按稳定 ID 在 Canvas 插值，命中当前帧，减少动画配置生效；扫描快照不得清空钻取历史。
@@ -284,9 +285,28 @@
 | Edge E2E | 全量 96 项通过，其中 5 项空间视图测试覆盖选择/钻取/返回及下述渐进行为 |
 | 质量门禁 | lint、生产构建、Rust fmt、clippy 通过；结果由主代理核对 |
 | 本轮原生索引边界 | 未修改原生索引，未重跑此前 MFT/USN 实机探针；beta.1 探针历史证据不冒充本轮实测 |
-| 剩余验收 | 最终 beta.2 EXE 实际窗口、设计稿截图对照、构建清单与 SHA256；完成前保持待验收状态 |
+| 剩余验收 | 最终 EXE 扫描中连续截图；用户正在窗口中试用，停止自动化输入以避免争抢控制 |
 
 - 受控 Channel 的多批真实协议消息在 Done 前更新画布；停止扫描保留最后几何状态，后续晚批次不能覆盖。
 - 扫描中钻取取消父会话，子目录仍可收到进度；父子会话状态与面包屑/返回历史保持隔离。
 - 极小目录通过 Smaller items 列表入口可点击到达；系统减少动画设置下布局立即稳定。
-- 上述为自动化行为证据；本节不将受控消息流等同于最终 EXE 的磁盘扫描与实际窗口验收，实机截图及交付哈希由后续记录补齐。
+- 上述为自动化行为证据，不将受控消息流等同于最终 EXE 的原生动画截图；实际静态窗口与交付哈希如下。
+
+### beta.2 测试包与实机记录（2026-09-13）
+
+| 项目 | 值或证据 |
+|---|---|
+| 文件 | `D:\Muller\release\0.1.5-beta.2\Muller-0.1.5-beta.2-x64.exe` |
+| 版本 / 平台 | `0.1.5-beta.2` / Windows x64，PE ProductVersion 已核对 |
+| 构建源 | `release/0.1.5`，`c666446b3625f79956f02d01e5aff823c9161f04` |
+| 大小 / SHA256 | 11,214,336 字节 / `02235d6f59efc34873c5538553497a679a83ad9853e781f3b66067e89df6fca1` |
+| 封装时间 | `2026-09-13T14:18:58.3034786+08:00` |
+| 实际 EXE | 已启动，真实项目目录显示 42.6 GB / 34 项；后续实际资源目录显示 38.3 GB / 265 项、汇总 174 项 |
+| 视觉证据 | 包内 `final-space-selection.jpg`：最终 EXE 的灰黑比例方块、较小项目入口、白色直角高亮及所选文件 211 MB / 0.5% 详情 |
+| 前后对照基线 | 包内 `before-src.jpg`、`before-cancelled.jpg` 保存 beta.1；最终选择截图来自不同目录，不能当成同目录面积对比 |
+| 最终修正验证 | `f8585e2` 的 5 项空间 Edge、scoped lint 通过，最终 beta.2 生产构建通过 |
+| 校验文件 | 包内 `manifest.json`、`SHA256SUMS.txt`、`README.zh-CN.txt` |
+
+用户在最终 EXE 内连续钻取试用时，Windows 输入工具两次检测到并发输入；已停止自动化操作，保留用户窗口。最终 EXE 的连续扫描中截图未完成；扫描增量算法、客户端快照和 Done 前画布变化已有上述自动化证据。此记录不将缺少的原生动画截图标为通过。
+
+本次依次 req → feat → release 同步，master 保持 `78e63c9`。后续文档同步不改变上述 EXE 的构建源和哈希。
