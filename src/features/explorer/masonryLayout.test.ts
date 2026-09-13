@@ -21,6 +21,24 @@ describe("virtual Masonry layout", () => {
     expect(new Set(positions).size).toBe(positions.length);
   });
 
+  it.each([0, 74, 109, 110, 229, 230, 469, 470, 633.375, 1_017.5])(
+    "fits complete equal-width columns inside a %s-pixel pane",
+    (width) => {
+      const layout = buildMasonryLayout(120, 5, width);
+      expect(layout.columns.length).toBeLessThanOrEqual(5);
+      expect(layout.items.every((item) => item.x >= 0 && item.width >= 0)).toBe(true);
+      for (const item of layout.items) {
+        expect(item.x + item.width).toBeLessThanOrEqual(width + 1e-9);
+        expect(item.width).toBe(layout.items[0]?.width);
+      }
+      expect(Math.max(...layout.items.map((item) => item.x + item.width))).toBeCloseTo(width, 8);
+    },
+  );
+
+  it("has no negative scroll extent for an empty directory", () => {
+    expect(buildMasonryLayout(0, 4, 800).height).toBe(0);
+  });
+
   it("navigates by visual columns instead of array order", () => {
     const layout = buildMasonryLayout(30, 4, 650);
     const current = layout.columns[1]?.[2];

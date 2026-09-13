@@ -27,8 +27,11 @@ export function buildMasonryLayout(
   availableWidth: number,
   gap = 10,
 ): MasonryLayout {
-  const columns = Math.max(1, Math.floor(columnCount));
-  const columnWidth = Math.max(110, (availableWidth - gap * (columns - 1)) / columns);
+  const width = Math.max(0, availableWidth);
+  // A preferred minimum must never push the last column outside a narrow pane.
+  const fittingColumns = Math.max(1, Math.floor((width + gap) / (110 + gap)));
+  const columns = Math.min(fittingColumns, Math.max(1, Math.floor(columnCount)));
+  const columnWidth = Math.max(0, (width - gap * (columns - 1)) / columns);
   const columnHeights = Array.from({ length: columns }, () => 0);
   const masonryColumns = Array.from({ length: columns }, () => [] as MasonryItem[]);
   const items: MasonryItem[] = [];
@@ -52,7 +55,7 @@ export function buildMasonryLayout(
     items,
     columns: masonryColumns,
     columnHeights,
-    height: Math.max(0, ...columnHeights) - gap,
+    height: Math.max(0, Math.max(...columnHeights) - gap),
   };
 }
 

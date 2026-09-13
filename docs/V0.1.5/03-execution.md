@@ -15,6 +15,8 @@
 
 | 条目 ID | 评审结论 | 实现负责人 | 状态 | 主要交付物 | 验证状态 |
 |---|---|---|---|---|---|
+| `REQ-0.1.5-007` | `Accepted` | `Codex` | `Verified / beta.4 packaging pending` | 统一地址导航、空间及共享预览、完整瀑布列；beta.4 候选 | `130 frontend; lint/build/Rust gates and non-space Edge passed; final space/EXE evidence pending` |
+| `REQ-0.1.5-006` | `Accepted` | `Codex` | `Verified / beta.4 packaging pending` | 空间视图父目录/历史快捷键与焦点隔离；beta.4 候选 | `Parent-path unit coverage passed; final space Edge and delivery evidence pending` |
 | `REQ-0.1.5-001` | `Accepted` | `Codex` | `Done` | V0.1.5 分支基线、旧分支归档标签、历史索引 | `Passed` |
 | `REQ-0.1.5-002` | `Accepted` | `Codex` | `Done` | 单栏空间扫描测试版、Canvas treemap、钻取、选择和音效 | `Passed` |
 | `REQ-0.1.5-003` | `Accepted` | `Codex` | `Done / native follow-up implemented in REQ-0.1.5-004` | 空间视图线性布局优化、全链路历史搜索审计、后续原生索引计划 | `Passed; MFT/USN implementation and probe recorded in REQ-0.1.5-004` |
@@ -389,3 +391,70 @@
 - `5afcc30`：Target Cursor 限定空间方块并改为亮白四角边框。
 - 验证：108 个前端测试、空间 Edge 6 项通过，lint 与生产构建通过；方向邻居单测覆盖投影、上下左右、汇总项和边界保持。
 - 已知边界：属性、自定义收纳、选择解压目标通过事件预留给浏览对话框；核心菜单操作已接入现有 native client。
+
+<a id="req-0-1-5-006"></a>
+
+## `REQ-0.1.5-006` - 空间视图 Backspace 与 Alt 历史导航
+
+- 原始输入：[01-original-input.md](01-original-input.md#req-0-1-5-006)；评审：[02-review.md](02-review.md#req-0-1-5-006)，`Accepted`。
+- 状态：`Verified / beta.4 packaging pending`，记录日期 `2026-09-14`，目标 `0.1.5-beta.4`。空间专项 17 项通过，候选构建与实机交付证据待补。
+
+| 任务 ID | 实现与主要位置 | 状态 |
+|---|---|---|
+| `REQ-0.1.5-006-T01` | `spaceNavigation.ts` 处理盘符/UNC 父目录；`SpaceSniffer.tsx` 提供 up/back/forward 与历史分支，取消旧扫描、恢复有效快照并隔离晚批次 | `Verified` |
+| `REQ-0.1.5-006-T02` | App 路由 Backspace、Alt 历史导航与顶部按钮；输入、IME、菜单、对话框、标签及分隔条按键隔离 | `Verified` |
+| `REQ-0.1.5-006-T03` | 父目录单测、空间及 Browse 导航回归，req → feat → release 同步，beta.4 EXE 与构建证据 | `In progress` |
+
+- Backspace 返回实际父目录，盘符根/UNC 共享根保持；Alt+左/右只在已有历史中往返。新钻取、侧栏跳转或地址提交清空前进历史，空间模式保持。导航更换会话时清理旧选择、右键菜单及预览，不用历史前进猜测要打开哪个子目录。
+- 小项列表焦点不阻断 Alt 历史；调宽分隔条仅消费普通方向键，组合键交给导航。App 的普通方向键选择命令避开分隔条，浏览预览调宽也不会改变文件选择。
+- 已加入初始扫描根之外的父目录、盘符边界、跨分支往返、新导航清空前进、菜单/输入/IME 隔离、较小项目焦点、扫描取消及晚批次、侧栏路径和标签目录隔离的空间 E2E。测试存在与最终通过分别记录；完整结果以 [beta.4 证据表](#beta4-delivery-evidence) 为准。
+- 回滚：普通反向提交撤销本条改动；不修改文件内容或扫描引擎。
+
+<a id="req-0-1-5-007"></a>
+
+## `REQ-0.1.5-007` - 统一空间地址栏、预览与瀑布流宽度适配
+
+- 原始输入：[01-original-input.md](01-original-input.md#req-0-1-5-007)；评审：[02-review.md](02-review.md#req-0-1-5-007)，`Accepted`。
+- 状态：`Verified / beta.4 packaging pending`，记录日期 `2026-09-14`，与 `REQ-0.1.5-006` 一起交付 `0.1.5-beta.4` 候选。
+
+| 任务 ID | 实现与主要位置 | 状态 |
+|---|---|---|
+| `REQ-0.1.5-007-T01` | App 复用顶部地址、面包屑与导航按钮，空间状态上报；取消地址草稿恢复已提交目录，隐藏内部重复路径条 | `Verified` |
+| `REQ-0.1.5-007-T02` | `SpaceSniffer.tsx` 提供预览按钮和 Space/焦点行处理；共享 `PreviewPanel.tsx/.css` 重新组织内容、元信息与嵌入布局，隔离晚响应及媒体生命周期 | `Verified` |
+| `REQ-0.1.5-007-T03` | `masonryLayout.ts` 约束完整列数、均分宽度；`stage7.css` 保持固定预览分栏、约束预览占比、稳定滚动条空间 | `Verified in targeted tests` |
+| `REQ-0.1.5-007-T04` | 完整质量门禁、候选版本元数据与更新日志、EXE/NSIS/manifest/SHA256，req → feat → release 证据同步 | `In progress` |
+
+### 实现说明
+
+- 顶部地址和空间目录使用同一导航来源。提交路径才导航；Esc 先关闭补全建议，再取消编辑，失焦也丢弃未提交草稿，面包屑恢复实际目录。后退、前进、上一级、侧栏和地址提交更新相同的历史状态及按钮可用性。
+- 详情中的单选预览按钮与 Space 共用入口；Smaller items 的焦点行先成为当前选择，再打开该行预览。关闭预览归还地图焦点，Esc 优先关闭预览。编辑输入、菜单、对话框和媒体控制不被页面空格/导航劫持。
+- 共享预览拆为标题/类型、内容舞台和默认折叠属性区。浏览保留固定/浮层操作，空间使用现有详情栏内嵌布局。目录保留已有递归大小、子目录及子文件数量统计；文本、图片/GIF、音视频、RAW/PPTX Shell 缩略图沿用既有读取和权限/大小限制。本轮未新增 PDF 内联渲染支持。
+- 文件身份改变后重建读取器和媒体节点，旧播放器随选择切换/关闭卸载；文件预览任务通过代际与取消隔离晚响应，目录统计及 Shell 元信息也不得串到下一项。文件大小/修改时间变化可触发当前文件重建，避免同路径旧内容残留。
+- 瀑布布局继续使用现有 ResizeObserver 的实际内容宽度。修复窄容器将固定预览变成浮层的覆盖规则；固定预览始终参与 Grid，宽度最多占可用空间 60%。图片列按剩余宽度取整数列，余量均分；空间不足时减少列数，极窄单列不再被 110px 下限撑出容器。滚动条预留稳定空间，保留虚拟化、缩略图与选框。
+- 相册 mock 从原测试提取至 `e2e/helpers/albumDirectoryMock.ts` 供旧、新回归共用；`e2e/masonry-preview.spec.ts` 校验真实 DOM 的完整列边界、等宽、无水平溢出、固定预览不遮挡列、拖宽/缩放及调宽按键后的选择路径保持。
+
+<a id="beta4-delivery-evidence"></a>
+
+### beta.4 验证与交付证据（REQ-0.1.5-006/007，2026-09-14）
+
+产品提交 `c8be8cff8b52d0bfc81b08717633af4b87c253d5` 已通过相关完整门禁。全套 Edge 首轮暴露两项导航时序问题，修复后空间全套及连续操作重复回归通过；按最终覆盖口径记录 109 项，不把首次失败隐去或把重复运行计为新增测试。
+
+| 项目 | 结果与交付证据 |
+|---|---|
+| 前端门禁 | lint、130 项前端测试、生产构建通过；最终导航同步修正后 scoped lint 与生产构建再次通过 |
+| Rust 门禁 | `cargo fmt --all -- --check`、`cargo test --workspace --locked`、`cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` 通过；1 项需要管理员真实 NTFS 环境的测试 ignored。本轮无原生索引改动，未重跑 MFT/USN 实机探针 |
+| Edge 全部文件覆盖 | 非空间 92 项 + 最终空间 17 项 = 109 项通过；覆盖 Browse/Compare 历史、共享地址补全、所有原有预览及相册、固定预览调宽、空间扫描与导航 |
+| 空间重复回归 | 地址编辑与连续 Escape 两条时序回归各重复 8 次，共 16/16 通过；目录、历史和地址在同次 UI 提交内同步，不通过测试延时绕过问题 |
+| 瀑布专项 | 原有 4 项相册 + 新增固定预览 1 项；900–1440 px 多宽度、鼠标/键盘调宽、无残列/水平溢出、选择保持。布局单测 14 项包含 100,000 项虚拟化 |
+| 测试命令 | `npx playwright test --workers=1` 全部文件覆盖；`npx playwright test e2e/space-sniffer.spec.ts --workers=1` 最终专项；时序用例使用 `--repeat-each=8` |
+| 实现提交 | `feat/0.1.5` / `c8be8cff8b52d0bfc81b08717633af4b87c253d5`，关联 REQ-0.1.5-006/007 |
+| 需求同步 | 需求基线 `b0981c7`、`bd955e4` 已从 req 合入 feat；本表所在文档提交随后按 req → feat → release 同步，提交沿分支历史追溯 |
+| 发布候选源 | `Pending`：待补 release 构建源完整提交 |
+| 版本 / 交付目录 | `0.1.5-beta.4` / `D:\Muller\release\0.1.5-beta.4`；构建及实机核验待补 |
+| EXE / NSIS / SHA256 | `Pending`：完成构建后填写文件名、大小、哈希、构建时间并核对 manifest |
+| 实机核验 | `Pending`：最终 EXE 的顶部导航、Backspace/Alt、按钮/Space 预览及界面截图；自动化 mock 结果不替代原生文件读取验收 |
+### 晋级与回滚
+
+- 本轮按 req → feat → release 同步需求和实现；实现及阻断修正完成、门禁通过后才更新 release 候选元数据并构建 beta.4。release 专属修正须回合 feat，更新的长期分支使用非强制推送。
+- 保留 beta.3 的 EXE、安装包、manifest 和哈希，不覆盖既有交付记录；本次测试版不向 `master` 晋级。
+- 必要时使用保留的 beta.3 测试包回退，代码通过普通反向提交撤销。目录统计与媒体权限边界不变，不修改用户文件，也不增加永久删除能力。

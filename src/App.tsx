@@ -105,7 +105,7 @@ import { WorkspaceFilterMenu } from "./features/filter/WorkspaceFilterMenu";
 import { HomeDashboard } from "./features/home/HomeDashboard";
 import { SpaceSniffer } from "./features/space/SpaceSniffer";
 import { spaceSnifferClient } from "./features/space/spaceSnifferClient";
-import type { SpaceContextAction, SpaceNode, SpaceScanProgress } from "./features/space/types";
+import type { SpaceContextAction, SpaceNode, SpaceScanProgress, SpaceSnifferHandle, SpaceNavigationState } from "./features/space/types";
 import {
   FlowBorder,
   type FlowBorderHandle,
@@ -293,9 +293,16 @@ export function App({ initialPath }: AppProps) {
   const [logicalDrives, setLogicalDrives] = useState<LogicalDrive[]>([]);
   const [extensionOptions, setExtensionOptions] = useState<DirectoryExtensionCount[]>([]);
   const [spaceRoot, setSpaceRoot] = useState<SpaceNode | null>(null);
+  const [spaceRootTabId, setSpaceRootTabId] = useState<string | null>(null);
+  const [spaceRootRequestId, setSpaceRootRequestId] = useState(0);
+  const [spaceNavigation, setSpaceNavigation] = useState<SpaceNavigationState>({ path: initialPath, canBack: false, canForward: false, canUp: false });
+  const [spaceAddress, setSpaceAddress] = useState(initialPath);
+  const spaceNavigationOwner = useRef<{ tabId: string; path: string } | null>(null);
+  const lastSpaceRefresh = useRef(0);
   const [spaceProgress, setSpaceProgress] = useState<SpaceScanProgress>({ scanned: 0, total: null, phase: "idle" });
   const [spaceRefreshToken, setSpaceRefreshToken] = useState(0);
   const spaceScanController = useRef<AbortController | null>(null);
+  const spaceRef = useRef<SpaceSnifferHandle>(null);
   const [spaceScanError, setSpaceScanError] = useState<string | null>(null);
   const [extensionsLoading, setExtensionsLoading] = useState(false);
   const [compareNavigation, setCompareNavigation] = useState<CompareNavigationState>({
@@ -407,6 +414,8 @@ export function App({ initialPath }: AppProps) {
   const explorerMode = systemRoute === "workspace" && (activeTool === "browse" || activeTool === "album");
   const isThisPc = activeTab.virtualLocation === "this-pc";
   const addressMode = explorerMode || (systemRoute === "workspace" && activeTool === "compare");
+  const spaceMode = systemRoute === "workspace" && activeTool === "space";
+  const locationMode = addressMode || spaceMode;
   const cancelSpaceScan = useCallback(() => {
     spaceScanController.current?.abort();
     spaceScanController.current = null;
@@ -419,9 +428,17 @@ export function App({ initialPath }: AppProps) {
       setSpaceProgress({ scanned: 0, total: null, phase: "idle" });
       return;
     }
+    const refreshing = lastSpaceRefresh.current !== spaceRefreshToken;
+    lastSpaceRefresh.current = spaceRefreshToken;
+    // Internal map navigation already owns the scan. Updating the shared tab
+    // path must not launch another scan or discard its history.
+    if (!refreshing && spaceRef.current && spaceNavigationOwner.current?.tabId === activeTab.id && spaceNavigationOwner.current.path === activeTab.path) return;
     const controller = new AbortController();
     spaceScanController.current = controller;
-    setSpaceRoot(null);
+    setSpaceRootTabId(activeTab.id);
+    setSpaceRootRequestId((request) => request + 1);
+    // Keep the map mounted so sidebar navigation retains its back/forward history.
+    setSpaceRoot({ id: activeTab.path, path: activeTab.path, name: activeTab.path.split(/[\\/]/).filter(Boolean).at(-1) ?? activeTab.path, kind: "folder", scanning: true });
     setSpaceScanError(null);
     setSpaceProgress({ scanned: 0, total: null, phase: "scanning" });
     void spaceSnifferClient.scan(activeTab.path, controller.signal, (root, progress) => {
@@ -446,7 +463,7 @@ export function App({ initialPath }: AppProps) {
       controller.abort();
       if (spaceScanController.current === controller) spaceScanController.current = null;
     };
-  }, [activeTab.path, activeTool, isThisPc, systemRoute, spaceRefreshToken]);
+  }, [activeTab.id, activeTab.path, activeTool, isThisPc, systemRoute, spaceRefreshToken]);
   const filterCount = activeTab.filter.extensions.length + (activeTab.filter.date ? 1 : 0);
   const directoryFilter = useMemo<DirectoryQueryFilter>(() => {
     const date = activeTab.filter.date;
@@ -570,6 +587,13 @@ export function App({ initialPath }: AppProps) {
     });
   }, [dispatchWorkspace]);
 
+  const handleSpaceNavigation = useCallback((next: SpaceNavigationState) => {
+    spaceNavigationOwner.current = { tabId: activeTab.id, path: next.path };
+    setSpaceNavigation(next);
+    setSpaceAddress(next.path);
+    dispatchWorkspace({ type: "update-active", patch: { path: next.path, title: next.path, virtualLocation: null } });
+  }, [activeTab.id, dispatchWorkspace]);
+
   const activateTool = useCallback((tool: WorkspaceMode) => {
     setSystemRoute("workspace");
     const presentation: DirectoryPresentation = tool === "album"
@@ -591,9 +615,9 @@ export function App({ initialPath }: AppProps) {
     setFilterOpen(false);
     dispatchWorkspace({
       type: "update-active",
-      patch: { mode: "browse", title: t("thisPc"), virtualLocation: "this-pc" },
+      patch: { mode: activeTool === "space" ? "space" : "browse", title: t("thisPc"), virtualLocation: "this-pc" },
     });
-  }, [dispatchWorkspace, t]);
+  }, [activeTool, dispatchWorkspace, t]);
 
   const openMullerHome = useCallback(() => {
     setSystemRoute("home");
@@ -913,7 +937,7 @@ export function App({ initialPath }: AppProps) {
         setSystemRoute("workspace");
         return;
       }
-      if (command === "editAddress" && addressMode && !isThisPc) {
+      if (command === "editAddress" && locationMode && !isThisPc) {
         event.preventDefault();
         window.dispatchEvent(new Event("muller:edit-address"));
         return;
@@ -938,6 +962,31 @@ export function App({ initialPath }: AppProps) {
         !mullerFindFromInput
       ) {
         return;
+      }
+      if (
+        target instanceof HTMLElement &&
+        target.closest('[role="separator"]') &&
+        ["moveNext", "movePrevious", "moveLeft", "moveRight"].includes(command)
+      ) return;
+      if (
+        target instanceof HTMLElement && target.closest(".preview-panel") &&
+        ["togglePreview", "moveNext", "movePrevious", "moveLeft", "moveRight", "movePageNext", "movePagePrevious", "openSelection", "cancelScan"].includes(command)
+      ) return;
+      if (activeTool === "space" && systemRoute === "workspace") {
+        if (command === "goUp" || command === "goBack" || command === "goForward") {
+          if (event.metaKey || event.shiftKey) return;
+          event.preventDefault();
+          if (command === "goUp") spaceRef.current?.up();
+          else if (command === "goBack") spaceRef.current?.back();
+          else spaceRef.current?.forward();
+          return;
+        }
+        if (command === "togglePreview") {
+          if (target instanceof HTMLElement && target.closest("button, a, select, [role=button]")) return;
+          event.preventDefault(); spaceRef.current?.togglePreview(); return;
+        }
+        // The map and details controls own ordinary selection keys.
+        if (["moveNext", "movePrevious", "moveLeft", "moveRight", "openSelection"].includes(command)) return;
       }
       if (command === "cancelScan" && !scanActive) return;
       const fileCommand = new Set([
@@ -1112,6 +1161,8 @@ export function App({ initialPath }: AppProps) {
     activeTool,
     activateTool,
     addressMode,
+    locationMode,
+    systemRoute,
     cancelScan,
     dispatchWorkspace,
     explorerMode,
@@ -1277,6 +1328,9 @@ export function App({ initialPath }: AppProps) {
     activeTool === "compare" ? compareNavigation : browseNavigation;
   const explorerAddress = activeTool === "compare" ? compareAddress : browseAddress;
   const explorerRef = activeTool === "compare" ? compareRef : browseRef;
+  const locationNavigation = spaceMode ? spaceNavigation : explorerNavigation;
+  const locationRef = spaceMode ? spaceRef : explorerRef;
+  const locationAddress = spaceMode ? spaceAddress : explorerAddress;
   const globalSearchRoots = useMemo(
     () => logicalDrives
       .filter((drive) => ["fixed", "removable", "ramdisk"].includes(drive.driveType))
@@ -1492,16 +1546,16 @@ export function App({ initialPath }: AppProps) {
       label: t("back"),
       detail: t("backDetail"),
       icon: <ArrowLeft size={16} />,
-      disabled: activeTool === "duplicates" || !explorerNavigation.canBack,
-      run: () => explorerRef.current?.back(),
+      disabled: !locationMode || !locationNavigation.canBack,
+      run: () => locationRef.current?.back(),
     },
     {
       id: "forward",
       label: t("forward"),
       detail: t("forwardDetail"),
       icon: <ArrowRight size={16} />,
-      disabled: activeTool === "duplicates" || !explorerNavigation.canForward,
-      run: () => explorerRef.current?.forward(),
+      disabled: !locationMode || !locationNavigation.canForward,
+      run: () => locationRef.current?.forward(),
     },
     {
       id: "up",
@@ -1509,8 +1563,8 @@ export function App({ initialPath }: AppProps) {
       detail: t("upDetail"),
       shortcut: "Backspace",
       icon: <ArrowUp size={16} />,
-      disabled: activeTool === "duplicates" || !explorerNavigation.canUp,
-      run: () => explorerRef.current?.up(),
+      disabled: !locationMode || !locationNavigation.canUp,
+      run: () => locationRef.current?.up(),
     },
     {
       id: "split",
@@ -1526,8 +1580,8 @@ export function App({ initialPath }: AppProps) {
       detail: t("previewDetail"),
       shortcut: "Space",
       icon: <Command size={16} />,
-      disabled: !explorerMode,
-      run: () => browseRef.current?.togglePreview(),
+      disabled: !explorerMode && !spaceMode,
+      run: () => spaceMode ? spaceRef.current?.togglePreview() : browseRef.current?.togglePreview(),
     },
     {
       id: "settings",
@@ -1655,33 +1709,36 @@ export function App({ initialPath }: AppProps) {
         </div>
         <div className="stage7-addressbar">
           <div className="nav-actions">
-            <SpecularButton compact title={t("back")} aria-label={t("back")} disabled={!addressMode || isThisPc || !explorerNavigation.canBack} onClick={() => { explorerRef.current?.back(); navigate("back"); }}><ArrowLeft size={16} /></SpecularButton>
-            <SpecularButton compact title={t("forward")} aria-label={t("forward")} disabled={!addressMode || isThisPc || !explorerNavigation.canForward} onClick={() => { explorerRef.current?.forward(); navigate("enter"); }}><ArrowRight size={16} /></SpecularButton>
+            <SpecularButton compact title={t("back")} aria-label={t("back")} disabled={!locationMode || isThisPc || !locationNavigation.canBack} onClick={() => { locationRef.current?.back(); navigate("back"); }}><ArrowLeft size={16} /></SpecularButton>
+            <SpecularButton compact title={t("forward")} aria-label={t("forward")} disabled={!locationMode || isThisPc || !locationNavigation.canForward} onClick={() => { locationRef.current?.forward(); navigate("enter"); }}><ArrowRight size={16} /></SpecularButton>
             <SpecularButton
               compact
               title={t("up")}
               aria-label={t("up")}
-              disabled={!addressMode || isThisPc || (!explorerNavigation.canUp && !(explorerTool && (isDriveRoot(explorerNavigation.path) || isNetworkHostRoot(explorerNavigation.path))))}
+              disabled={!locationMode || isThisPc || (!locationNavigation.canUp && !(explorerMode && (isDriveRoot(locationNavigation.path) || isNetworkHostRoot(locationNavigation.path))))}
               onClick={() => {
-                if (explorerTool && (isDriveRoot(explorerNavigation.path) || isNetworkHostRoot(explorerNavigation.path))) openThisPcHome();
-                else explorerRef.current?.up();
+                if (explorerMode && (isDriveRoot(locationNavigation.path) || isNetworkHostRoot(locationNavigation.path))) openThisPcHome();
+                else locationRef.current?.up();
                 navigate("back");
               }}
             >
               <ArrowUp size={16} />
             </SpecularButton>
           </div>
-          {addressMode && !isThisPc ? (
-            <div className="stage7-address-center">
+          {locationMode && !isThisPc ? (
+            <div className={`stage7-address-center${spaceMode ? " is-space" : ""}`}>
               <ExplorerAddressBar
-                paneLabel={explorerNavigation.activePane.toUpperCase()}
-                value={explorerAddress}
+                paneLabel={spaceMode ? "SPACE" : explorerNavigation.activePane.toUpperCase()}
+                showPaneToggle={!spaceMode}
+                value={locationAddress}
+                committedValue={locationNavigation.path}
                 onChange={(value) => {
-                  if (activeTool === "compare") setCompareAddress(value);
+                  if (spaceMode) setSpaceAddress(value);
+                  else if (activeTool === "compare") setCompareAddress(value);
                   else setBrowseAddress(value);
                 }}
                 onNavigate={(path) => {
-                  explorerRef.current?.navigateActive(path);
+                  locationRef.current?.navigateActive(path);
                   navigate("enter");
                 }}
                 onNavigateThisPc={openThisPcHome}
@@ -1900,10 +1957,16 @@ export function App({ initialPath }: AppProps) {
         ) : null}
 
         {activeTool === "space" && !isThisPc ? (
-          spaceRoot ? (
+          spaceRoot && spaceRootTabId === activeTab.id ? (
             <SpaceSniffer
               key={activeTab.id}
+              ref={spaceRef}
+              onNavigationChange={handleSpaceNavigation}
+              showBreadcrumbs={false}
+              mediaAutoplay={preferences.mediaAutoplay}
+              onMediaAutoplayChange={(mediaAutoplay) => updatePreferences({ mediaAutoplay })}
               root={spaceRoot}
+              rootRequestId={spaceRootRequestId}
               progress={spaceProgress}
               client={spaceSnifferClient}
               onCancelScan={cancelSpaceScan}

@@ -1,3 +1,5 @@
+import type { Ref } from "react";
+
 export interface SpaceNode {
   id: string;
   name: string;
@@ -64,8 +66,30 @@ export type SpaceContextAction =
   | "new-empty-file"
   | "custom-organize";
 
+export interface SpaceSnifferHandle {
+  up: () => void;
+  back: () => void;
+  forward: () => void;
+  navigateActive: (path: string) => void;
+  togglePreview: () => void;
+}
+
+export interface SpaceNavigationState {
+  path: string;
+  canBack: boolean;
+  canForward: boolean;
+  canUp: boolean;
+}
+
 export interface SpaceSnifferProps {
+  ref?: Ref<SpaceSnifferHandle>;
+  onNavigationChange?: (navigation: SpaceNavigationState) => void;
+  showBreadcrumbs?: boolean;
+  mediaAutoplay?: boolean;
+  onMediaAutoplayChange?: (enabled: boolean) => void;
   root: SpaceNode;
+  /** Distinguishes a new host navigation/refresh from streamed updates at the same path. */
+  rootRequestId?: number;
   progress?: SpaceScanProgress;
   client?: SpaceSnifferClient;
   onCancelScan?: () => void;
