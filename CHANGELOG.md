@@ -2,6 +2,26 @@
 
 All notable changes to Muller are documented in this file.
 
+## [0.1.5-beta.4] - 2026-09-14
+
+REQ-0.1.5-006/007 unify Space navigation with the top address bar and add
+selection previews while keeping complete album columns beside a pinned preview.
+
+- Backspace opens the actual parent directory; Alt+Left/Right traverse history.
+  Top buttons, breadcrumbs, typed paths and sidebar navigation share that state.
+  Cancelled address drafts restore the current path, and rapid navigation keeps focus.
+- Space offers a Preview button and Space toggle for selected files and folders.
+  Focused smaller items preview their own content; stale requests cannot replace a new selection.
+- Shared previews use a dark content stage, compact file identity and collapsed properties.
+  Readers and media are replaced on selection changes; existing format support is preserved.
+- Pinned album previews stay in the grid. Available image width is divided into
+  complete equal-width columns when the preview or window is resized.
+- Includes the beta.3 follow-ups for Space context actions, smaller-item selection,
+  resizable details, recycle cleanup and white Target Cursor corners limited to blocks.
+- Verified 130 frontend tests and all 109 Edge cases, plus lint, production build
+  and Rust formatting/tests/clippy. One administrator-only NTFS test remains ignored;
+  the unchanged native index was not probed again in this UI release.
+
 ## [0.1.5-beta.3] - 2026-09-13
 
 REQ-0.1.5-005 adds keyboard navigation and interaction polish to the Platinum
