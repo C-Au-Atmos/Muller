@@ -15,6 +15,7 @@
 
 | 条目 ID | 评审结论 | 实现负责人 | 状态 | 主要交付物 | 验证状态 |
 |---|---|---|---|---|---|
+| `REQ-0.1.5-006` | `Accepted` | `Codex` | `In progress` | 空间视图父目录/历史快捷键与测试 | `Pending` |
 | `REQ-0.1.5-001` | `Accepted` | `Codex` | `Done` | V0.1.5 分支基线、旧分支归档标签、历史索引 | `Passed` |
 | `REQ-0.1.5-002` | `Accepted` | `Codex` | `Done` | 单栏空间扫描测试版、Canvas treemap、钻取、选择和音效 | `Passed` |
 | `REQ-0.1.5-003` | `Accepted` | `Codex` | `Done / native follow-up implemented in REQ-0.1.5-004` | 空间视图线性布局优化、全链路历史搜索审计、后续原生索引计划 | `Passed; MFT/USN implementation and probe recorded in REQ-0.1.5-004` |
@@ -389,3 +390,13 @@
 - `5afcc30`：Target Cursor 限定空间方块并改为亮白四角边框。
 - 验证：108 个前端测试、空间 Edge 6 项通过，lint 与生产构建通过；方向邻居单测覆盖投影、上下左右、汇总项和边界保持。
 - 已知边界：属性、自定义收纳、选择解压目标通过事件预留给浏览对话框；核心菜单操作已接入现有 native client。
+
+<a id="req-0-1-5-006"></a>
+
+## `REQ-0.1.5-006` - 空间视图 Backspace 与 Alt 历史导航
+
+- 原始输入：[01-original-input.md](01-original-input.md#req-0-1-5-006)；评审：[02-review.md](02-review.md#req-0-1-5-006)，`Accepted`。
+- T01：空间组件建立 up/back/forward 接口及可前进历史；父目录复用 Windows 路径规则；保留扫描取消、渐进更新及焦点。
+- T02：App 将空间模式三种导航命令路由到空间组件；排除输入、菜单、对话框与组合键选框/调宽冲突。
+- T03：补充导航回归并运行 lint、前端测试、生产构建、相关 Edge E2E；req → feat → release 同步证据，保留既有测试包。
+- 回滚：普通反向提交撤销本条改动；不修改文件内容或扫描引擎。
