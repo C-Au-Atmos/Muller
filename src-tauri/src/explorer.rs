@@ -129,6 +129,26 @@ pub struct DirectoryEntry {
     size: u64,
     modified_unix_ms: Option<u64>,
     hidden: bool,
+    #[serde(skip)]
+    metadata_pending: bool,
+}
+
+impl DirectoryEntry {
+    fn with_metadata(mut self) -> Self {
+        if self.metadata_pending {
+            if let Ok(metadata) = fs::symlink_metadata(&self.path) {
+                self.size = if metadata.is_file() {
+                    metadata.len()
+                } else {
+                    0
+                };
+                self.modified_unix_ms = modified_unix_ms(&metadata);
+                self.hidden = is_hidden(&self.name, &metadata);
+            }
+            self.metadata_pending = false;
+        }
+        self
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -365,7 +385,11 @@ impl ExplorerManager {
             session_id,
             offset: start,
             total_entries,
-            entries: session.entries[start..end].to_vec(),
+            entries: session.entries[start..end]
+                .iter()
+                .cloned()
+                .map(DirectoryEntry::with_metadata)
+                .collect(),
         })
     }
 
@@ -389,7 +413,7 @@ impl ExplorerManager {
                 continue;
             }
             if total_entries >= offset && entries.len() < limit {
-                entries.push(entry.clone());
+                entries.push(entry.clone().with_metadata());
             }
             total_entries = total_entries.saturating_add(1);
         }
@@ -423,7 +447,7 @@ impl ExplorerManager {
                 continue;
             }
             if requested.contains(&visible_position) {
-                entries.push(entry.clone());
+                entries.push(entry.clone().with_metadata());
             }
             visible_position = visible_position.saturating_add(1);
         }
@@ -543,11 +567,12 @@ pub fn start_directory_query(
 #[tauri::command]
 pub fn start_directory_search(
     manager: State<'_, ExplorerManager>,
-    _indexer: State<'_, crate::indexer::IndexerManager>,
+    indexer: State<'_, crate::indexer::IndexerManager>,
     request: StartDirectorySearchRequest,
     on_event: Channel<DirectoryEvent>,
 ) -> StartDirectoryResponse {
     let manager = manager.inner().clone();
+    let indexer = indexer.inner().clone();
     let (task_id, cancellation) = manager.begin();
     let root_count = request.roots.len();
     let query_length = request.query.chars().count();
@@ -562,15 +587,24 @@ pub fn start_directory_search(
         if on_event.send(DirectoryEvent::Started { task_id }).is_err() {
             cancellation.cancel();
         }
-        let result = if request.indexed {
-            match build_persistent_indexed_search_session(&request, &cancellation) {
+        let result = if request.indexed || request.recursive {
+            match build_native_indexed_search_session(&request, &cancellation) {
                 Ok(session) => Ok(session),
-                Err(error) => {
+                Err(DirectoryBuildError::Cancelled) => Err(DirectoryBuildError::Cancelled),
+                Err(_) if request.indexed => {
+                    match build_persistent_indexed_search_session(&indexer, &request, &cancellation)
+                    {
+                        Ok(session) => Ok(session),
+                        Err(DirectoryBuildError::Cancelled) => Err(DirectoryBuildError::Cancelled),
+                        Err(_) => manager.build_indexed_search_session(&request, &cancellation),
+                    }
+                }
+                Err(_) => {
                     log::debug!(
                         target: "muller::search",
-                        "event=search.persistent_index_unavailable error={error}; falling back to directory index"
+                        "event=search.native_index_unavailable provider=portable-walker"
                     );
-                    manager.build_indexed_search_session(&request, &cancellation)
+                    build_search_session(&request, &cancellation)
                 }
             }
         } else {
@@ -668,32 +702,41 @@ pub fn cancel_directory_query(
 }
 
 #[tauri::command]
-pub fn read_directory_page(
+pub async fn read_directory_page(
     manager: State<'_, ExplorerManager>,
     session_id: u64,
     offset: usize,
     limit: usize,
 ) -> Result<DirectoryPageResponse, String> {
-    manager.page(session_id, offset, limit)
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.page(session_id, offset, limit))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn search_directory_page(
+pub async fn search_directory_page(
     manager: State<'_, ExplorerManager>,
     session_id: u64,
     query: String,
     offset: usize,
     limit: usize,
 ) -> Result<DirectorySearchPageResponse, String> {
-    manager.search(session_id, &query, offset, limit)
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.search(session_id, &query, offset, limit))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn resolve_directory_entries(
+pub async fn resolve_directory_entries(
     manager: State<'_, ExplorerManager>,
     request: ResolveDirectoryEntriesRequest,
 ) -> Result<Vec<DirectoryEntry>, String> {
-    manager.resolve_entries(&request)
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.resolve_entries(&request))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -833,6 +876,7 @@ fn build_directory_session(
             },
             modified_unix_ms: modified,
             hidden: is_hidden(&name, &metadata),
+            metadata_pending: false,
             path: path_for_user(&entry_path),
             name_lower,
             name,
@@ -946,6 +990,7 @@ fn build_search_session(
                     hidden: metadata
                         .as_ref()
                         .is_some_and(|metadata| is_hidden(&name, metadata)),
+                    metadata_pending: false,
                     path: path_for_user(&entry_path),
                     name_lower,
                     name,
@@ -975,21 +1020,139 @@ fn build_search_session(
     })
 }
 
+/// Native file-name records carry no file length. For the normal name query,
+/// only visible pages fetch that metadata. Explicit size/time sorting or time
+/// filters request metadata for matched candidates before sorting.
+fn build_native_indexed_search_session(
+    request: &StartDirectorySearchRequest,
+    cancellation: &CancellationToken,
+) -> Result<DirectorySession, DirectoryBuildError> {
+    if request.roots.is_empty() || request.query.trim().is_empty() {
+        return Err(DirectoryBuildError::Message(
+            "search requires roots and a query".into(),
+        ));
+    }
+    for _ in 0..3 {
+        let mut entries = Vec::new();
+        let mut offset = 0;
+        let mut revision = None;
+        loop {
+            if cancellation.is_cancelled() {
+                return Err(DirectoryBuildError::Cancelled);
+            }
+            let page = crate::native_broker::search_native_index_cancellable(
+                &request.roots,
+                &request.query,
+                offset,
+                2000,
+                cancellation,
+            )
+            .map_err(DirectoryBuildError::Message)?;
+            if revision.is_some_and(|expected| expected != page.revision) {
+                break;
+            }
+            revision = Some(page.revision);
+            offset += page.hits.len();
+            for hit in page.hits {
+                if cancellation.is_cancelled() {
+                    return Err(DirectoryBuildError::Cancelled);
+                }
+                let kind = if hit.attributes & 0x400 != 0 {
+                    DirectoryEntryKind::Symlink
+                } else if hit.is_directory {
+                    DirectoryEntryKind::Directory
+                } else {
+                    DirectoryEntryKind::File
+                };
+                let extension = hit
+                    .path
+                    .extension()
+                    .map(|value| value.to_string_lossy().to_lowercase());
+                if let Some(filter) = &request.filter {
+                    if filter.files_only && kind != DirectoryEntryKind::File {
+                        continue;
+                    }
+                    if kind == DirectoryEntryKind::File
+                        && !filter.extensions.is_empty()
+                        && !filter.extensions.iter().any(|value| {
+                            extension
+                                .as_deref()
+                                .is_some_and(|ext| ext.eq_ignore_ascii_case(value))
+                        })
+                    {
+                        continue;
+                    }
+                }
+                let needs_metadata = request.filter.as_ref().is_some_and(|filter| {
+                    filter.modified_before_unix_ms.is_some()
+                        || filter.modified_after_unix_ms.is_some()
+                        || matches!(
+                            filter.sort_by,
+                            DirectorySortField::Size | DirectorySortField::Modified
+                        )
+                });
+                let mut entry = DirectoryEntry {
+                    path: path_for_user(&hit.path),
+                    name_lower: hit.name.to_lowercase(),
+                    name: hit.name,
+                    kind,
+                    extension,
+                    size: 0,
+                    modified_unix_ms: None,
+                    hidden: hit.attributes & 2 != 0,
+                    metadata_pending: true,
+                };
+                if needs_metadata {
+                    entry = entry.with_metadata();
+                }
+                if !matches_directory_filter(
+                    entry.kind,
+                    entry.extension.as_deref(),
+                    entry.modified_unix_ms,
+                    request.filter.as_ref(),
+                ) {
+                    continue;
+                }
+                entries.push(entry);
+                if entries.len() >= MAX_SEARCH_RESULTS {
+                    break;
+                }
+            }
+            if !page.has_more || entries.len() >= MAX_SEARCH_RESULTS {
+                sort_directory_entries(&mut entries, request.filter.as_ref());
+                return Ok(DirectorySession {
+                    path: path_for_user(&request.roots[0]),
+                    entries,
+                });
+            }
+        }
+    }
+    Err(DirectoryBuildError::Message(
+        "native index changed repeatedly while paging; retry search".into(),
+    ))
+}
+
 fn build_persistent_indexed_search_session(
+    indexer: &crate::indexer::IndexerManager,
     request: &StartDirectorySearchRequest,
     cancellation: &CancellationToken,
 ) -> Result<DirectorySession, DirectoryBuildError> {
     if cancellation.is_cancelled() {
         return Err(DirectoryBuildError::Cancelled);
     }
-    let indexed = search_persistent_index(&request.roots, &request.query, MAX_SEARCH_RESULTS)
-        .map_err(DirectoryBuildError::Message)?;
+    let indexed = search_persistent_index(
+        indexer,
+        &request.roots,
+        &request.query,
+        MAX_SEARCH_INDEX_ENTRIES,
+    )
+    .map_err(DirectoryBuildError::Message)?;
     let mut entries = Vec::with_capacity(indexed.len());
     for entry in indexed {
         if cancellation.is_cancelled() {
             return Err(DirectoryBuildError::Cancelled);
         }
-        let hidden = entry.name.starts_with('.');
+        let hidden = entry.hidden;
         let path = entry.path;
         let kind = if entry.is_directory {
             DirectoryEntryKind::Directory
@@ -1017,7 +1180,11 @@ fn build_persistent_indexed_search_session(
             size: entry.size,
             modified_unix_ms: entry.modified_unix_ms,
             hidden,
+            metadata_pending: false,
         });
+        if entries.len() >= MAX_SEARCH_RESULTS {
+            break;
+        }
     }
     sort_directory_entries(&mut entries, request.filter.as_ref());
     Ok(DirectorySession {
@@ -1169,6 +1336,7 @@ fn filter_search_index(
             size: indexed.size,
             modified_unix_ms: indexed.modified_unix_ms,
             hidden: indexed.hidden,
+            metadata_pending: false,
         });
         if entries.len() >= MAX_SEARCH_RESULTS {
             break;
@@ -1254,6 +1422,7 @@ fn build_unc_server_session(
             size: 0,
             modified_unix_ms: None,
             hidden: false,
+            metadata_pending: false,
         });
     }
     sort_directory_entries(&mut entries, filter);
@@ -1398,6 +1567,31 @@ mod tests {
         DirectoryEntryKind, DirectoryQueryFilter, ExplorerManager, StartDirectorySearchRequest,
         build_directory_session, build_search_session,
     };
+
+    #[test]
+    fn native_record_metadata_is_read_only_for_requested_pages() {
+        let fixture = tempdir().unwrap();
+        let first = fixture.path().join("a.txt");
+        let second = fixture.path().join("b.txt");
+        fs::write(&first, "old").unwrap();
+        fs::write(&second, "old").unwrap();
+        let mut session =
+            build_directory_session(fixture.path(), None, &Default::default()).unwrap();
+        for entry in &mut session.entries {
+            entry.size = 0;
+            entry.metadata_pending = true;
+        }
+        let manager = ExplorerManager::default();
+        manager.store(77, session);
+        fs::write(first, "first updated").unwrap();
+        let page = manager.page(77, 0, 1).unwrap();
+        assert_eq!(page.entries[0].size, 13);
+        fs::write(second, "second updated after first page").unwrap();
+        let next = manager.page(77, 1, 1).unwrap();
+        assert_eq!(next.entries[0].size, 31);
+        assert_eq!(next.total_entries, 2);
+        assert!(next.entries[0].modified_unix_ms.is_some());
+    }
 
     #[test]
     fn directory_snapshot_sorts_directories_first_and_pages_results() {

@@ -85,6 +85,7 @@ import {
 } from "./features/explorer/BrowseWorkspace";
 import { DirectorySearchBar } from "./features/explorer/DirectorySearchBar";
 import { ImeAwareSearchInput } from "./features/explorer/ImeAwareSearchInput";
+import { NativeIndexerControl } from "./features/explorer/NativeIndexerControl";
 import { listDirectoryExtensions, warmGlobalSearchIndex, type DirectoryExtensionCount } from "./features/explorer/explorerClient";
 import { openNativePath } from "./features/explorer/fileOperationsClient";
 import { displayPath } from "./features/explorer/pathDisplay";
@@ -1683,6 +1684,7 @@ export function App({ initialPath }: AppProps) {
             <div className="stage7-context-path"><span>{activePage.toUpperCase()}</span><strong>{activePage === "settings" ? t("preferences") : displayPath(activeTab.path)}</strong></div>
           )}
           <div className="address-actions">
+            <NativeIndexerControl roots={globalSearchRoots} onAction={() => play("action")} />
             {explorerMode && !isThisPc ? <SpecularButton compact className={activePathIsFavorite ? "is-active" : ""} title={activePathIsFavorite ? t("unpinSidebar") : t("pinSidebar")} aria-label={activePathIsFavorite ? t("unpinSidebar") : t("pinSidebar")} aria-pressed={activePathIsFavorite} onClick={toggleFavorite}>{activePathIsFavorite ? <PinOff size={16} /> : <Pin size={16} />}</SpecularButton> : null}
             <SpecularButton compact className={explorerNavigation.split && addressMode && !isThisPc ? "is-active" : ""} title={t("splitView")} aria-label={t("splitView")} disabled={!addressMode || isThisPc || activeTool === "album"} aria-pressed={addressMode && !isThisPc && explorerNavigation.split} onClick={() => explorerRef.current?.toggleSplit()}><Columns2 size={16} /></SpecularButton>
             <SpecularButton

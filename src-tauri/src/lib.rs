@@ -5,6 +5,10 @@ mod file_operations;
 mod indexer;
 mod lifecycle;
 mod mutation;
+mod native_broker;
+mod native_index;
+mod native_probe;
+mod ntfs;
 mod preview;
 mod scan;
 mod space_sniffer;
@@ -48,6 +52,7 @@ use mutation::{
     MutationManager, close_edit_session, open_edit_session, recycle_duplicates, rollback_edit_side,
     save_edit_side,
 };
+use native_index::{enable_native_indexer, get_native_indexer_status, stop_native_indexer};
 use preview::{PreviewManager, cancel_file_preview, start_file_preview};
 use scan::{ScanManager, cancel_scan, start_scan};
 use space_sniffer::{SpaceSnifferManager, cancel_space_scan, start_space_scan};
@@ -97,6 +102,12 @@ fn request_show_main_window(app: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if native_broker::native_helper_entry() {
+        return;
+    }
+    if native_probe::entry() {
+        return;
+    }
     let launch_args = std::env::args().collect::<Vec<_>>();
     let launch_is_autostart = is_autostart_args(&launch_args);
     let mut context = tauri::generate_context!();
@@ -256,6 +267,9 @@ pub fn run() {
             cancel_global_indexer,
             search_global_index,
             get_indexer_status,
+            enable_native_indexer,
+            get_native_indexer_status,
+            stop_native_indexer,
             cancel_directory_query,
             read_directory_page,
             search_directory_page,
