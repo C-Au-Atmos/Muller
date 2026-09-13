@@ -2,6 +2,18 @@
 
 All notable changes to Muller are documented in this file.
 
+## [0.1.5-beta.3] - 2026-09-13
+
+REQ-0.1.5-005 adds keyboard navigation and interaction polish to the Platinum
+space view.
+
+- Arrow keys select the nearest visible block; Enter opens folders and Escape returns.
+- Optional Target Cursor effect can lock onto controls and the current Canvas block.
+- Space blocks use richer deep-black, low-saturation graphite, blue-black, smoke-purple and warm-black tones.
+- Right-click offers open/enter, locate in browser and copy path for the selected item.
+- Choosing a folder from the left rail while in Space mode keeps the Space view active.
+- Verified lint, 103 frontend tests, production build and the full Edge E2E suite.
+
 ## [0.1.5-beta.2] - 2026-09-13
 
 BUG-0.1.5-001 corrects the space map's thin, hard-to-click rectangles and the
