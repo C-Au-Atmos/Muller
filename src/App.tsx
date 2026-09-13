@@ -1366,7 +1366,7 @@ export function App({ initialPath }: AppProps) {
     if (mode === "album" || mode === "browse") browseRef.current?.navigateActive(location.target.path);
   };
   const handleSpaceContextAction = useCallback((action: SpaceContextAction, node: SpaceNode | null, selection: readonly SpaceNode[] = []) => {
-    const items = (selection.length > 0 ? selection : node ? [node] : []).map((entry) => ({
+    const items: DirectoryEntry[] = (selection.length > 0 ? selection : node ? [node] : []).map((entry) => ({
       path: entry.path,
       name: entry.name,
       kind: entry.kind === "folder" ? "directory" : "file",
