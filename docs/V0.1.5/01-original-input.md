@@ -212,3 +212,7 @@
 - T03：Preferences/Settings 加入 `cursorEffect`，Target Cursor 在全局 portal 中按设置挂载并支持 system/reduced/touch 生命周期。
 - T04：SpaceSniffer.css 与 Canvas palette 使用深黑透亮低饱和层级，增加可测试颜色/对比契约。
 - T05：自动化回归和 beta.3 EXE，保留 beta.2/manifest/hash 供追溯。
+
+### 用户补充反馈（2026-09-13，REQ-0.1.5-005）
+
+> 右键菜单需要和浏览页面大部分功能一致，除了比较、双栏；较小项目列表需要和主浏览页面选框一致，可选中、操作和右键；右侧栏目可以调整宽度；空间页面集成清理指示；Target 只在空间视图使用，文件夹框使用亮白色四角边框。
