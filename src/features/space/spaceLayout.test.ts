@@ -138,4 +138,10 @@ describe("findDirectionalSpaceRect", () => {
     const candidate = rect("candidate", 100, 0, 100, 100);
     expect(findDirectionalSpaceRect([source, candidate], member, "right")?.node.id).toBe("candidate");
   });
+
+  it("does not wrap to another tile when no tile exists in that direction", () => {
+    const source = rect("source", 0, 0, 100, 100);
+    const below = rect("below", 0, 100, 100, 100);
+    expect(findDirectionalSpaceRect([source, below], source.node, "left")).toBeUndefined();
+  });
 });
