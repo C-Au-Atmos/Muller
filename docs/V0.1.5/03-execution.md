@@ -18,6 +18,7 @@
 | `REQ-0.1.5-001` | `Accepted` | `Codex` | `Done` | V0.1.5 分支基线、旧分支归档标签、历史索引 | `Passed` |
 | `REQ-0.1.5-002` | `Accepted` | `Codex` | `Done` | 单栏空间扫描测试版、Canvas treemap、钻取、选择和音效 | `Passed` |
 | `REQ-0.1.5-003` | `Accepted` | `Codex` | `Done / Follow-up planned` | 空间视图线性布局优化、全链路搜索审计、Everything 级索引服务计划 | `Passed / MFT+USN pending` |
+| `REQ-0.1.5-004` | `Accepted` | `Codex` | `Implemented / packaging` | MFT/USN provider、隔离 helper、索引控制及测试 EXE | `147 Rust + 86 frontend + 92 Edge passed; native probe passed` |
 
 <a id="req-0-1-5-001"></a>
 
@@ -101,14 +102,14 @@
 | `REQ-0.1.5-002-T03` | 实现 Canvas treemap 和 Platinum 视觉 | `src/features/space/` | T02 | `Done` |
 | `REQ-0.1.5-002-T04` | 接入钻取、面包屑、选框、键盘和详情 | `src/features/space/` | T03 | `Done` |
 | `REQ-0.1.5-002-T05` | 接入音效事件和扫描状态 | `src/features/space/`, `src/features/feedback/` | T04 | `Done` |
-| `REQ-0.1.5-002-T06` | 添加 Rust、前端和 Edge 测试 | `src-tauri`, `src`, `e2e` | T02-T05 | `Rust/frontend passed; Edge pending` |
+| `REQ-0.1.5-002-T06` | 添加 Rust、前端和 Edge 测试 | `src-tauri`, `src`, `e2e` | T02-T05 | `Rust/frontend/Edge passed` |
 
 ### 验证计划
 
 - [x] Rust：递归大小、空目录、权限失败、符号链接跳过、取消和旧 session 丢弃。
 - [x] 前端：面积比例、绘制、选择、钻取、返回、选框和详情。
 - [ ] 音效：选择/打开/完成/失败事件，静音和限流。
-- [ ] Edge E2E：从浏览入口进入空间视图，打开子目录后返回。
+- [x] Edge E2E：从浏览入口进入空间视图，打开子目录后返回。
 - [ ] 基准：测试版完成后记录 10k/100k 节点首批、完整扫描、FPS、内存和取消延迟。
 
 ### 发布与回滚
@@ -154,7 +155,7 @@ Windows 专用索引服务负责 MFT 初始枚举和 USN Journal 增量维护，
 
 ## `REQ-0.1.5-004` - 实现 MFT/USN 原生索引并交付测试版 EXE
 
-- 状态：In progress；评审 Accepted，用户已授权实现和本地测试版构建。
+- 状态：T01-T05 Done，T06 Packaging；评审 Accepted，用户已授权实现和本地测试版构建。
 - T01：实现 Windows MFT/USN 卷 provider、file ID 树、增量重放和日志恢复，覆盖二进制解析边界和生命周期测试。
 - T02：实现同 EXE 提权索引进程、本机用户受限命名管道、普通权限 GUI 查询与状态协议。
 - T03：接通 Browse/Home/Compare 全盘搜索，复用结果分页、筛选和取消；内存查询及按页元数据加载。
@@ -162,3 +163,12 @@ Windows 专用索引服务负责 MFT 初始枚举和 USN Journal 增量维护，
 - T05：测试 fmt/test/clippy、lint/frontend/build、Edge E2E；执行真实 NTFS 枚举与变更验证并记录性能证据。
 - T06：从 master 基线建立 release/0.1.5，合入已验证 feat/0.1.5；更新测试版元数据并构建独立 GUI EXE，提供哈希与运行说明，推送 req/feat/release；master 不参与此次测试版交付。
 - 回滚：停止按需索引进程并回退原生索引相关提交；不改写文件内容和现有系统 USN 日志，不强制推送。
+
+### 实现及门禁证据（2026-09-13）
+
+- `src-tauri/src/ntfs.rs`：真实 MFT 枚举、枚举前水位、USN 有界重放、日志断档失效、目录父链、Unicode/重解析点和根范围测试。
+- `src-tauri/src/native_broker.rs`：同 EXE 按需 helper、当前用户/SYSTEM ACL、medium integrity、本机限制、双向 PID 校验、有界帧和超时、每秒增量维护、取消及四份分页缓存。
+- `src-tauri/src/explorer.rs`：global/recursive 优先原生索引，失败回退；分页/选中条目补充元数据放到后台线程。Portable 查询复用内存，所有根覆盖和过期检查，取消保留旧快照。
+- `NativeIndexerControl`：全局入口、启用/停止、实际引擎/状态/计数/原因、中英文 Platinum 样式及硬链接范围说明。
+- 检查：147 个 Rust tests passed（另 1 个需提权的 direct provider test ignored，由真实 helper 探针补充）；86 个前端 tests、92 个 Edge E2E 通过；lint、build、fmt、clippy 通过。
+- 调试 EXE 原生探针：F 盘 20,387 条，初建含启动/授权 2,047 ms，首个查询 16.675 ms，四类 USN 变化验证共 4,147 ms。报告在测试包 `native-probe-debug.json`；正式测试 EXE 构建后继续验证。
