@@ -1607,10 +1607,12 @@
   position: relative;
   min-width: 0;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 10px;
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
   scrollbar-width: thin;
+  scrollbar-gutter: stable;
   contain: strict;
 }
 
@@ -2038,6 +2040,8 @@
 .breadcrumb-address__blank { min-width: 32px !important; flex: 1; }
 .breadcrumb-address__edit { width: 32px; padding: 0; }
 
+.stage7-addressbar .stage7-address-center.is-space { grid-template-columns: minmax(0, 1fr); }
+
 .stage7-address-center {
   display: grid;
   min-width: 0;
@@ -2325,7 +2329,7 @@
 }
 
 .browse-content.has-preview.is-preview-pinned {
-  grid-template-columns: minmax(0, 1fr) 5px minmax(240px, var(--preview-width, 320px)) !important;
+  grid-template-columns: minmax(0, 1fr) 5px min(var(--preview-width, 320px), 60%) !important;
   grid-template-rows: minmax(0, 1fr) !important;
 }
 
@@ -2350,22 +2354,6 @@
   border-left: 1px solid var(--border-strong);
   box-shadow: none;
   backdrop-filter: none;
-}
-
-@container browse-layout (max-width: 759px) {
-  .browse-content.has-preview.is-preview-pinned {
-    grid-template-columns: minmax(0, 1fr) !important;
-  }
-
-  .browse-content.has-preview.is-preview-pinned .preview-panel {
-    position: absolute;
-    z-index: 12;
-    inset: 0 0 0 auto;
-    width: min(var(--preview-width, 320px), calc(100% - 24px));
-    border-left: 1px solid var(--border-strong);
-    box-shadow: -14px 0 30px rgb(0 0 0 / 22%);
-    backdrop-filter: blur(18px);
-  }
 }
 
 @media (max-width: 1100px) {

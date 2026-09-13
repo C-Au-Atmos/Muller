@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 
 import { useAppI18n } from "../../i18n/i18n";
@@ -6,6 +6,10 @@ import { formatSpaceBytes, spaceSnifferClient } from "./spaceSnifferClient";
 import type { SpaceContextAction, SpaceNode, SpaceScanProgress, SpaceSnifferProps } from "./types";
 import { buildSpaceMapLayout, findDirectionalSpaceRect, interpolateSpaceRects, spaceNodeBytes, type SpaceDirection, type SpaceRect } from "./spaceLayout";
 import { registerTargetCursorSurface } from "../feedback/targetCursorRegistry";
+import { isImeCompositionEvent } from "../../input/imeInput";
+import { spaceParentPath } from "./spaceNavigation";
+import { PreviewPanel } from "../preview/PreviewPanel";
+import type { DirectoryEntry } from "../explorer/types";
 import "./SpaceSniffer.css";
 
 interface Point { x: number; y: number; }
@@ -79,21 +83,24 @@ function drawMap(context: CanvasRenderingContext2D, rects: readonly SpaceRect[],
   }
 }
 
-export function SpaceSniffer({ root, progress, client = spaceSnifferClient, onOpenFolder, onCancelScan, onSelectionChange, onSoundEvent, onContextAction, className }: SpaceSnifferProps) {
-  const { locale, formatNumber } = useAppI18n(); const words = copy[locale];
+export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, client = spaceSnifferClient, onOpenFolder, onCancelScan, onSelectionChange, onSoundEvent, onContextAction, onNavigationChange, showBreadcrumbs = true, mediaAutoplay = false, onMediaAutoplayChange, className }: SpaceSnifferProps) {
+  const { locale, formatNumber, t } = useAppI18n(); const words = copy[locale];
   const canvasRef = useRef<HTMLCanvasElement>(null); const viewportRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const pointerRef = useRef<{ start: Point; current: Point; dragging: boolean } | null>(null);
   const displayedRectsRef = useRef<readonly SpaceRect[]>([]); const paintRef = useRef<(rects: readonly SpaceRect[]) => void>(() => undefined);
   const drillRef = useRef<{ controller: AbortController; generation: number } | null>(null); const generationRef = useRef(0);
-  const externalPathRef = useRef(root.path); const animationPathRef = useRef(root.path);
+  const externalRootRef = useRef(root); const animationPathRef = useRef(root.path);
+  const externalRequestRef = useRef(rootRequestId);
   const historyProgressRef = useRef(new Map<string, SpaceScanProgress>());
   const [size, setSize] = useState({ width: 1, height: 1 }); const [selected, setSelected] = useState<readonly SpaceNode[]>([]);
   const [hovered, setHovered] = useState<string | null>(null); const [marquee, setMarquee] = useState<{ start: Point; current: Point } | null>(null);
   const [activeRoot, setActiveRoot] = useState(root); const [rootHistory, setRootHistory] = useState<readonly SpaceNode[]>([]);
+  const [forwardHistory, setForwardHistory] = useState<readonly SpaceNode[]>([]);
   const [localProgress, setLocalProgress] = useState<SpaceScanProgress | null>(null); const [groupOpen, setGroupOpen] = useState(false); const [groupLimit, setGroupLimit] = useState(60);
   const [detailsWidth, setDetailsWidth] = useState(248);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: SpaceNode | null } | null>(null);
   const activeProgress = localProgress ?? progress; const scanning = activeProgress?.phase === "scanning";
   const total = spaceNodeBytes(activeRoot);
@@ -107,14 +114,21 @@ export function SpaceSniffer({ root, progress, client = spaceSnifferClient, onOp
   }, [rects, selectedIds]);
   const historyIndexes = useMemo(() => new Map(rootHistory.map((node, index) => [breadcrumbKey(node.path), index])), [rootHistory]);
   useEffect(() => {
-    if (externalPathRef.current !== root.path) {
-      externalPathRef.current = root.path; generationRef.current += 1; drillRef.current?.controller.abort(); drillRef.current = null;
-      historyProgressRef.current.clear(); setActiveRoot(root); setRootHistory([]); setSelected([]); setLocalProgress(null); setGroupOpen(false);
+    if (externalRootRef.current === root && externalRequestRef.current === rootRequestId) return;
+    const changedPath = externalRootRef.current.path !== root.path || externalRequestRef.current !== rootRequestId;
+    externalRootRef.current = root;
+    externalRequestRef.current = rootRequestId;
+    if (changedPath) {
+      generationRef.current += 1; drillRef.current?.controller.abort(); drillRef.current = null;
+      historyProgressRef.current.set(activeRoot.path, activeProgress ?? { phase: "complete", scanned: 0, total: null });
+      if (activeRoot.path !== root.path) { setRootHistory((history) => [...history, activeRoot]); setForwardHistory([]); }
+      setActiveRoot(root); setSelected([]); setLocalProgress(null); setGroupOpen(false); setContextMenu(null); setPreviewOpen(false);
     } else {
       setActiveRoot((current) => current.path === root.path ? root : current);
       setRootHistory((history) => history.map((node) => node.path === root.path ? root : node));
+      setForwardHistory((history) => history.map((node) => node.path === root.path ? root : node));
     }
-  }, [root]);
+  }, [activeProgress, activeRoot, root, rootRequestId]);
   useEffect(() => () => { generationRef.current += 1; drillRef.current?.controller.abort(); }, []);
   useEffect(() => {
     if (!contextMenu) return;
@@ -173,7 +187,7 @@ export function SpaceSniffer({ root, progress, client = spaceSnifferClient, onOp
   }, [activeRoot.path, rects]);
 
   const emitSelection = useCallback((nodes: readonly SpaceNode[]) => { setSelected(nodes); onSelectionChange?.(nodes); onSoundEvent?.(nodes.length ? "select" : "hover"); }, [onSelectionChange, onSoundEvent]);
-  const clearInteraction = useCallback(() => { setSelected([]); onSelectionChange?.([]); setGroupOpen(false); setGroupLimit(60); setMarquee(null); pointerRef.current = null; }, [onSelectionChange]);
+  const clearInteraction = useCallback(() => { setSelected([]); onSelectionChange?.([]); setGroupOpen(false); setGroupLimit(60); setMarquee(null); setContextMenu(null); setHovered(null); setPreviewOpen(false); pointerRef.current = null; }, [onSelectionChange]);
   const startFolderScan = useCallback((node: SpaceNode) => {
     drillRef.current?.controller.abort(); const controller = new AbortController(); const generation = ++generationRef.current; drillRef.current = { controller, generation };
     setLocalProgress({ phase: "scanning", scanned: 0, total: null });
@@ -189,20 +203,63 @@ export function SpaceSniffer({ root, progress, client = spaceSnifferClient, onOp
       setLocalProgress({ phase: "error", scanned: 0, total: null, message: error instanceof Error ? error.message : String(error) });
     }).finally(() => { if (drillRef.current?.generation === generation) drillRef.current = null; });
   }, [client]);
-  const restoreHistory = useCallback((index: number) => {
-    const previousRoot = rootHistory[index]; if (!previousRoot) return;
+  const restoreRoot = useCallback((previousRoot: SpaceNode) => {
+    historyProgressRef.current.set(activeRoot.path, activeProgress ?? { phase: "complete", scanned: activeRoot.children?.length ?? 0, total: null });
+    onCancelScan?.();
     generationRef.current += 1; drillRef.current?.controller.abort(); drillRef.current = null;
-    setActiveRoot(previousRoot); setRootHistory((history) => history.slice(0, index)); clearInteraction();
+    setActiveRoot(previousRoot); clearInteraction();
     setLocalProgress(historyProgressRef.current.get(previousRoot.path) ?? { phase: previousRoot.scanning ? "idle" : "complete", scanned: previousRoot.children?.length ?? 0, total: null });
     if (previousRoot.scanning) startFolderScan(previousRoot);
     onSoundEvent?.("open"); viewportRef.current?.focus();
-  }, [clearInteraction, onSoundEvent, rootHistory, startFolderScan]);
+  }, [activeProgress, activeRoot, clearInteraction, onCancelScan, onSoundEvent, startFolderScan]);
+  const restoreHistory = useCallback((index: number) => {
+    const previousRoot = rootHistory[index]; if (!previousRoot) return;
+    setForwardHistory((history) => [...rootHistory.slice(index + 1), activeRoot, ...history]);
+    setRootHistory((history) => history.slice(0, index));
+    restoreRoot(previousRoot);
+  }, [activeRoot, restoreRoot, rootHistory]);
+  const forward = useCallback(() => {
+    const next = forwardHistory[0]; if (!next) return;
+    setRootHistory((history) => [...history, activeRoot]);
+    setForwardHistory((history) => history.slice(1));
+    restoreRoot(next);
+  }, [activeRoot, forwardHistory, restoreRoot]);
   const openFolder = useCallback((node: SpaceNode) => {
     if (node.kind !== "folder") return;
     historyProgressRef.current.set(activeRoot.path, activeProgress ?? { phase: "complete", scanned: activeRoot.children?.length ?? 0, total: null });
-    onCancelScan?.(); onSoundEvent?.("open"); onOpenFolder?.(node); setRootHistory((history) => [...history, activeRoot]);
-    setActiveRoot(node); clearInteraction(); startFolderScan(node);
+    onCancelScan?.(); onSoundEvent?.("open"); onOpenFolder?.(node); setRootHistory((history) => [...history, activeRoot]); setForwardHistory([]);
+    setActiveRoot(node); clearInteraction(); startFolderScan(node); viewportRef.current?.focus();
   }, [activeProgress, activeRoot, clearInteraction, onCancelScan, onOpenFolder, onSoundEvent, startFolderScan]);
+  const up = useCallback(() => {
+    const parent = spaceParentPath(activeRoot.path); if (!parent) return;
+    const cached = [...rootHistory].reverse().find((node) => breadcrumbKey(node.path) === breadcrumbKey(parent));
+    if (cached && !cached.scanning) {
+      setRootHistory((history) => [...history, activeRoot]); setForwardHistory([]); restoreRoot(cached);
+    } else openFolder(cached ?? { id: parent, path: parent, name: pathParts(parent).at(-1) ?? parent, kind: "folder", scanning: true });
+  }, [activeRoot, openFolder, restoreRoot, rootHistory]);
+  const navigateActive = useCallback((path: string) => {
+    const nextPath = path.trim();
+    if (!nextPath || breadcrumbKey(nextPath) === breadcrumbKey(activeRoot.path)) return;
+    const cached = [...rootHistory].reverse().find((node) => breadcrumbKey(node.path) === breadcrumbKey(nextPath));
+    if (cached && !cached.scanning) {
+      setRootHistory((history) => [...history, activeRoot]); setForwardHistory([]); restoreRoot(cached);
+    } else openFolder(cached ?? { id: nextPath, path: nextPath, name: pathParts(nextPath).at(-1) ?? nextPath, kind: "folder", scanning: true });
+  }, [activeRoot, openFolder, restoreRoot, rootHistory]);
+  const togglePreview = useCallback(() => {
+    if (contextMenu || selected.length !== 1) return;
+    setPreviewOpen((open) => !open);
+  }, [contextMenu, selected.length]);
+  useImperativeHandle(ref, () => ({
+    up: () => { if (!contextMenu) up(); },
+    back: () => { if (!contextMenu) restoreHistory(rootHistory.length - 1); },
+    forward: () => { if (!contextMenu) forward(); },
+    navigateActive,
+    togglePreview,
+  }), [contextMenu, forward, navigateActive, restoreHistory, rootHistory.length, togglePreview, up]);
+  const canUp = spaceParentPath(activeRoot.path) !== null;
+  useLayoutEffect(() => {
+    onNavigationChange?.({ path: activeRoot.path, canBack: rootHistory.length > 0, canForward: forwardHistory.length > 0, canUp });
+  }, [activeRoot.path, canUp, forwardHistory.length, onNavigationChange, rootHistory.length]);
   const stopScan = () => {
     generationRef.current += 1; drillRef.current?.controller.abort(); drillRef.current = null; onCancelScan?.();
     setLocalProgress({ ...activeProgress, phase: "idle", scanned: activeProgress?.scanned ?? 0, total: activeProgress?.total ?? null });
@@ -260,21 +317,32 @@ export function SpaceSniffer({ root, progress, client = spaceSnifferClient, onOp
   };
   const handleDoubleClick = (event: ReactPointerEvent<HTMLDivElement>) => { const rect = hitTest(localPoint(event)); if (rect && !rect.members) openFolder(rect.node); };
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || isImeCompositionEvent(event.nativeEvent) || contextMenu) return;
     if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) { event.preventDefault(); moveKeyboardSelection(event.key); return; }
-    if (event.key === "Escape" && rootHistory.length) { event.preventDefault(); restoreHistory(rootHistory.length - 1); }
+    if (event.key === "Escape" && previewOpen) { event.preventDefault(); setPreviewOpen(false); }
+    else if (event.key === "Escape" && rootHistory.length) { event.preventDefault(); restoreHistory(rootHistory.length - 1); }
     else if (event.key === "Enter" && currentSelection.length === 1 && currentSelection[0]?.kind === "folder") { event.preventDefault(); openFolder(currentSelection[0]); }
   };
   const crumbs = pathParts(activeRoot.path); const selectedBytes = currentSelection.reduce((sum, node) => sum + spaceNodeBytes(node), 0); const single = currentSelection.length === 1 ? currentSelection[0] : undefined;
+  const previewEntry: DirectoryEntry | null = single ? {
+    path: single.path, name: single.name, kind: single.kind === "folder" ? "directory" : "file",
+    size: spaceNodeBytes(single), extension: single.extension ?? (single.kind === "file" ? single.name.split(".").slice(1).at(-1) ?? null : null),
+    modifiedUnixMs: single.modifiedAt ?? null, hidden: false,
+  } : null;
   const statusText = scanning ? words.scanning : activeProgress?.phase === "error" ? words.failed : activeProgress?.phase === "idle" ? words.stopped : words.complete;
   return (
-    <section className={`space-sniffer${className ? ` ${className}` : ""}`} aria-label="Space Sniffer">
+    <section className={`space-sniffer${className ? ` ${className}` : ""}`} aria-label="Space Sniffer" data-root-path={activeRoot.path} onKeyDown={(event) => {
+      if (!previewOpen || contextMenu || event.key !== "Escape" || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || isImeCompositionEvent(event.nativeEvent)) return;
+      if (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable=true], [role=menu], [role=dialog]')) return;
+      event.preventDefault(); event.stopPropagation(); setPreviewOpen(false); viewportRef.current?.focus();
+    }}>
       <header className="space-sniffer__toolbar">
         <div className="space-sniffer__heading"><span className="space-sniffer__title">{words.title}</span><span className="space-sniffer__status">{formatSpaceBytes(total)} {words.scanned} · {formatNumber(activeRoot.children?.length ?? activeRoot.childCount ?? 0)} {words.items}</span></div>
         <div className="space-sniffer__scan"><span className={`space-sniffer__scan-state${scanning ? " is-scanning" : ""}${activeProgress?.phase === "error" ? " is-error" : ""}`} role="status"><i />{statusText}</span>{scanning ? <button type="button" className="space-sniffer__button" onClick={stopScan}>{words.stop}</button> : null}</div>
-        <nav className="space-sniffer__crumbs" aria-label="Folder path">
+        {showBreadcrumbs ? <nav className="space-sniffer__crumbs" aria-label="Folder path">
           {crumbs.map((crumb, index) => { const historyIndex = historyIndexes.get(crumbs.slice(0, index + 1).join("\\").toLowerCase()); const isCurrent = index === crumbs.length - 1;
-            return <span key={`${crumb}-${index}`}>{historyIndex !== undefined ? <button className="space-sniffer__crumb" type="button" onClick={() => restoreHistory(historyIndex)}>{crumb}</button> : <span className={`space-sniffer__crumb${isCurrent ? " is-current" : ""}`} aria-current={isCurrent ? "page" : undefined}>{crumb}</span>}{index < crumbs.length - 1 ? <span className="space-sniffer__crumb-separator">/</span> : null}</span>; })}
-        </nav>
+            return <span key={`${crumb}-${index}`}>{!isCurrent && historyIndex !== undefined ? <button className="space-sniffer__crumb" type="button" onClick={() => restoreHistory(historyIndex)}>{crumb}</button> : <span className={`space-sniffer__crumb${isCurrent ? " is-current" : ""}`} aria-current={isCurrent ? "page" : undefined}>{crumb}</span>}{index < crumbs.length - 1 ? <span className="space-sniffer__crumb-separator">/</span> : null}</span>; })}
+        </nav> : null}
       </header>
       {activeProgress?.message ? <div className="space-sniffer__notice" role="alert">{activeProgress.message}</div> : null}
       <div ref={bodyRef} className="space-sniffer__body" style={{ "--space-details-width": `${detailsWidth}px` } as CSSProperties}>
@@ -321,16 +389,27 @@ export function SpaceSniffer({ root, progress, client = spaceSnifferClient, onOp
         </div>
         <div className="space-sniffer__resize-handle" role="separator" aria-orientation="vertical" aria-label="调整详情栏宽度" tabIndex={0}
           onPointerDown={(event) => { event.preventDefault(); resizeRef.current = { startX: event.clientX, startWidth: detailsWidth }; event.currentTarget.setPointerCapture?.(event.pointerId); }}
-          onKeyDown={(event) => { if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return; event.preventDefault(); setDetailsWidth((value) => Math.max(180, Math.min(460, value + (event.key === "ArrowLeft" ? 16 : -16)))); }}
+          onKeyDown={(event) => { if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return; event.preventDefault(); setDetailsWidth((value) => Math.max(180, Math.min(460, value + (event.key === "ArrowLeft" ? 16 : -16)))); }}
           onDoubleClick={() => setDetailsWidth(248)} />
         <aside className="space-sniffer__details" aria-label={words.selected}>
           <div className="space-sniffer__details-label">{words.selected}</div>
           {currentSelection.length ? <><div className="space-sniffer__selection-card"><h2>{single?.name ?? (groupOpen ? words.other : `${formatNumber(currentSelection.length)} ${words.items}`)}</h2><span>{single ? single.kind === "folder" ? words.folder : words.file : `${formatNumber(currentSelection.length)} ${words.items}`}{single?.partial ? ` · ${words.partial}` : ""}</span></div>
-            <dl className="space-sniffer__metrics"><dt>{words.size}</dt><dd className="space-sniffer__metric">{formatSpaceBytes(selectedBytes)}</dd><dt>{words.share}</dt><dd>{total > 0 ? (selectedBytes / total * 100).toFixed(1) : "0.0"}%</dd>{single?.kind === "folder" ? <><dt>{words.contents}</dt><dd>{formatNumber(single.children?.length ?? single.childCount ?? 0)} {words.items}</dd></> : null}{single ? <><dt>{words.path}</dt><dd className="space-sniffer__path" title={single.path}>{single.path}</dd></> : null}</dl>
+            <div className="space-sniffer__selection-actions">
             {single?.kind === "folder" ? <button type="button" className="space-sniffer__open" onClick={() => openFolder(single)}>{words.open}<span>↗</span></button> : null}
+            {single ? <button type="button" className="space-sniffer__open space-sniffer__preview-button" aria-pressed={previewOpen} title={t("previewShortcut")} onClick={togglePreview}>{t("preview")}<span>Space</span></button> : null}
+            </div>
+            {!previewOpen || !single ? <dl className="space-sniffer__metrics"><dt>{words.size}</dt><dd className="space-sniffer__metric">{formatSpaceBytes(selectedBytes)}</dd><dt>{words.share}</dt><dd>{total > 0 ? (selectedBytes / total * 100).toFixed(1) : "0.0"}%</dd>{single?.kind === "folder" ? <><dt>{words.contents}</dt><dd>{formatNumber(single.children?.length ?? single.childCount ?? 0)} {words.items}</dd></> : null}{single ? <><dt>{words.path}</dt><dd className="space-sniffer__path" title={single.path}>{single.path}</dd></> : null}</dl> : null}
           </> : <div className="space-sniffer__empty"><span className="space-sniffer__empty-icon" /><p>{words.empty}</p></div>}
-          {groupOpen ? <div className="space-sniffer__group-list"><p>{words.otherHint}</p>{grouped.slice(0, groupLimit).map((node) => <button key={node.id} type="button" title={node.path} className={selectedIds.has(node.id) ? "is-selected" : undefined} aria-pressed={selectedIds.has(node.id)} onClick={() => emitSelection([node])} onDoubleClick={() => activateNode(node)} onContextMenu={(event) => showContextMenu(event, node)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); activateNode(node); } }}><span>{node.name}</span><small>{formatSpaceBytes(spaceNodeBytes(node))}</small></button>)}{grouped.length > groupLimit ? <button type="button" onClick={() => setGroupLimit((value) => value + 60)}>{words.more} · {groupLimit} {words.of} {grouped.length}</button> : null}</div> : null}
-          <div className="space-sniffer__keyboard">{words.keyboard}</div>
+          {previewOpen && previewEntry ? <PreviewPanel variant="embedded" entry={previewEntry} pinned={false} mediaAutoplay={mediaAutoplay} onPinnedChange={() => undefined} onMediaAutoplayChange={(enabled) => onMediaAutoplayChange?.(enabled)} onClose={() => { setPreviewOpen(false); viewportRef.current?.focus(); }} /> : null}
+          {groupOpen ? <div className="space-sniffer__group-list"><p>{words.otherHint}</p>{grouped.slice(0, groupLimit).map((node) => <button key={node.id} type="button" title={node.path} className={selectedIds.has(node.id) ? "is-selected" : undefined} aria-pressed={selectedIds.has(node.id)} onClick={() => emitSelection([node])} onDoubleClick={() => activateNode(node)} onContextMenu={(event) => showContextMenu(event, node)} onKeyDown={(event) => {
+            if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || contextMenu || isImeCompositionEvent(event.nativeEvent)) return;
+            if (event.key === " ") {
+              event.preventDefault(); event.stopPropagation();
+              setPreviewOpen((open) => currentSelection.length === 1 && currentSelection[0]?.id === node.id ? !open : true);
+              emitSelection([node]);
+            } else if (event.key === "Enter") { event.preventDefault(); activateNode(node); }
+          }}><span>{node.name}</span><small>{formatSpaceBytes(spaceNodeBytes(node))}</small></button>)}{grouped.length > groupLimit ? <button type="button" onClick={() => setGroupLimit((value) => value + 60)}>{words.more} · {groupLimit} {words.of} {grouped.length}</button> : null}</div> : null}
+          <div className="space-sniffer__keyboard">{locale === "zh-CN" ? "Enter 打开 · Space 预览 · Backspace 上一级 · Alt ←/→ 后退/前进" : "Enter to open · Space to preview · Backspace up · Alt ←/→ back/forward"}</div>
         </aside>
       </div>
     </section>
