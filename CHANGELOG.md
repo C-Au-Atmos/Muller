@@ -2,6 +2,26 @@
 
 All notable changes to Muller are documented in this file.
 
+## [0.1.5-beta.2] - 2026-09-13
+
+BUG-0.1.5-001 corrects the space map's thin, hard-to-click rectangles and the
+missing updates during scanning.
+
+- Uses squarified byte-proportional rectangles, aggregating small entries into
+  an accessible list. Individual blocks meet a 28px short edge and 1600px² area
+  threshold; an aggregate keeps its true area even when it is subpixel.
+- Restores Platinum gradients, fine white seams, orthogonal light accents and
+  selection corners. Folder contents become interactive tiles after opening.
+- Streams discovered directories and growing totals through coalesced immutable
+  snapshots, animates current geometry, and retains the last result on stop.
+- Keeps drill-down history and scan sessions isolated; respects reduced motion
+  and preserves distinct names in Windows case-sensitive directories.
+- Verified 102 frontend, 153 Rust and 96 Edge tests, with focused regressions for
+  live Canvas changes, cancellation, small-item access and folder navigation.
+
+The beta.1 native MFT/USN filename index remains available. Directory space is
+still measured separately; fast scans finish immediately without artificial delay.
+
 ## [0.1.5-beta.1] - 2026-09-13
 
 Windows test build for REQ-0.1.5-002/004: Platinum Space Sniffer view and native
