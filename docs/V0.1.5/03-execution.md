@@ -15,6 +15,7 @@
 
 | 条目 ID | 评审结论 | 实现负责人 | 状态 | 主要交付物 | 验证状态 |
 |---|---|---|---|---|---|
+| `REQ-0.1.5-007` | `Accepted` | `Codex` | `In progress` | 统一地址导航、空间及共享预览、完整瀑布列 | `Pending` |
 | `REQ-0.1.5-006` | `Accepted` | `Codex` | `In progress` | 空间视图父目录/历史快捷键与测试 | `Pending` |
 | `REQ-0.1.5-001` | `Accepted` | `Codex` | `Done` | V0.1.5 分支基线、旧分支归档标签、历史索引 | `Passed` |
 | `REQ-0.1.5-002` | `Accepted` | `Codex` | `Done` | 单栏空间扫描测试版、Canvas treemap、钻取、选择和音效 | `Passed` |
@@ -400,3 +401,13 @@
 - T02：App 将空间模式三种导航命令路由到空间组件；排除输入、菜单、对话框与组合键选框/调宽冲突。
 - T03：补充导航回归并运行 lint、前端测试、生产构建、相关 Edge E2E；req → feat → release 同步证据，保留既有测试包。
 - 回滚：普通反向提交撤销本条改动；不修改文件内容或扫描引擎。
+
+<a id="req-0-1-5-007"></a>
+
+## `REQ-0.1.5-007` - 统一空间地址栏、预览与瀑布流宽度适配
+
+- 原始输入：[01-original-input.md](01-original-input.md#req-0-1-5-007)；评审：[02-review.md](02-review.md#req-0-1-5-007)，`Accepted`。
+- T01：空间导航状态上报 App，顶部地址组件、按钮和命令共用 ref 接口；隐藏内部重复路径条。
+- T02：改进共享 PreviewPanel，空间详情嵌入预览，按钮及 Space 触发；保留现有读取客户端。
+- T03：修复瀑布流的可用宽度测量与完整列分配，验证固定预览及 resize。
+- T04：lint、前端测试、build、相关 Edge；最终候选执行完整门禁并构建可追溯测试 EXE，旧包保留。
