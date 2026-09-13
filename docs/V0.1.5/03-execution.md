@@ -20,7 +20,7 @@
 | `REQ-0.1.5-003` | `Accepted` | `Codex` | `Done / native follow-up implemented in REQ-0.1.5-004` | 空间视图线性布局优化、全链路历史搜索审计、后续原生索引计划 | `Passed; MFT/USN implementation and probe recorded in REQ-0.1.5-004` |
 | `REQ-0.1.5-004` | `Accepted` | `Codex` | `Done / beta.1 delivered` | MFT/USN provider、隔离 helper、索引控制及最终测试 EXE/SHA256 | `148 Rust + 86 frontend + 93 Edge and quality gates passed; final native probe/GUI/space recheck passed` |
 | `BUG-0.1.5-001` | `Accepted` | `Codex` | `beta.2 delivered; native in-progress capture pending` | 真实渐进扫描、紧凑方块、微小项汇总入口、SVG 细白边线与直角高亮 | `102 frontend + 153 Rust + 96 Edge passed; EXE/hash and actual selection screenshot recorded` |
-| `REQ-0.1.5-005` | `Accepted` | `Codex` | `Implemented / beta.3 packaging` | 方向键空间选框、可选 Target Cursor、黑透色阶、右键文件操作、测试版 EXE | `lint/test/build/Edge passed; packaging pending` |
+| `REQ-0.1.5-005` | `Accepted` | `Codex` | `Done / beta.3 delivered` | 方向键空间选框、可选 Target Cursor、黑透色阶、右键文件操作、测试版 EXE | `103 frontend + 101 Rust + 97 Edge; EXE/hash recorded` |
 
 <a id="req-0-1-5-001"></a>
 
@@ -320,7 +320,7 @@
 
 - 原始输入：[`01-original-input.md#req-0-1-5-005`](01-original-input.md#req-0-1-5-005)。
 - 评审记录：[`02-review.md#req-0-1-5-005`](02-review.md#req-0-1-5-005)，`Accepted`。
-- 状态：`Implemented / beta.3 packaging in progress`；目标交付 `0.1.5-beta.3`，实现提交 `37c4ed7`。
+- 状态：`Done / 0.1.5-beta.3 delivered`；实现提交 `37c4ed7`，release 提交 `73a82ad`。
 - 实现基线：保留 beta.2 紧凑布局、真实增量统计、可点击小项入口和细白正交边线；不改动 MFT/USN 文件名索引架构。
 
 ### 技术设计
@@ -340,8 +340,8 @@
 | `REQ-0.1.5-005-T03` | DOM/Canvas 光标锁定与当前帧虚拟矩形，输入/可见性/减少动画清理 | 光标组件、`src/features/space/` | T02 | `Done` |
 | `REQ-0.1.5-005-T04` | 低亮黑透色板、局部反光与实际运行界面视觉核验 | `src/features/space/` | 评审 Accepted | `Done` |
 | `REQ-0.1.5-005-T05` | 复用 Browse 右键文件操作、单项/多选命中及修改后扫描失效刷新 | `src/features/space/`、浏览文件操作与应用协调层 | 评审 Accepted | `Implemented core menu; rename/properties follow-up` |
-| `REQ-0.1.5-005-T06` | 有意义的单测/Edge 回归，完整质量门禁及真实 EXE 交互截图 | `src`、`e2e`、测试包证据 | T01-T05 | `Automated gates done; EXE evidence pending` |
-| `REQ-0.1.5-005-T07` | feat → release、beta.3 元数据/EXE/manifest/SHA256/说明，req 证据同步并非强制推送三分支 | `release/0.1.5`、`release/0.1.5-beta.3`、版本文档 | T06 | `In progress` |
+| `REQ-0.1.5-005-T06` | 有意义的单测/Edge 回归，完整质量门禁及真实 EXE 交互截图 | `src`、`e2e`、测试包证据 | T01-T05 | `Done; 97 Edge and EXE evidence recorded` |
+| `REQ-0.1.5-005-T07` | feat → release、beta.3 元数据/EXE/manifest/SHA256/说明，req 证据同步并非强制推送三分支 | `release/0.1.5`、`release/0.1.5-beta.3`、版本文档 | T06 | `Done` |
 
 ### 验证计划
 
@@ -369,3 +369,16 @@
 - T03：Preferences/Settings 持久化 cursorEffect，Target Cursor 生命周期和 reduced/touch 处理。
 - T04：深黑透亮低饱和材质与 Canvas palette 回归。
 - T05：全量门禁、beta.3 EXE、manifest/SHA256，beta.2 保留。
+
+### beta.3 测试包与验证记录（2026-09-13）
+
+| 项目 | 值 |
+|---|---|
+| 文件 | `D:\Muller\release\0.1.5-beta.3\Muller-0.1.5-beta.3-x64.exe` |
+| 安装包 | `Muller-0.1.5-beta.3-x64-setup.exe`（NSIS） |
+| 源分支 / 提交 | `release/0.1.5` / `73a82ad` |
+| 直接运行 EXE | 11,220,992 字节，SHA256 `3e319247b2a3bee4f99856fcd51803a7a9a7137ad3141a5f04515d16a72fc086` |
+| NSIS 安装包 | 4,868,505 字节，SHA256 `2bfadc2a3d008a3d5edba25fb8d986e3fdd75d93b770f8ca2e90e67462b1b81d` |
+| 验证 | 103 前端、101 Rust（1 ignored）、97 Edge；lint/build/fmt/clippy 通过 |
+
+说明：默认 Tauri 构建的 MSI 目标受 WiX 预发布版本规则限制，本次采用可直接运行 EXE 与 NSIS 安装包交付；beta.2 测试包继续保留。右键本轮交付打开/定位/复制路径核心菜单，重命名和属性列为后续扩展。
