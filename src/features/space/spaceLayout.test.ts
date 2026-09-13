@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { buildSpaceMapLayout, interpolateSpaceRects, layoutNodes, spaceNodeBytes } from "./spaceLayout";
+import { buildSpaceMapLayout, findDirectionalSpaceRect, interpolateSpaceRects, layoutNodes, spaceNodeBytes, type SpaceRect } from "./spaceLayout";
 
 const node = (id: string, bytes: number) => ({ id, name: id, path: id, kind: "folder" as const, bytes });
+const rect = (id: string, x: number, y: number, width: number, height: number): SpaceRect => ({ node: node(id, width * height), x, y, width, height });
 
 describe("layoutNodes", () => {
   it("lays out large child lists without overlap or quadratic work", () => {
@@ -103,5 +104,44 @@ describe("layoutNodes", () => {
       if (source) expect(rect.x).toBeCloseTo((source.x + target.x) / 2, 8);
     }
     expect(interpolateSpaceRects(previous, next, 1)).toEqual(next);
+  });
+});
+
+describe("findDirectionalSpaceRect", () => {
+  it("follows the overlapping visual row before a nearer diagonal tile", () => {
+    const source = rect("source", 0, 0, 100, 100);
+    const aligned = rect("aligned", 100, 30, 70, 40);
+    const diagonal = rect("diagonal", 102, 130, 70, 40);
+    expect(findDirectionalSpaceRect([source, diagonal, aligned], source.node, "right")?.node.id).toBe("aligned");
+  });
+
+  it("uses edge distance and stable identity when several tiles share a projection", () => {
+    const source = rect("source", 0, 0, 100, 100);
+    const farther = rect("farther", 140, 10, 40, 40);
+    const nearer = rect("nearer", 100, 55, 40, 40);
+    expect(findDirectionalSpaceRect([source, farther, nearer], source.node, "right")?.node.id).toBe("nearer");
+  });
+
+  it("uses the same projection rule for up and down", () => {
+    const source = rect("source", 100, 100, 100, 100);
+    const alignedUp = rect("aligned-up", 120, 0, 50, 100);
+    const diagonalUp = rect("diagonal-up", 0, 5, 80, 80);
+    const alignedDown = rect("aligned-down", 130, 200, 60, 100);
+    const diagonalDown = rect("diagonal-down", 230, 205, 80, 80);
+    expect(findDirectionalSpaceRect([source, diagonalUp, alignedUp], source.node, "up")?.node.id).toBe("aligned-up");
+    expect(findDirectionalSpaceRect([source, diagonalDown, alignedDown], source.node, "down")?.node.id).toBe("aligned-down");
+  });
+
+  it("resolves a grouped member to its aggregate rectangle", () => {
+    const member = node("member", 10);
+    const source: SpaceRect = { ...rect("other", 0, 0, 100, 100), members: [member] };
+    const candidate = rect("candidate", 100, 0, 100, 100);
+    expect(findDirectionalSpaceRect([source, candidate], member, "right")?.node.id).toBe("candidate");
+  });
+
+  it("does not wrap to another tile when no tile exists in that direction", () => {
+    const source = rect("source", 0, 0, 100, 100);
+    const below = rect("below", 0, 100, 100, 100);
+    expect(findDirectionalSpaceRect([source, below], source.node, "left")).toBeUndefined();
   });
 });

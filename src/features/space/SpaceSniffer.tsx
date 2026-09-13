@@ -4,7 +4,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { useAppI18n } from "../../i18n/i18n";
 import { formatSpaceBytes, spaceSnifferClient } from "./spaceSnifferClient";
 import type { SpaceNode, SpaceScanProgress, SpaceSnifferProps } from "./types";
-import { buildSpaceMapLayout, interpolateSpaceRects, spaceNodeBytes, type SpaceRect } from "./spaceLayout";
+import { buildSpaceMapLayout, findDirectionalSpaceRect, interpolateSpaceRects, spaceNodeBytes, type SpaceDirection, type SpaceRect } from "./spaceLayout";
 import { registerTargetCursorSurface } from "../feedback/targetCursorRegistry";
 import "./SpaceSniffer.css";
 
@@ -200,16 +200,18 @@ export function SpaceSniffer({ root, progress, client = spaceSnifferClient, onOp
     });
   }, [rects]);
   const moveKeyboardSelection = (key: string) => {
-    const current = currentSelection[0]; const candidates = displayedRectsRef.current.filter((rect) => !rect.members);
+    const current = currentSelection[0];
+    // Aggregated "Other items" is a real visible tile and must remain
+    // reachable by arrows when all individual entries are too small.
+    const candidates = displayedRectsRef.current.filter((rect) => rect.width > 1e-6 && rect.height > 1e-6);
     if (!candidates.length) return;
-    const source = current ? displayedRectsRef.current.find((rect) => rect.node.id === current.id) : null;
-    if (!source) { emitSelection([candidates[0]!.node]); return; }
-    const origin = { x: source.x + source.width / 2, y: source.y + source.height / 2 };
-    const direction: readonly [number, number] = key === "ArrowLeft" ? [-1, 0] : key === "ArrowRight" ? [1, 0] : key === "ArrowUp" ? [0, -1] : [0, 1];
-    const next = candidates.filter((rect) => direction[0] === 0 ? (direction[1] < 0 ? rect.y + rect.height / 2 < origin.y : rect.y + rect.height / 2 > origin.y) : (direction[0] < 0 ? rect.x + rect.width / 2 < origin.x : rect.x + rect.width / 2 > origin.x)).sort((a, b) => {
-      const ac = Math.hypot(a.x + a.width / 2 - origin.x, a.y + a.height / 2 - origin.y); const bc = Math.hypot(b.x + b.width / 2 - origin.x, b.y + b.height / 2 - origin.y); return ac - bc;
-    });
-    const nextRect = next[0]; if (nextRect) emitSelection(nextRect.members ?? [nextRect.node]);
+    const direction: SpaceDirection = key === "ArrowLeft" ? "left" : key === "ArrowRight" ? "right" : key === "ArrowUp" ? "up" : "down";
+    if (!current) { emitSelection(candidates[0]!.members ?? [candidates[0]!.node]); return; }
+    const nextRect = findDirectionalSpaceRect(displayedRectsRef.current, current, direction);
+    // At the edge of the map an arrow key keeps the current selection. It
+    // must not wrap to the first tile, which feels like an inaccurate jump.
+    if (!nextRect) return;
+    emitSelection(nextRect.members ?? [nextRect.node]);
   };
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => { if (event.button !== 0) return; const point = localPoint(event); pointerRef.current = { start: point, current: point, dragging: false }; event.currentTarget.setPointerCapture(event.pointerId); event.currentTarget.focus(); };
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
