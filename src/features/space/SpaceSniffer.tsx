@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 
 import { useAppI18n } from "../../i18n/i18n";
 import { formatSpaceBytes, spaceSnifferClient } from "./spaceSnifferClient";
@@ -82,6 +82,8 @@ function drawMap(context: CanvasRenderingContext2D, rects: readonly SpaceRect[],
 export function SpaceSniffer({ root, progress, client = spaceSnifferClient, onOpenFolder, onCancelScan, onSelectionChange, onSoundEvent, onContextAction, className }: SpaceSnifferProps) {
   const { locale, formatNumber } = useAppI18n(); const words = copy[locale];
   const canvasRef = useRef<HTMLCanvasElement>(null); const viewportRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const pointerRef = useRef<{ start: Point; current: Point; dragging: boolean } | null>(null);
   const displayedRectsRef = useRef<readonly SpaceRect[]>([]); const paintRef = useRef<(rects: readonly SpaceRect[]) => void>(() => undefined);
   const drillRef = useRef<{ controller: AbortController; generation: number } | null>(null); const generationRef = useRef(0);
@@ -91,6 +93,7 @@ export function SpaceSniffer({ root, progress, client = spaceSnifferClient, onOp
   const [hovered, setHovered] = useState<string | null>(null); const [marquee, setMarquee] = useState<{ start: Point; current: Point } | null>(null);
   const [activeRoot, setActiveRoot] = useState(root); const [rootHistory, setRootHistory] = useState<readonly SpaceNode[]>([]);
   const [localProgress, setLocalProgress] = useState<SpaceScanProgress | null>(null); const [groupOpen, setGroupOpen] = useState(false); const [groupLimit, setGroupLimit] = useState(60);
+  const [detailsWidth, setDetailsWidth] = useState(248);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: SpaceNode } | null>(null);
   const activeProgress = localProgress ?? progress; const scanning = activeProgress?.phase === "scanning";
   const total = spaceNodeBytes(activeRoot);
@@ -123,6 +126,20 @@ export function SpaceSniffer({ root, progress, client = spaceSnifferClient, onOp
     window.addEventListener("keydown", close); window.addEventListener("mousedown", close);
     return () => { window.removeEventListener("keydown", close); window.removeEventListener("mousedown", close); };
   }, [contextMenu]);
+  useEffect(() => {
+    const handleMove = (event: PointerEvent) => {
+      const resize = resizeRef.current; const body = bodyRef.current;
+      if (!resize || !body) return;
+      const available = body.getBoundingClientRect().width;
+      const max = Math.max(260, Math.min(460, available - 300));
+      const next = Math.min(max, Math.max(180, resize.startWidth - (event.clientX - resize.startX)));
+      setDetailsWidth(next);
+    };
+    const handleUp = () => { resizeRef.current = null; };
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    return () => { window.removeEventListener("pointermove", handleMove); window.removeEventListener("pointerup", handleUp); };
+  }, []);
   useEffect(() => {
     const element = viewportRef.current; if (!element) return;
     const observer = new ResizeObserver(([entry]) => {
@@ -213,6 +230,15 @@ export function SpaceSniffer({ root, progress, client = spaceSnifferClient, onOp
     if (!nextRect) return;
     emitSelection(nextRect.members ?? [nextRect.node]);
   };
+  const activateNode = (node: SpaceNode) => {
+    if (node.kind === "folder") openFolder(node);
+    else onContextAction?.("open", node);
+  };
+  const showContextMenu = (event: ReactMouseEvent, node: SpaceNode) => {
+    event.preventDefault(); event.stopPropagation();
+    emitSelection([node]);
+    setContextMenu({ x: event.clientX, y: event.clientY, node });
+  };
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => { if (event.button !== 0) return; const point = localPoint(event); pointerRef.current = { start: point, current: point, dragging: false }; event.currentTarget.setPointerCapture(event.pointerId); event.currentTarget.focus(); };
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const point = localPoint(event); const pointer = pointerRef.current;
@@ -247,7 +273,7 @@ export function SpaceSniffer({ root, progress, client = spaceSnifferClient, onOp
         </nav>
       </header>
       {activeProgress?.message ? <div className="space-sniffer__notice" role="alert">{activeProgress.message}</div> : null}
-      <div className="space-sniffer__body">
+      <div ref={bodyRef} className="space-sniffer__body" style={{ "--space-details-width": `${detailsWidth}px` } as CSSProperties}>
         <div className="space-sniffer__map">
           <div className="space-sniffer__legend"><span>{words.legend}</span><span>{words.seams}</span>{activeRoot.partial ? <span>{words.partial}</span> : null}</div>
           <div ref={viewportRef} className="space-sniffer__viewport" onContextMenu={(event) => { event.preventDefault(); const rect = hitTest(localPoint(event)) ?? displayedRectsRef.current[0]; if (!rect) return; const node = rect.members?.[0] ?? rect.node; emitSelection([node]); setContextMenu({ x: event.clientX, y: event.clientY, node }); }} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={() => { pointerRef.current = null; setMarquee(null); }} onPointerLeave={() => setHovered(null)} onDoubleClick={handleDoubleClick} onKeyDown={handleKeyDown} role="application" aria-label="Folder space map" tabIndex={0}>
@@ -262,13 +288,16 @@ export function SpaceSniffer({ root, progress, client = spaceSnifferClient, onOp
           </div> : null}
           <footer className="space-sniffer__map-footer">{grouped.length ? <button type="button" className="space-sniffer__group-toggle" onClick={() => { setGroupOpen(!groupOpen); if (!groupOpen) emitSelection(grouped); }}>{words.other} · {formatNumber(grouped.length)} <span>{formatSpaceBytes(grouped.reduce((sum, node) => sum + spaceNodeBytes(node), 0))}</span></button> : <span>{formatNumber(activeProgress?.scanned ?? activeRoot.children?.length ?? 0)} {words.items}</span>}<span className="space-sniffer__hint">{words.hint}</span></footer>
         </div>
+        <div className="space-sniffer__resize-handle" role="separator" aria-orientation="vertical" aria-label="调整详情栏宽度" tabIndex={0}
+          onPointerDown={(event) => { event.preventDefault(); resizeRef.current = { startX: event.clientX, startWidth: detailsWidth }; event.currentTarget.setPointerCapture?.(event.pointerId); }}
+          onDoubleClick={() => setDetailsWidth(248)} />
         <aside className="space-sniffer__details" aria-label={words.selected}>
           <div className="space-sniffer__details-label">{words.selected}</div>
           {currentSelection.length ? <><div className="space-sniffer__selection-card"><h2>{single?.name ?? (groupOpen ? words.other : `${formatNumber(currentSelection.length)} ${words.items}`)}</h2><span>{single ? single.kind === "folder" ? words.folder : words.file : `${formatNumber(currentSelection.length)} ${words.items}`}{single?.partial ? ` · ${words.partial}` : ""}</span></div>
             <dl className="space-sniffer__metrics"><dt>{words.size}</dt><dd className="space-sniffer__metric">{formatSpaceBytes(selectedBytes)}</dd><dt>{words.share}</dt><dd>{total > 0 ? (selectedBytes / total * 100).toFixed(1) : "0.0"}%</dd>{single?.kind === "folder" ? <><dt>{words.contents}</dt><dd>{formatNumber(single.children?.length ?? single.childCount ?? 0)} {words.items}</dd></> : null}{single ? <><dt>{words.path}</dt><dd className="space-sniffer__path" title={single.path}>{single.path}</dd></> : null}</dl>
             {single?.kind === "folder" ? <button type="button" className="space-sniffer__open" onClick={() => openFolder(single)}>{words.open}<span>↗</span></button> : null}
           </> : <div className="space-sniffer__empty"><span className="space-sniffer__empty-icon" /><p>{words.empty}</p></div>}
-          {groupOpen ? <div className="space-sniffer__group-list"><p>{words.otherHint}</p>{grouped.slice(0, groupLimit).map((node) => <button key={node.id} type="button" title={node.path} onClick={() => emitSelection([node])} onDoubleClick={() => openFolder(node)}><span>{node.name}</span><small>{formatSpaceBytes(spaceNodeBytes(node))}</small></button>)}{grouped.length > groupLimit ? <button type="button" onClick={() => setGroupLimit((value) => value + 60)}>{words.more} · {groupLimit} {words.of} {grouped.length}</button> : null}</div> : null}
+          {groupOpen ? <div className="space-sniffer__group-list"><p>{words.otherHint}</p>{grouped.slice(0, groupLimit).map((node) => <button key={node.id} type="button" title={node.path} className={selectedIds.has(node.id) ? "is-selected" : undefined} aria-pressed={selectedIds.has(node.id)} onClick={() => emitSelection([node])} onDoubleClick={() => activateNode(node)} onContextMenu={(event) => showContextMenu(event, node)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); activateNode(node); } }}><span>{node.name}</span><small>{formatSpaceBytes(spaceNodeBytes(node))}</small></button>)}{grouped.length > groupLimit ? <button type="button" onClick={() => setGroupLimit((value) => value + 60)}>{words.more} · {groupLimit} {words.of} {grouped.length}</button> : null}</div> : null}
           <div className="space-sniffer__keyboard">{words.keyboard}</div>
         </aside>
       </div>
