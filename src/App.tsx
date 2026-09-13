@@ -1540,7 +1540,7 @@ export function App({ initialPath }: AppProps) {
         <span>{stats.messagesPerSecond} msg/s</span>
       </output>
 
-      <TargetCursor enabled={preferences.cursorEffect === "target"} reducedMotion={preferences.motion === "reduced"} />
+      <TargetCursor enabled={preferences.cursorEffect === "target" && activeTool === "space"} reducedMotion={preferences.motion === "reduced"} />
       {systemRoute === "home" || preferences.glassBackground ? (
         <Suspense fallback={null}>
           <ColorBendsBackground intensity={systemRoute === "home" ? "home" : "workspace"} />
