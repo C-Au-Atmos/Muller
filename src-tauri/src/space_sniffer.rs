@@ -314,6 +314,8 @@ fn run_space_scan_task<F>(
                     for child_index in children.into_iter().rev() {
                         work.push(Work::Enter(child_index));
                     }
+                } else {
+                    work.push(Work::Exit(index));
                 }
             }
             Work::Exit(index) => {
@@ -411,19 +413,90 @@ mod tests {
         let done = events
             .iter()
             .find_map(|event| {
-                if let SpaceScanEvent::Done { root, .. } = event {
-                    Some(root)
+                if let SpaceScanEvent::Done {
+                    root,
+                    total_bytes,
+                    file_count,
+                    directory_count,
+                    ..
+                } = event
+                {
+                    Some((root, *total_bytes, *file_count, *directory_count))
                 } else {
                     None
                 }
             })
             .expect("done");
-        assert_eq!(done.bytes, 10);
-        assert!(
-            events
+        assert_eq!(done.0.bytes, 10);
+        assert_eq!((done.1, done.2, done.3), (10, 2, 1));
+        let nodes: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                SpaceScanEvent::Batch { items, .. } => Some(items),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(nodes.len(), 3);
+        for (relative_path, kind, bytes, relative_parent) in [
+            ("root.txt", SpaceNodeKind::File, 4, ""),
+            ("nested/child.txt", SpaceNodeKind::File, 6, "nested"),
+            ("nested", SpaceNodeKind::Directory, 6, ""),
+        ] {
+            let expected_path = directory.path().join(relative_path);
+            let matching: Vec<_> = nodes
                 .iter()
-                .any(|event| matches!(event, SpaceScanEvent::Batch { .. }))
+                .filter(|node| node.path == expected_path)
+                .collect();
+            assert_eq!(matching.len(), 1, "{relative_path} must be emitted once");
+            let node = matching[0];
+            assert_eq!(node.kind, kind);
+            assert_eq!(node.bytes, bytes);
+            assert_eq!(
+                node.parent.as_ref(),
+                Some(&directory.path().join(relative_parent))
+            );
+            assert!(!node.partial);
+        }
+    }
+
+    #[test]
+    fn directory_containing_only_files_emits_tiles_before_done() {
+        let directory = tempdir().expect("fixture");
+        fs::write(directory.path().join("only.txt"), b"visible tile").expect("file");
+        let mut events = Vec::new();
+        run_space_scan_task(
+            8,
+            StartSpaceScanRequest {
+                root: directory.path().to_path_buf(),
+                batch_size: Some(128),
+                max_depth: None,
+            },
+            &CancellationToken::default(),
+            |event| {
+                events.push(event);
+                true
+            },
         );
+        let [
+            SpaceScanEvent::Started { .. },
+            SpaceScanEvent::Batch { items, .. },
+            SpaceScanEvent::Done {
+                root,
+                file_count,
+                directory_count,
+                ..
+            },
+        ] = events.as_slice()
+        else {
+            panic!("file-only scan must emit a batch before completion: {events:?}");
+        };
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].path, directory.path().join("only.txt"));
+        assert_eq!(items[0].kind, SpaceNodeKind::File);
+        assert_eq!(items[0].bytes, 12);
+        assert_eq!(root.bytes, 12);
+        assert_eq!((*file_count, *directory_count), (1, 0));
     }
 
     #[test]

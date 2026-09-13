@@ -12,6 +12,7 @@ const palette = ["#27272a", "#3f3f46", "#52525b", "#27272a", "#454545", "#333338
 const nodeBytes = (node: SpaceNode): number => node.bytes ?? node.size ?? 0;
 
 function pathParts(path: string): string[] { return path.split(/[\\/]/).filter(Boolean); }
+function breadcrumbKey(path: string): string { return pathParts(path).join("\\").toLowerCase(); }
 
 export function SpaceSniffer({ root, client = spaceSnifferClient, onOpenFolder, onSelectionChange, onSoundEvent, className }: SpaceSnifferProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -41,6 +42,7 @@ export function SpaceSniffer({ root, client = spaceSnifferClient, onOpenFolder, 
 
   const rects = useMemo<SpaceRect[]>(() => layoutNodes(activeRoot.children ?? [], size.width, size.height), [activeRoot.children, size.height, size.width]);
   const selectedIds = useMemo(() => new Set(selected.map((node) => node.id)), [selected]);
+  const historyIndexes = useMemo(() => new Map(rootHistory.map((node, index) => [breadcrumbKey(node.path), index])), [rootHistory]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -88,6 +90,18 @@ export function SpaceSniffer({ root, client = spaceSnifferClient, onOpenFolder, 
   }, []);
   const hitTest = useCallback((point: Point) => rects.find((rect) => point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height)?.node, [rects]);
   const emitSelection = useCallback((nodes: readonly SpaceNode[]) => { setSelected(nodes); onSelectionChange?.(nodes); onSoundEvent?.(nodes.length ? "select" : "hover"); }, [onSelectionChange, onSoundEvent]);
+  const restoreHistory = useCallback((index: number) => {
+    const previousRoot = rootHistory[index];
+    if (!previousRoot) return;
+    setActiveRoot(previousRoot);
+    setRootHistory((history) => history.slice(0, index));
+    setSelected([]);
+    onSelectionChange?.([]);
+    setMarquee(null);
+    pointerRef.current = null;
+    onSoundEvent?.("open");
+    viewportRef.current?.focus();
+  }, [onSelectionChange, onSoundEvent, rootHistory]);
   const openFolder = useCallback((node: SpaceNode) => {
     onSoundEvent?.("open");
     onOpenFolder?.(node);
@@ -136,10 +150,7 @@ export function SpaceSniffer({ root, client = spaceSnifferClient, onOpenFolder, 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape" && rootHistory.length > 0) {
       event.preventDefault();
-      setActiveRoot(rootHistory[rootHistory.length - 1]!);
-      setRootHistory((history) => history.slice(0, -1));
-      setSelected([]);
-      onSoundEvent?.("open");
+      restoreHistory(rootHistory.length - 1);
       return;
     }
     if (event.key !== "Enter" || selected.length !== 1) return;
@@ -155,13 +166,18 @@ export function SpaceSniffer({ root, client = spaceSnifferClient, onOpenFolder, 
         <span className="space-sniffer__title">SPACE SNIFFER</span>
         <span className="space-sniffer__status">{formatSpaceBytes(nodeBytes(activeRoot))} · {activeRoot.children?.length ?? activeRoot.childCount ?? 0} items</span>
         <nav className="space-sniffer__crumbs" aria-label="Folder path">
-          {crumbs.map((crumb, index) => <span key={`${crumb}-${index}`}><button className={`space-sniffer__crumb${index === crumbs.length - 1 ? " is-current" : ""}`} type="button" onClick={() => {
-            if (index === 0) {
-              setActiveRoot(root);
-              setRootHistory([]);
-              setSelected([]);
-            }
-          }}>{crumb}</button>{index < crumbs.length - 1 ? <span className="space-sniffer__crumb-separator">/</span> : null}</span>)}
+          {crumbs.map((crumb, index) => {
+            const historyIndex = historyIndexes.get(crumbs.slice(0, index + 1).join("\\").toLowerCase());
+            const isCurrent = index === crumbs.length - 1;
+            return <span key={`${crumb}-${index}`}>
+              {historyIndex !== undefined ? (
+                <button className="space-sniffer__crumb" type="button" onClick={() => restoreHistory(historyIndex)}>{crumb}</button>
+              ) : (
+                <span className={`space-sniffer__crumb${isCurrent ? " is-current" : ""}`} aria-current={isCurrent ? "page" : undefined} style={{ cursor: "default" }}>{crumb}</span>
+              )}
+              {index < crumbs.length - 1 ? <span className="space-sniffer__crumb-separator">/</span> : null}
+            </span>;
+          })}
         </nav>
       </header>
       <div className="space-sniffer__body">
