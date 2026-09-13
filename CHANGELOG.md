@@ -2,6 +2,31 @@
 
 All notable changes to Muller are documented in this file.
 
+## [0.1.5-beta.1] - 2026-09-13
+
+Windows test build for REQ-0.1.5-002/004: Platinum Space Sniffer view and native
+NTFS filename indexing. Enable "NTFS fast index" in the address bar to launch
+the isolated indexer through UAC; the desktop GUI keeps normal privileges.
+
+- Enumerates MFT records with FSCTL_ENUM_USN_DATA, then replays USN changes for
+  creates, deletes, file renames and parent-directory renames. Invalid journal
+  checkpoints trigger a rebuild or an explicit fallback state.
+- Uses a local, user-restricted named pipe with process identity checks; the
+  helper only reads filesystem metadata and exits with its parent process.
+- Browse, Home and Compare searches share the native provider, bounded query
+  snapshots and paged metadata loading. Missing coverage falls back to the
+  portable walker. Portable snapshots are cached in memory for queries.
+- Includes the existing Canvas space map with selection, folder drill-down,
+  breadcrumbs, interface sounds and linear weighted-strip layout.
+- Verified 147 Rust tests, 86 frontend tests and 92 Edge E2E tests, plus a real
+  NTFS helper probe covering initial enumeration and USN lifecycle changes.
+
+Beta limits: the native index lives in memory and rebuilds on activation;
+additional hard-link names are not fully enumerated. USN must already be
+enabled. Filename indexing does not compute recursive directory byte totals;
+the space view continues to scan logical sizes separately. Name queries scan
+cached names; this build does not claim parity with every Everything feature.
+
 ## [0.1.4] - 2026-09-03
 
 Keyword-based file organization and Windows-style directory navigation release.
