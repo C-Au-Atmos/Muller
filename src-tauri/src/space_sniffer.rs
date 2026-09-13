@@ -6,6 +6,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
+    time::{Duration, Instant},
 };
 
 use muller_core::CancellationToken;
@@ -15,6 +16,7 @@ use tauri::{State, ipc::Channel};
 const DEFAULT_BATCH_SIZE: usize = 128;
 const MAX_BATCH_SIZE: usize = 4096;
 const MAX_DEPTH: u32 = 256;
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(80);
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -61,6 +63,7 @@ pub struct SpaceNode {
     pub depth: u32,
     pub child_count: u32,
     pub partial: bool,
+    pub scanning: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -84,6 +87,10 @@ pub enum SpaceScanEvent {
     Batch {
         task_id: u64,
         items: Vec<SpaceNode>,
+        total_bytes: u64,
+        file_count: u64,
+        directory_count: u64,
+        skipped_count: u64,
     },
     Done {
         task_id: u64,
@@ -152,7 +159,7 @@ pub fn start_space_scan(
 ) -> Result<StartSpaceScanResponse, String> {
     let metadata = fs::symlink_metadata(&request.root)
         .map_err(|error| format!("cannot inspect {}: {error}", request.root.display()))?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+    if is_link_or_reparse(&metadata) || !metadata.is_dir() {
         return Err(format!("{} is not a directory", request.root.display()));
     }
     let manager = manager.inner().clone();
@@ -180,12 +187,89 @@ pub fn cancel_space_scan(
 #[derive(Debug)]
 struct NodeState {
     node: SpaceNode,
-    children: Vec<usize>,
+    parent: Option<usize>,
+    dirty: bool,
 }
 
 enum Work {
     Enter(usize),
     Exit(usize),
+}
+
+struct ScanProgress {
+    states: Vec<NodeState>,
+    dirty: Vec<usize>,
+    file_count: u64,
+    directory_count: u64,
+    skipped_count: u64,
+    batch_size: usize,
+    last_flush: Instant,
+}
+
+impl ScanProgress {
+    fn mark_dirty(&mut self, index: usize) {
+        if !self.states[index].dirty {
+            self.states[index].dirty = true;
+            self.dirty.push(index);
+        }
+    }
+
+    // Each file contributes once, at discovery. Closing directories never adds
+    // their bytes again. The parent chain is bounded by the scan depth limit.
+    fn update_ancestors(&mut self, mut index: Option<usize>, bytes: u64, partial: bool) {
+        while let Some(current) = index {
+            let state = &mut self.states[current];
+            state.node.bytes = state.node.bytes.saturating_add(bytes);
+            state.node.partial |= partial;
+            index = state.parent;
+            self.mark_dirty(current);
+        }
+    }
+
+    fn flush<F>(
+        &mut self,
+        task_id: u64,
+        cancellation: &CancellationToken,
+        force: bool,
+        send: &mut F,
+    ) where
+        F: FnMut(SpaceScanEvent) -> bool,
+    {
+        if self.dirty.is_empty()
+            || (!force
+                && self.dirty.len() < self.batch_size
+                && self.last_flush.elapsed() < PROGRESS_INTERVAL)
+        {
+            return;
+        }
+        // Upserts use absolute totals. A node is queued at most once per flush,
+        // so wide directories cannot create quadratic snapshots or append work.
+        for chunk in self.dirty.chunks(self.batch_size) {
+            if cancellation.is_cancelled() {
+                break;
+            }
+            let items = chunk
+                .iter()
+                .map(|&index| {
+                    self.states[index].dirty = false;
+                    self.states[index].node.clone()
+                })
+                .collect();
+            if !send(SpaceScanEvent::Batch {
+                task_id,
+                items,
+                total_bytes: self.states[0].node.bytes,
+                file_count: self.file_count,
+                directory_count: self.directory_count,
+                skipped_count: self.skipped_count,
+            }) {
+                cancellation.cancel();
+                break;
+            }
+        }
+        self.dirty.clear();
+        self.last_flush = Instant::now();
+    }
 }
 
 fn run_space_scan_task<F>(
@@ -217,16 +301,23 @@ fn run_space_scan_task<F>(
         depth: 0,
         child_count: 0,
         partial: false,
+        scanning: true,
     };
-    let mut states = vec![NodeState {
-        node: root_node,
-        children: Vec::new(),
-    }];
+    let mut progress = ScanProgress {
+        states: vec![NodeState {
+            node: root_node,
+            parent: None,
+            dirty: true,
+        }],
+        dirty: vec![0],
+        file_count: 0,
+        directory_count: 0,
+        skipped_count: 0,
+        batch_size: request.batch_size(),
+        last_flush: Instant::now(),
+    };
     let mut work = vec![Work::Enter(0)];
-    let mut batch = Vec::with_capacity(request.batch_size());
-    let mut skipped_count = 0_u64;
-    let mut file_count = 0_u64;
-    let mut directory_count = 0_u64;
+    progress.flush(task_id, cancellation, true, &mut send);
 
     while let Some(step) = work.pop() {
         if cancellation.is_cancelled() {
@@ -235,11 +326,11 @@ fn run_space_scan_task<F>(
         }
         match step {
             Work::Enter(index) => {
-                if states[index].node.kind == SpaceNodeKind::Directory {
-                    let path = states[index].node.path.clone();
-                    let depth = states[index].node.depth;
+                if progress.states[index].node.kind == SpaceNodeKind::Directory {
+                    let path = progress.states[index].node.path.clone();
+                    let depth = progress.states[index].node.depth;
                     if depth >= request.max_depth() {
-                        states[index].node.partial = true;
+                        progress.update_ancestors(Some(index), 0, true);
                         work.push(Work::Exit(index));
                         continue;
                     }
@@ -253,28 +344,41 @@ fn run_space_scan_task<F>(
                                 });
                                 return;
                             }
-                            skipped_count = skipped_count.saturating_add(1);
-                            states[index].node.partial = true;
+                            progress.skipped_count = progress.skipped_count.saturating_add(1);
+                            progress.update_ancestors(Some(index), 0, true);
                             work.push(Work::Exit(index));
                             continue;
                         }
                     };
                     work.push(Work::Exit(index));
                     let mut children = Vec::new();
-                    for entry in entries.flatten() {
+                    for entry in entries {
                         if cancellation.is_cancelled() {
                             let _ = send(SpaceScanEvent::Cancelled { task_id });
                             return;
                         }
-                        let child_path = entry.path();
-                        let metadata = match fs::symlink_metadata(&child_path) {
-                            Ok(metadata) => metadata,
+                        let entry = match entry {
+                            Ok(entry) => entry,
                             Err(_) => {
-                                skipped_count = skipped_count.saturating_add(1);
+                                progress.skipped_count = progress.skipped_count.saturating_add(1);
+                                progress.update_ancestors(Some(index), 0, true);
+                                progress.flush(task_id, cancellation, false, &mut send);
                                 continue;
                             }
                         };
-                        if metadata.file_type().is_symlink() {
+                        let child_path = entry.path();
+                        // On Windows DirEntry metadata reuses enumeration data;
+                        // unlike fs::metadata it never follows a symbolic link.
+                        let metadata = match entry.metadata() {
+                            Ok(metadata) => metadata,
+                            Err(_) => {
+                                progress.skipped_count = progress.skipped_count.saturating_add(1);
+                                progress.update_ancestors(Some(index), 0, true);
+                                progress.flush(task_id, cancellation, false, &mut send);
+                                continue;
+                            }
+                        };
+                        if is_link_or_reparse(&metadata) {
                             continue;
                         }
                         let kind = if metadata.is_dir() {
@@ -284,67 +388,52 @@ fn run_space_scan_task<F>(
                         } else {
                             continue;
                         };
-                        let child_index = states.len();
+                        let child_index = progress.states.len();
                         let name = entry.file_name().to_string_lossy().into_owned();
-                        states.push(NodeState {
+                        let bytes = if kind == SpaceNodeKind::File {
+                            metadata.len()
+                        } else {
+                            0
+                        };
+                        progress.states.push(NodeState {
                             node: SpaceNode {
                                 path: child_path.clone(),
                                 parent: Some(path.clone()),
                                 name,
                                 kind,
-                                bytes: if kind == SpaceNodeKind::File {
-                                    metadata.len()
-                                } else {
-                                    0
-                                },
+                                bytes,
                                 depth: depth.saturating_add(1),
                                 child_count: 0,
                                 partial: false,
+                                scanning: kind == SpaceNodeKind::Directory,
                             },
-                            children: Vec::new(),
+                            parent: Some(index),
+                            dirty: false,
                         });
-                        children.push(child_index);
+                        progress.mark_dirty(child_index);
+                        progress.states[index].node.child_count =
+                            progress.states[index].node.child_count.saturating_add(1);
+                        progress.update_ancestors(Some(index), bytes, false);
                         if kind == SpaceNodeKind::File {
-                            file_count = file_count.saturating_add(1);
+                            progress.file_count = progress.file_count.saturating_add(1);
                         } else {
-                            directory_count = directory_count.saturating_add(1);
+                            progress.directory_count = progress.directory_count.saturating_add(1);
+                            children.push(child_index);
                         }
+                        progress.flush(task_id, cancellation, false, &mut send);
                     }
-                    states[index].children = children.clone();
+                    // Discover the root's children before traversing any child
+                    // subtree, even when there are fewer than one full batch.
+                    progress.flush(task_id, cancellation, index == 0, &mut send);
                     for child_index in children.into_iter().rev() {
                         work.push(Work::Enter(child_index));
                     }
-                } else {
-                    work.push(Work::Exit(index));
                 }
             }
             Work::Exit(index) => {
-                let (mut bytes, mut partial) = (
-                    if states[index].node.kind == SpaceNodeKind::File {
-                        states[index].node.bytes
-                    } else {
-                        0
-                    },
-                    states[index].node.partial,
-                );
-                for &child in &states[index].children {
-                    bytes = bytes.saturating_add(states[child].node.bytes);
-                    partial |= states[child].node.partial;
-                }
-                states[index].node.bytes = bytes;
-                states[index].node.child_count = states[index].children.len() as u32;
-                states[index].node.partial = partial;
-                if index != 0 {
-                    batch.push(states[index].node.clone());
-                    if batch.len() >= request.batch_size()
-                        && !send(SpaceScanEvent::Batch {
-                            task_id,
-                            items: std::mem::take(&mut batch),
-                        })
-                    {
-                        cancellation.cancel();
-                    }
-                }
+                progress.states[index].node.scanning = false;
+                progress.mark_dirty(index);
+                progress.flush(task_id, cancellation, false, &mut send);
             }
         }
     }
@@ -352,25 +441,32 @@ fn run_space_scan_task<F>(
         let _ = send(SpaceScanEvent::Cancelled { task_id });
         return;
     }
-    if !batch.is_empty()
-        && !send(SpaceScanEvent::Batch {
-            task_id,
-            items: batch,
-        })
-    {
-        cancellation.cancel();
+    progress.flush(task_id, cancellation, true, &mut send);
+    if cancellation.is_cancelled() {
         let _ = send(SpaceScanEvent::Cancelled { task_id });
         return;
     }
-    let root = states.remove(0).node;
+    let root = progress.states.remove(0).node;
     let _ = send(SpaceScanEvent::Done {
         task_id,
         total_bytes: root.bytes,
         root,
-        file_count,
-        directory_count,
-        skipped_count,
+        file_count: progress.file_count,
+        directory_count: progress.directory_count,
+        skipped_count: progress.skipped_count,
     });
+}
+
+fn is_link_or_reparse(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        metadata.file_attributes() & 0x400 != 0
+    }
+    #[cfg(not(windows))]
+    {
+        metadata.file_type().is_symlink()
+    }
 }
 
 fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -429,27 +525,23 @@ mod tests {
             .expect("done");
         assert_eq!(done.0.bytes, 10);
         assert_eq!((done.1, done.2, done.3), (10, 2, 1));
-        let nodes: Vec<_> = events
+        let nodes: HashMap<_, _> = events
             .iter()
             .filter_map(|event| match event {
                 SpaceScanEvent::Batch { items, .. } => Some(items),
                 _ => None,
             })
             .flatten()
+            .map(|node| (&node.path, node))
             .collect();
-        assert_eq!(nodes.len(), 3);
+        assert_eq!(nodes.len(), 4);
         for (relative_path, kind, bytes, relative_parent) in [
             ("root.txt", SpaceNodeKind::File, 4, ""),
             ("nested/child.txt", SpaceNodeKind::File, 6, "nested"),
             ("nested", SpaceNodeKind::Directory, 6, ""),
         ] {
             let expected_path = directory.path().join(relative_path);
-            let matching: Vec<_> = nodes
-                .iter()
-                .filter(|node| node.path == expected_path)
-                .collect();
-            assert_eq!(matching.len(), 1, "{relative_path} must be emitted once");
-            let node = matching[0];
+            let node = nodes.get(&expected_path).expect("node upsert");
             assert_eq!(node.kind, kind);
             assert_eq!(node.bytes, bytes);
             assert_eq!(
@@ -457,6 +549,7 @@ mod tests {
                 Some(&directory.path().join(relative_parent))
             );
             assert!(!node.partial);
+            assert!(!node.scanning);
         }
     }
 
@@ -478,25 +571,242 @@ mod tests {
                 true
             },
         );
-        let [
-            SpaceScanEvent::Started { .. },
-            SpaceScanEvent::Batch { items, .. },
-            SpaceScanEvent::Done {
-                root,
-                file_count,
-                directory_count,
-                ..
-            },
-        ] = events.as_slice()
+        let done_index = events
+            .iter()
+            .position(|event| matches!(event, SpaceScanEvent::Done { .. }))
+            .expect("done");
+        let file = events[..done_index]
+            .iter()
+            .filter_map(|event| match event {
+                SpaceScanEvent::Batch { items, .. } => Some(items),
+                _ => None,
+            })
+            .flatten()
+            .find(|node| node.path == directory.path().join("only.txt"))
+            .expect("file tile before done");
+        assert_eq!(file.kind, SpaceNodeKind::File);
+        assert_eq!(file.bytes, 12);
+        let SpaceScanEvent::Done {
+            root,
+            file_count,
+            directory_count,
+            ..
+        } = &events[done_index]
         else {
-            panic!("file-only scan must emit a batch before completion: {events:?}");
+            unreachable!()
         };
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].path, directory.path().join("only.txt"));
-        assert_eq!(items[0].kind, SpaceNodeKind::File);
-        assert_eq!(items[0].bytes, 12);
         assert_eq!(root.bytes, 12);
         assert_eq!((*file_count, *directory_count), (1, 0));
+    }
+
+    #[test]
+    fn discovers_directories_and_streams_their_growth_before_completion() {
+        let directory = tempdir().expect("fixture");
+        let nested = directory.path().join("nested");
+        fs::create_dir(&nested).expect("nested");
+        for name in ["a", "b", "c"] {
+            fs::write(nested.join(name), b"four").expect("file");
+        }
+        let mut events = Vec::new();
+        run_space_scan_task(
+            11,
+            StartSpaceScanRequest {
+                root: directory.path().to_path_buf(),
+                batch_size: Some(1),
+                max_depth: None,
+            },
+            &CancellationToken::default(),
+            |event| {
+                events.push(event);
+                true
+            },
+        );
+        let updates: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                SpaceScanEvent::Batch { items, .. } => Some(items),
+                _ => None,
+            })
+            .flatten()
+            .filter(|node| node.path == nested)
+            .collect();
+        assert!(updates[0].scanning);
+        assert_eq!(updates[0].bytes, 0, "directory is visible before traversal");
+        let in_progress: Vec<_> = updates
+            .iter()
+            .filter(|node| node.scanning)
+            .map(|node| node.bytes)
+            .collect();
+        assert_eq!(in_progress, [0, 4, 8, 12]);
+        assert!(!updates.last().expect("completed directory").scanning);
+        assert_eq!(updates.last().expect("completed directory").bytes, 12);
+        assert!(matches!(
+            events.last(),
+            Some(SpaceScanEvent::Done {
+                total_bytes: 12,
+                file_count: 3,
+                directory_count: 1,
+                ..
+            })
+        ));
+        let root_sizes: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                SpaceScanEvent::Batch { total_bytes, .. } => Some(*total_bytes),
+                _ => None,
+            })
+            .collect();
+        assert!(root_sizes.windows(2).all(|pair| pair[0] <= pair[1]));
+        assert!(root_sizes.contains(&4) && root_sizes.contains(&8));
+    }
+
+    #[test]
+    fn wide_directory_emits_during_enumeration_with_bounded_upserts() {
+        let directory = tempdir().expect("fixture");
+        for index in 0..300 {
+            fs::write(directory.path().join(format!("{index}.txt")), b"x").expect("file");
+        }
+        let mut saw_partial_enumeration = false;
+        let mut emitted_nodes = 0;
+        run_space_scan_task(
+            12,
+            StartSpaceScanRequest {
+                root: directory.path().to_path_buf(),
+                batch_size: Some(32),
+                max_depth: None,
+            },
+            &CancellationToken::default(),
+            |event| {
+                if let SpaceScanEvent::Batch {
+                    items,
+                    file_count,
+                    total_bytes,
+                    ..
+                } = event
+                {
+                    assert!(items.len() <= 32);
+                    emitted_nodes += items.len();
+                    assert_eq!(file_count, total_bytes);
+                    if file_count > 0 && file_count < 300 {
+                        saw_partial_enumeration = true;
+                    }
+                }
+                true
+            },
+        );
+        assert!(saw_partial_enumeration);
+        assert!(emitted_nodes < 650, "no repeated whole-directory snapshots");
+    }
+
+    #[test]
+    fn depth_limit_propagates_partial_separately_from_scanning() {
+        let directory = tempdir().expect("fixture");
+        fs::create_dir(directory.path().join("nested")).expect("nested");
+        fs::write(directory.path().join("nested/hidden.txt"), b"hidden").expect("file");
+        let mut events = Vec::new();
+        run_space_scan_task(
+            13,
+            StartSpaceScanRequest {
+                root: directory.path().to_path_buf(),
+                batch_size: None,
+                max_depth: Some(1),
+            },
+            &CancellationToken::default(),
+            |event| {
+                events.push(event);
+                true
+            },
+        );
+        let Some(SpaceScanEvent::Done {
+            root,
+            file_count,
+            total_bytes,
+            ..
+        }) = events.last()
+        else {
+            panic!("expected done");
+        };
+        assert!(root.partial);
+        assert!(!root.scanning);
+        assert_eq!((*file_count, *total_bytes), (0, 0));
+        let final_nested = events
+            .iter()
+            .filter_map(|event| match event {
+                SpaceScanEvent::Batch { items, .. } => Some(items),
+                _ => None,
+            })
+            .flatten()
+            .rfind(|node| node.depth == 1)
+            .expect("nested");
+        assert!(final_nested.partial);
+        assert!(!final_nested.scanning);
+    }
+
+    #[test]
+    fn cancelling_on_live_progress_never_publishes_done() {
+        let directory = tempdir().expect("fixture");
+        for name in ["first", "second", "third"] {
+            fs::write(directory.path().join(name), b"data").expect("file");
+        }
+        let cancellation = CancellationToken::default();
+        let mut events = Vec::new();
+        run_space_scan_task(
+            14,
+            StartSpaceScanRequest {
+                root: directory.path().to_path_buf(),
+                batch_size: Some(1),
+                max_depth: None,
+            },
+            &cancellation,
+            |event| {
+                if matches!(event, SpaceScanEvent::Batch { file_count: 1, .. }) {
+                    cancellation.cancel();
+                }
+                events.push(event);
+                true
+            },
+        );
+        assert!(matches!(
+            events.last(),
+            Some(SpaceScanEvent::Cancelled { .. })
+        ));
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, SpaceScanEvent::Done { .. }))
+        );
+    }
+
+    #[test]
+    fn closed_channel_cancels_scanning_instead_of_publishing_done() {
+        let directory = tempdir().expect("fixture");
+        fs::write(directory.path().join("file"), b"data").expect("file");
+        let cancellation = CancellationToken::default();
+        let mut events = Vec::new();
+        run_space_scan_task(
+            15,
+            StartSpaceScanRequest {
+                root: directory.path().to_path_buf(),
+                batch_size: None,
+                max_depth: None,
+            },
+            &cancellation,
+            |event| {
+                let accepted = !matches!(event, SpaceScanEvent::Batch { .. });
+                events.push(event);
+                accepted
+            },
+        );
+        assert!(cancellation.is_cancelled());
+        assert!(matches!(
+            events.last(),
+            Some(SpaceScanEvent::Cancelled { .. })
+        ));
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, SpaceScanEvent::Done { .. }))
+        );
     }
 
     #[test]

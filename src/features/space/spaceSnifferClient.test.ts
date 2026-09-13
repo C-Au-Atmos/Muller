@@ -1,6 +1,50 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { formatSpaceBytes, spaceSnifferClient } from "./spaceSnifferClient";
+import { formatSpaceBytes, spaceSnifferClient, type SpaceScanEvent } from "./spaceSnifferClient";
+import type { SpaceScanProgressCallback } from "./types";
+
+const tauri = vi.hoisted(() => ({
+  invoke: vi.fn(),
+  isTauri: vi.fn(() => false),
+  channels: [] as Array<(event: SpaceScanEvent) => void>,
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: tauri.invoke,
+  isTauri: tauri.isTauri,
+  Channel: class {
+    constructor(callback: (event: SpaceScanEvent) => void) { tauri.channels.push(callback); }
+  },
+}));
+
+function item(path: string, bytes: number, kind: "file" | "directory" = "file", scanning = false): NonNullable<SpaceScanEvent["items"]>[number] {
+  const separator = path.lastIndexOf("\\");
+  return {
+    path,
+    parent: separator === 2 ? path.slice(0, 3) : path.slice(0, separator),
+    name: path.slice(separator + 1),
+    kind,
+    bytes,
+    depth: path.split("\\").length - 2,
+    childCount: 0,
+    partial: false,
+    scanning,
+  };
+}
+
+function send(event: SpaceScanEvent, channel = 0) {
+  const callback = tauri.channels[channel];
+  if (!callback) throw new Error("Expected scan event channel");
+  callback(event);
+}
+
+beforeEach(() => {
+  tauri.invoke.mockReset().mockResolvedValue({ taskId: 7 });
+  tauri.isTauri.mockReturnValue(false);
+  tauri.channels.length = 0;
+});
+
+afterEach(() => { vi.useRealTimers(); });
 
 describe("space sniffer client helpers", () => {
   it("formats scanner byte counts for the details panel", () => {
@@ -13,5 +57,179 @@ describe("space sniffer client helpers", () => {
     const controller = new AbortController();
     controller.abort();
     await expect(spaceSnifferClient.scan("C:\\", controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
+describe("native space scan stream", () => {
+  beforeEach(() => {
+    tauri.isTauri.mockReturnValue(true);
+    vi.useFakeTimers();
+  });
+
+  it("publishes growing directory snapshots before done and keeps previous snapshots immutable", async () => {
+    const onProgress = vi.fn<SpaceScanProgressCallback>();
+    const promise = spaceSnifferClient.scan("D:\\", undefined, onProgress);
+    expect(onProgress).toHaveBeenCalledTimes(1);
+    expect(onProgress.mock.calls[0]?.[0]?.children).toEqual([]);
+    send({ type: "started", taskId: 7, root: "D:\\" });
+    send({
+      type: "batch", taskId: 7,
+      items: [item("D:\\Projects", 10, "directory", true), item("D:\\Projects\\a.txt", 10), item("D:\\Media", 4, "directory")],
+      totalBytes: 14, fileCount: 1, directoryCount: 2, skippedCount: 0,
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    const first = onProgress.mock.calls[1]?.[0];
+    expect(first?.bytes).toBe(14);
+    expect(first?.children?.[0]?.bytes).toBe(10);
+    expect(onProgress.mock.calls[1]?.[1]).toMatchObject({ phase: "scanning", scanned: 3, total: null });
+
+    send({
+      type: "batch", taskId: 7,
+      items: [item("D:\\Projects\\b.txt", 30), item("D:\\Projects", 40, "directory", true)],
+      totalBytes: 44, fileCount: 2, directoryCount: 2,
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    const second = onProgress.mock.calls[2]?.[0];
+    expect(second?.children?.[0]?.bytes).toBe(40);
+    expect(second?.children?.[0]?.children).toHaveLength(2);
+    expect(second?.children?.[1]).toBe(first?.children?.[1]);
+    expect(first?.children?.[0]?.bytes).toBe(10);
+    expect(first?.children?.[0]?.children).toHaveLength(1);
+    send({ type: "done", taskId: 7, totalBytes: 44, fileCount: 2, directoryCount: 2 });
+    expect(await promise).toMatchObject({ bytes: 44, scanning: false });
+    expect(onProgress.mock.lastCall?.[1]).toMatchObject({ phase: "complete", total: 4 });
+  });
+
+  it("coalesces bursts, upserts repeated nodes without duplicates and flushes completion immediately", async () => {
+    const onProgress = vi.fn<SpaceScanProgressCallback>();
+    const promise = spaceSnifferClient.scan("D:\\Fixture\\", undefined, onProgress);
+    for (let index = 1; index <= 50; index += 1) {
+      send({ type: "batch", taskId: 7, items: [item("D:\\Fixture\\a.txt", index)], totalBytes: index });
+    }
+    expect(onProgress).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(99);
+    expect(onProgress).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onProgress).toHaveBeenCalledTimes(2);
+    expect(onProgress.mock.lastCall?.[0]?.children).toHaveLength(1);
+    expect(onProgress.mock.lastCall?.[0]?.children?.[0]?.bytes).toBe(50);
+    send({ type: "batch", taskId: 7, items: [item("D:\\Fixture\\a.txt", 100)], totalBytes: 100 });
+    send({ type: "done", taskId: 7, totalBytes: 100 });
+    expect((await promise).children?.[0]?.bytes).toBe(100);
+    expect(onProgress).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(onProgress).toHaveBeenCalledTimes(3);
+  });
+
+  it("links out-of-order descendants by parent and preserves scan and incomplete flags", async () => {
+    const onProgress = vi.fn<SpaceScanProgressCallback>();
+    const promise = spaceSnifferClient.scan("D:\\", undefined, onProgress);
+    send({ type: "batch", taskId: 7, items: [item("D:\\Nested\\file.bin", 16)], totalBytes: 16 });
+    send({ type: "batch", taskId: 7, items: [{ ...item("D:\\Nested", 16, "directory"), partial: true }], totalBytes: 16 });
+    send({ type: "done", taskId: 7, totalBytes: 16, root: { ...item("D:\\", 16, "directory"), parent: null, partial: true } });
+    const root = await promise;
+    expect(root.children).toHaveLength(1);
+    expect(root.children?.[0]).toMatchObject({ path: "D:\\Nested", bytes: 16, scanning: false, partial: true });
+    expect(root.children?.[0]?.children?.[0]?.path).toBe("D:\\Nested\\file.bin");
+    expect(root.partial).toBe(true);
+  });
+
+  it("preserves distinct names in case-sensitive directories while normalizing root separators", async () => {
+    const onProgress = vi.fn<SpaceScanProgressCallback>();
+    const promise = spaceSnifferClient.scan("D:/Fixture/", undefined, onProgress);
+    send({
+      type: "batch", taskId: 7,
+      items: [item("D:\\Fixture\\Report.txt", 10), item("D:\\Fixture\\report.txt", 30)],
+      totalBytes: 40, fileCount: 2,
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(onProgress.mock.lastCall?.[0].children?.map((node) => [node.name, node.bytes])).toEqual([["Report.txt", 10], ["report.txt", 30]]);
+    send({ type: "batch", taskId: 7, items: [item("D:\\Fixture\\Report.txt", 20)], totalBytes: 50, fileCount: 2 });
+    send({ type: "done", taskId: 7, totalBytes: 50, fileCount: 2 });
+    const root = await promise;
+    expect(root.children?.map((node) => [node.name, node.bytes])).toEqual([["Report.txt", 20], ["report.txt", 30]]);
+    expect(root.children?.reduce((bytes, node) => bytes + (node.bytes ?? 0), 0)).toBe(root.bytes);
+  });
+
+  it("settles abort while start is still pending and cancels its late task ID exactly once", async () => {
+    let finishStart: ((response: { taskId: number }) => void) | undefined;
+    tauri.invoke.mockImplementation((command: string) => command === "start_space_scan"
+      ? new Promise<{ taskId: number }>((resolve) => { finishStart = resolve; })
+      : Promise.resolve({ cancelled: true }));
+    const controller = new AbortController();
+    const onProgress = vi.fn<SpaceScanProgressCallback>();
+    const promise = spaceSnifferClient.scan("D:\\", controller.signal, onProgress);
+    const rejected = expect(promise).rejects.toMatchObject({ name: "AbortError" });
+    controller.abort();
+    await rejected;
+    expect(tauri.invoke).toHaveBeenCalledTimes(1);
+    finishStart?.({ taskId: 19 });
+    await Promise.resolve();
+    send({ type: "started", taskId: 19, root: "D:\\" });
+    send({ type: "done", taskId: 19, totalBytes: 999 });
+    await vi.advanceTimersByTimeAsync(200);
+    expect(tauri.invoke).toHaveBeenCalledTimes(2);
+    expect(tauri.invoke).toHaveBeenLastCalledWith("cancel_space_scan", { taskId: 19 });
+    expect(onProgress).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops cancelled buffered updates and ignores another task on the same channel", async () => {
+    const controller = new AbortController();
+    const onProgress = vi.fn<SpaceScanProgressCallback>();
+    const promise = spaceSnifferClient.scan("D:\\", controller.signal, onProgress);
+    const rejected = expect(promise).rejects.toMatchObject({ name: "AbortError" });
+    send({ type: "started", taskId: 7, root: "D:\\" });
+    send({ type: "done", taskId: 88, totalBytes: 999 });
+    send({ type: "batch", taskId: 7, items: [item("D:\\file.txt", 10)], totalBytes: 10 });
+    controller.abort();
+    await rejected;
+    send({ type: "done", taskId: 7, totalBytes: 10 });
+    await vi.advanceTimersByTimeAsync(200);
+    expect(onProgress).toHaveBeenCalledTimes(1);
+    expect(tauri.invoke).toHaveBeenLastCalledWith("cancel_space_scan", { taskId: 7 });
+  });
+
+  it("cleans buffered updates when native scanning fails", async () => {
+    const onProgress = vi.fn<SpaceScanProgressCallback>();
+    const promise = spaceSnifferClient.scan("D:\\", undefined, onProgress);
+    const rejected = expect(promise).rejects.toThrow("unreadable folder");
+    send({ type: "batch", taskId: 7, items: [item("D:\\file.txt", 10)], totalBytes: 10 });
+    send({ type: "error", taskId: 7, message: "unreadable folder" });
+    await rejected;
+    await vi.advanceTimersByTimeAsync(200);
+    expect(onProgress).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports rejected start commands and accepts streaming callbacks during drill-down", async () => {
+    tauri.invoke.mockRejectedValueOnce(new Error("cannot inspect folder"));
+    await expect(spaceSnifferClient.scan("D:\\Missing")).rejects.toThrow("cannot inspect folder");
+    const onProgress = vi.fn<SpaceScanProgressCallback>();
+    const promise = spaceSnifferClient.openFolder?.({ id: "D:\\Nested", path: "D:\\Nested", name: "Nested", kind: "folder" }, undefined, onProgress);
+    send({ type: "done", taskId: 7, totalBytes: 12 }, 1);
+    expect(await promise).toMatchObject({ path: "D:\\Nested", bytes: 12 });
+    expect(onProgress.mock.lastCall?.[1].phase).toBe("complete");
+  });
+
+  it("assembles a wide directory in batches and updates existing entries without rebuilding sibling subtrees", async () => {
+    const onProgress = vi.fn<SpaceScanProgressCallback>();
+    const promise = spaceSnifferClient.scan("D:\\", undefined, onProgress);
+    for (let batch = 0; batch < 40; batch += 1) {
+      send({
+        type: "batch", taskId: 7,
+        items: Array.from({ length: 250 }, (_, offset) => item(`D:\\file-${batch * 250 + offset}.bin`, 1)),
+        totalBytes: (batch + 1) * 250, fileCount: (batch + 1) * 250,
+      });
+    }
+    await vi.advanceTimersByTimeAsync(100);
+    const initial = onProgress.mock.lastCall?.[0];
+    expect(initial?.children).toHaveLength(10_000);
+    send({ type: "batch", taskId: 7, items: [item("D:\\file-123.bin", 21)], totalBytes: 10_020, fileCount: 10_000 });
+    send({ type: "done", taskId: 7, totalBytes: 10_020, fileCount: 10_000, directoryCount: 0 });
+    const final = await promise;
+    expect(final.children).toHaveLength(10_000);
+    expect(final.children?.[123]?.bytes).toBe(21);
+    expect(final.children?.[124]).toBe(initial?.children?.[124]);
+    expect(initial?.children?.[123]?.bytes).toBe(1);
+    expect(onProgress).toHaveBeenCalledTimes(3);
   });
 });
