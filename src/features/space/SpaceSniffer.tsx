@@ -4,7 +4,7 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 import { useAppI18n } from "../../i18n/i18n";
 import { formatSpaceBytes, spaceSnifferClient } from "./spaceSnifferClient";
 import type { SpaceNode, SpaceScanProgress, SpaceSnifferProps } from "./types";
-import { buildSpaceMapLayout, interpolateSpaceRects, layoutNodes, spaceNodeBytes, type SpaceRect } from "./spaceLayout";
+import { buildSpaceMapLayout, interpolateSpaceRects, spaceNodeBytes, type SpaceRect } from "./spaceLayout";
 import "./SpaceSniffer.css";
 
 interface Point { x: number; y: number; }
@@ -23,7 +23,7 @@ function ellipsis(context: CanvasRenderingContext2D, value: string, width: numbe
   while (start < end) { const middle = Math.ceil((start + end) / 2); if (context.measureText(`${value.slice(0, middle)}…`).width <= width) start = middle; else end = middle - 1; }
   return `${value.slice(0, start)}…`;
 }
-function drawMap(context: CanvasRenderingContext2D, rects: readonly SpaceRect[], width: number, height: number, selected: ReadonlySet<string>, hovered: string | null, words: SpaceCopy, total: number, previews: ReadonlyMap<string, readonly SpaceRect[]>) {
+function drawMap(context: CanvasRenderingContext2D, rects: readonly SpaceRect[], width: number, height: number, selected: ReadonlySet<string>, hovered: string | null, words: SpaceCopy, total: number) {
   const ratio = window.devicePixelRatio || 1;
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
   context.clearRect(0, 0, width, height);
@@ -51,18 +51,18 @@ function drawMap(context: CanvasRenderingContext2D, rects: readonly SpaceRect[],
         context.fillText(ellipsis(context, `${formatSpaceBytes(spaceNodeBytes(rect.node))}${percent}`, rect.width - inset * 2), rect.x + inset, rect.y + inset + (roomy ? 39 : 30));
       }
     }
-    // A bounded, precomputed child preview supplies the hierarchy from the
-    // approved design without creating another DOM element per file.
-    if (roomy && rect.height > 175) {
-      const children = previews.get(rect.node.id);
-      if (children) for (const child of children) {
-        const childX = rect.x + 16 + child.x * (rect.width - 32);
-        const childY = rect.y + 79 + child.y * (rect.height - 95);
-        const childWidth = child.width * (rect.width - 32); const childHeight = child.height * (rect.height - 95);
-        context.fillStyle = "rgba(9,9,11,.17)"; context.fillRect(childX, childY, childWidth, childHeight);
-        context.strokeStyle = "rgba(255,255,255,.12)"; context.lineWidth = .6; context.strokeRect(childX, childY, childWidth, childHeight);
-        if (childWidth > 98 && childHeight > 32) { context.fillStyle = "#85858f"; context.font = "10px Segoe UI, sans-serif"; context.fillText(ellipsis(context, child.node.name, childWidth - 16), childX + 8, childY + 20); }
-      }
+    // The approved SVG uses an open, orthogonal accent inside large tiles.
+    // It does not enclose areas or represent children; drill in to operate on
+    // the next folder level instead of drawing non-interactive miniature tiles.
+    if (roomy && rect.height > 175 && rect.node.kind === "folder" && !rect.members) {
+      const left = rect.x + 22; const right = rect.x + rect.width - 26;
+      const top = rect.y + 84; const step = Math.min(28, (rect.height - 112) / 3);
+      const turn = Math.min(74, (right - left) * .24);
+      context.strokeStyle = "rgba(255,255,255,.22)"; context.lineWidth = .75;
+      context.beginPath(); context.moveTo(left, top); context.lineTo(right, top);
+      context.lineTo(right, top + step); context.lineTo(right - turn, top + step);
+      context.lineTo(right - turn, top + step * 2); context.lineTo(right, top + step * 2);
+      context.stroke();
     }
     context.restore();
     if (isSelected && rect.width > 3 && rect.height > 3) {
@@ -101,18 +101,6 @@ export function SpaceSniffer({ root, progress, client = spaceSnifferClient, onOp
     return new Set(rects.filter((rect) => rect.members ? rect.members.some((node) => selectedIds.has(node.id)) : selectedIds.has(rect.node.id)).map((rect) => rect.node.id));
   }, [rects, selectedIds]);
   const historyIndexes = useMemo(() => new Map(rootHistory.map((node, index) => [breadcrumbKey(node.path), index])), [rootHistory]);
-  const previews = useMemo(() => {
-    const result = new Map<string, SpaceRect[]>();
-    for (const rect of rects) {
-      if (rect.width < 200 || rect.height < 175 || !rect.node.children?.length) continue;
-      const children = rect.node.children.slice(0, 24); const included = children.reduce((sum, child) => sum + spaceNodeBytes(child), 0);
-      const rest = spaceNodeBytes(rect.node) - included;
-      const previewNodes = rest > 0 ? [...children, { id: "rest", name: words.other, path: "", kind: "file" as const, bytes: rest }] : children;
-      const previewWidth = rect.width - 32; const previewHeight = rect.height - 95;
-      result.set(rect.node.id, layoutNodes(previewNodes, previewWidth, previewHeight).map((child) => ({ ...child, x: child.x / previewWidth, y: child.y / previewHeight, width: child.width / previewWidth, height: child.height / previewHeight })));
-    }
-    return result;
-  }, [rects, words.other]);
   useEffect(() => {
     if (externalPathRef.current !== root.path) {
       externalPathRef.current = root.path; generationRef.current += 1; drillRef.current?.controller.abort(); drillRef.current = null;
@@ -136,9 +124,9 @@ export function SpaceSniffer({ root, progress, client = spaceSnifferClient, onOp
     const ratio = window.devicePixelRatio || 1; const pixelWidth = Math.max(1, Math.round(size.width * ratio)); const pixelHeight = Math.max(1, Math.round(size.height * ratio));
     if (canvas.width !== pixelWidth) canvas.width = pixelWidth; if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
     canvas.style.width = `${size.width}px`; canvas.style.height = `${size.height}px`;
-    paintRef.current = (frame) => drawMap(context, frame, size.width, size.height, selectedRectIds, hovered, words, total, previews);
+    paintRef.current = (frame) => drawMap(context, frame, size.width, size.height, selectedRectIds, hovered, words, total);
     paintRef.current(displayedRectsRef.current);
-  }, [hovered, previews, selectedRectIds, size, total, words]);
+  }, [hovered, selectedRectIds, size, total, words]);
   useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
     const samePath = animationPathRef.current === activeRoot.path; animationPathRef.current = activeRoot.path;
