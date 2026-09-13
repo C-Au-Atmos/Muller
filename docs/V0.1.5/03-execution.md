@@ -6,17 +6,17 @@
 |---|---|
 | 目标版本 | `V0.1.5` |
 | 实现分支 | `feat/0.1.5` |
-| 候选分支 | `release/0.1.5`（`0.1.5-beta.2` 已交付，下一目标 `0.1.5-beta.3`） |
+| 候选分支 | `release/0.1.5`（`0.1.5-beta.4` 已交付） |
 | 文档状态 | `In progress` |
 | 技术负责人 | `Codex` |
-| 最后更新 | `2026-09-13` |
+| 最后更新 | `2026-09-14` |
 
 ## 执行索引
 
 | 条目 ID | 评审结论 | 实现负责人 | 状态 | 主要交付物 | 验证状态 |
 |---|---|---|---|---|---|
-| `REQ-0.1.5-007` | `Accepted` | `Codex` | `Verified / beta.4 packaging pending` | 统一地址导航、空间及共享预览、完整瀑布列；beta.4 候选 | `130 frontend; lint/build/Rust gates and non-space Edge passed; final space/EXE evidence pending` |
-| `REQ-0.1.5-006` | `Accepted` | `Codex` | `Verified / beta.4 packaging pending` | 空间视图父目录/历史快捷键与焦点隔离；beta.4 候选 | `Parent-path unit coverage passed; final space Edge and delivery evidence pending` |
+| `REQ-0.1.5-007` | `Accepted` | `Codex` | `Done / beta.4 delivered` | 统一地址导航、空间及共享预览、完整瀑布列；beta.4 候选 | `130 frontend + 109 Edge; quality gates and native EXE navigation/preview passed` |
+| `REQ-0.1.5-006` | `Accepted` | `Codex` | `Done / beta.4 delivered` | 空间视图父目录/历史快捷键与焦点隔离；beta.4 候选 | `17 space Edge + native Backspace/Alt navigation passed` |
 | `REQ-0.1.5-001` | `Accepted` | `Codex` | `Done` | V0.1.5 分支基线、旧分支归档标签、历史索引 | `Passed` |
 | `REQ-0.1.5-002` | `Accepted` | `Codex` | `Done` | 单栏空间扫描测试版、Canvas treemap、钻取、选择和音效 | `Passed` |
 | `REQ-0.1.5-003` | `Accepted` | `Codex` | `Done / native follow-up implemented in REQ-0.1.5-004` | 空间视图线性布局优化、全链路历史搜索审计、后续原生索引计划 | `Passed; MFT/USN implementation and probe recorded in REQ-0.1.5-004` |
@@ -397,13 +397,13 @@
 ## `REQ-0.1.5-006` - 空间视图 Backspace 与 Alt 历史导航
 
 - 原始输入：[01-original-input.md](01-original-input.md#req-0-1-5-006)；评审：[02-review.md](02-review.md#req-0-1-5-006)，`Accepted`。
-- 状态：`Verified / beta.4 packaging pending`，记录日期 `2026-09-14`，目标 `0.1.5-beta.4`。空间专项 17 项通过，候选构建与实机交付证据待补。
+- 状态：`Done / beta.4 delivered`，记录日期 `2026-09-14`，目标 `0.1.5-beta.4`。空间专项 17 项通过，EXE、NSIS、哈希及实机证据已归档。
 
 | 任务 ID | 实现与主要位置 | 状态 |
 |---|---|---|
 | `REQ-0.1.5-006-T01` | `spaceNavigation.ts` 处理盘符/UNC 父目录；`SpaceSniffer.tsx` 提供 up/back/forward 与历史分支，取消旧扫描、恢复有效快照并隔离晚批次 | `Verified` |
 | `REQ-0.1.5-006-T02` | App 路由 Backspace、Alt 历史导航与顶部按钮；输入、IME、菜单、对话框、标签及分隔条按键隔离 | `Verified` |
-| `REQ-0.1.5-006-T03` | 父目录单测、空间及 Browse 导航回归，req → feat → release 同步，beta.4 EXE 与构建证据 | `In progress` |
+| `REQ-0.1.5-006-T03` | 父目录单测、空间及 Browse 导航回归，req → feat → release 同步，beta.4 EXE 与构建证据 | `Done` |
 
 - Backspace 返回实际父目录，盘符根/UNC 共享根保持；Alt+左/右只在已有历史中往返。新钻取、侧栏跳转或地址提交清空前进历史，空间模式保持。导航更换会话时清理旧选择、右键菜单及预览，不用历史前进猜测要打开哪个子目录。
 - 小项列表焦点不阻断 Alt 历史；调宽分隔条仅消费普通方向键，组合键交给导航。App 的普通方向键选择命令避开分隔条，浏览预览调宽也不会改变文件选择。
@@ -415,14 +415,14 @@
 ## `REQ-0.1.5-007` - 统一空间地址栏、预览与瀑布流宽度适配
 
 - 原始输入：[01-original-input.md](01-original-input.md#req-0-1-5-007)；评审：[02-review.md](02-review.md#req-0-1-5-007)，`Accepted`。
-- 状态：`Verified / beta.4 packaging pending`，记录日期 `2026-09-14`，与 `REQ-0.1.5-006` 一起交付 `0.1.5-beta.4` 候选。
+- 状态：`Done / beta.4 delivered`，记录日期 `2026-09-14`，与 `REQ-0.1.5-006` 一起交付 `0.1.5-beta.4` 测试版。
 
 | 任务 ID | 实现与主要位置 | 状态 |
 |---|---|---|
 | `REQ-0.1.5-007-T01` | App 复用顶部地址、面包屑与导航按钮，空间状态上报；取消地址草稿恢复已提交目录，隐藏内部重复路径条 | `Verified` |
 | `REQ-0.1.5-007-T02` | `SpaceSniffer.tsx` 提供预览按钮和 Space/焦点行处理；共享 `PreviewPanel.tsx/.css` 重新组织内容、元信息与嵌入布局，隔离晚响应及媒体生命周期 | `Verified` |
 | `REQ-0.1.5-007-T03` | `masonryLayout.ts` 约束完整列数、均分宽度；`stage7.css` 保持固定预览分栏、约束预览占比、稳定滚动条空间 | `Verified in targeted tests` |
-| `REQ-0.1.5-007-T04` | 完整质量门禁、候选版本元数据与更新日志、EXE/NSIS/manifest/SHA256，req → feat → release 证据同步 | `In progress` |
+| `REQ-0.1.5-007-T04` | 完整质量门禁、候选版本元数据与更新日志、EXE/NSIS/manifest/SHA256，req → feat → release 证据同步 | `Done` |
 
 ### 实现说明
 
@@ -449,12 +449,23 @@
 | 测试命令 | `npx playwright test --workers=1` 全部文件覆盖；`npx playwright test e2e/space-sniffer.spec.ts --workers=1` 最终专项；时序用例使用 `--repeat-each=8` |
 | 实现提交 | `feat/0.1.5` / `c8be8cff8b52d0bfc81b08717633af4b87c253d5`，关联 REQ-0.1.5-006/007 |
 | 需求同步 | 需求基线 `b0981c7`、`bd955e4` 已从 req 合入 feat；本表所在文档提交随后按 req → feat → release 同步，提交沿分支历史追溯 |
-| 发布候选源 | `Pending`：待补 release 构建源完整提交 |
-| 版本 / 交付目录 | `0.1.5-beta.4` / `D:\Muller\release\0.1.5-beta.4`；构建及实机核验待补 |
-| EXE / NSIS / SHA256 | `Pending`：完成构建后填写文件名、大小、哈希、构建时间并核对 manifest |
-| 实机核验 | `Pending`：最终 EXE 的顶部导航、Backspace/Alt、按钮/Space 预览及界面截图；自动化 mock 结果不替代原生文件读取验收 |
+| 发布候选源 | `release/0.1.5` / `01352893dc67192a0f4e0fcdd9b862d59e29dac3`；feat 通过门禁后提升，release 元数据已回流 feat |
+| 版本 / 交付目录 | `0.1.5-beta.4` / `D:\Muller\release\0.1.5-beta.4`；2026-09-14 00:22 +08:00 构建，EXE 已实际启动 |
+| EXE / NSIS / SHA256 | 文件及哈希见下表，已核对 `manifest.json`、`SHA256SUMS.txt`、README 和实际产物。NSIS 已构建，未执行安装 |
+| 实机核验 | 最终 EXE 在 `D:\Muller\src` 实测地址导航、features 钻取、Backspace 返回 src、Alt+左回 features、Alt+右到 src；真实文件夹统计、App.tsx 文本读取、选择跟随、Space 开关、Esc 关闭、详情调宽通过；相册固定预览已打开真实截图 |
 ### 晋级与回滚
 
 - 本轮按 req → feat → release 同步需求和实现；实现及阻断修正完成、门禁通过后才更新 release 候选元数据并构建 beta.4。release 专属修正须回合 feat，更新的长期分支使用非强制推送。
 - 保留 beta.3 的 EXE、安装包、manifest 和哈希，不覆盖既有交付记录；本次测试版不向 `master` 晋级。
 - 必要时使用保留的 beta.3 测试包回退，代码通过普通反向提交撤销。目录统计与媒体权限边界不变，不修改用户文件，也不增加永久删除能力。
+
+### 最终产物与实机证据
+
+| 产物 | 字节数 | SHA256 |
+|---|---:|---|
+| `Muller-0.1.5-beta.4-x64.exe` | 11,235,840 | `5cc3ab5d5b1f137c68a7dc573483576ab6dedc2868f07e0d9db2fc4b657ae47e` |
+| `Muller-0.1.5-beta.4-x64-setup.exe` | 4,883,256 | `83dbe869f6048992f2467e17d5945e5c5bf18bc8620eb9ba1fce11ccd90a93e6` |
+
+截图保存在同一交付目录：`space-folder-preview.jpg`、`space-text-preview.jpg`、`space-history-return.jpg`、`album-pinned-preview.jpg`。实机验收使用普通权限 beta.4 EXE，未安装 NSIS，未修改或删除用户文件；MFT/USN 未在本轮重复探测。空间预览按钮和 Space、共享文本/图片/目录预览已实测，其余媒体类型由对应 Edge 回归覆盖。
+
+beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上述 release 提交，后续纯文档同步不改变产物的构建来源。
