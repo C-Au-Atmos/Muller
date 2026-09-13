@@ -95,7 +95,7 @@ import { WorkspaceFilterMenu } from "./features/filter/WorkspaceFilterMenu";
 import { HomeDashboard } from "./features/home/HomeDashboard";
 import { SpaceSniffer } from "./features/space/SpaceSniffer";
 import { spaceSnifferClient } from "./features/space/spaceSnifferClient";
-import type { SpaceNode } from "./features/space/types";
+import type { SpaceNode, SpaceScanProgress } from "./features/space/types";
 import {
   FlowBorder,
   type FlowBorderHandle,
@@ -283,6 +283,8 @@ export function App({ initialPath }: AppProps) {
   const [logicalDrives, setLogicalDrives] = useState<LogicalDrive[]>([]);
   const [extensionOptions, setExtensionOptions] = useState<DirectoryExtensionCount[]>([]);
   const [spaceRoot, setSpaceRoot] = useState<SpaceNode | null>(null);
+  const [spaceProgress, setSpaceProgress] = useState<SpaceScanProgress>({ scanned: 0, total: null, phase: "idle" });
+  const spaceScanController = useRef<AbortController | null>(null);
   const [spaceScanError, setSpaceScanError] = useState<string | null>(null);
   const [extensionsLoading, setExtensionsLoading] = useState(false);
   const [compareNavigation, setCompareNavigation] = useState<CompareNavigationState>({
@@ -394,24 +396,45 @@ export function App({ initialPath }: AppProps) {
   const explorerMode = systemRoute === "workspace" && (activeTool === "browse" || activeTool === "album");
   const isThisPc = activeTab.virtualLocation === "this-pc";
   const addressMode = explorerMode || (systemRoute === "workspace" && activeTool === "compare");
+  const cancelSpaceScan = useCallback(() => {
+    spaceScanController.current?.abort();
+    spaceScanController.current = null;
+    setSpaceProgress((previous) => previous.phase === "scanning" ? { ...previous, phase: "idle" } : previous);
+  }, []);
   useEffect(() => {
     if (systemRoute !== "workspace" || activeTool !== "space" || isThisPc || !activeTab.path.trim()) {
       setSpaceRoot(null);
       setSpaceScanError(null);
+      setSpaceProgress({ scanned: 0, total: null, phase: "idle" });
       return;
     }
     const controller = new AbortController();
+    spaceScanController.current = controller;
     setSpaceRoot(null);
     setSpaceScanError(null);
-    void spaceSnifferClient.scan(activeTab.path, controller.signal)
+    setSpaceProgress({ scanned: 0, total: null, phase: "scanning" });
+    void spaceSnifferClient.scan(activeTab.path, controller.signal, (root, progress) => {
+      if (controller.signal.aborted || spaceScanController.current !== controller) return;
+      setSpaceRoot(root);
+      setSpaceProgress(progress);
+    })
       .then((root) => {
-        if (!controller.signal.aborted) setSpaceRoot(root);
+        if (!controller.signal.aborted && spaceScanController.current === controller) setSpaceRoot(root);
       })
       .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        setSpaceScanError(error instanceof Error ? error.message : String(error));
+        if (controller.signal.aborted || spaceScanController.current !== controller) return;
+        if (error instanceof Error && error.name === "AbortError") {
+          setSpaceProgress((previous) => ({ ...previous, phase: "idle" }));
+          return;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        setSpaceScanError(message);
+        setSpaceProgress((previous) => ({ ...previous, phase: "error", message }));
       });
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      if (spaceScanController.current === controller) spaceScanController.current = null;
+    };
   }, [activeTab.path, activeTool, isThisPc, systemRoute]);
   const filterCount = activeTab.filter.extensions.length + (activeTab.filter.date ? 1 : 0);
   const directoryFilter = useMemo<DirectoryQueryFilter>(() => {
@@ -1799,7 +1822,9 @@ export function App({ initialPath }: AppProps) {
             <SpaceSniffer
               key={activeTab.id}
               root={spaceRoot}
+              progress={spaceProgress}
               client={spaceSnifferClient}
+              onCancelScan={cancelSpaceScan}
               onSoundEvent={(event) => play(event === "open" ? "navigate" : event === "select" ? "action" : "navigate")}
             />
           ) : (

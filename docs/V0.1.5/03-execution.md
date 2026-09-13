@@ -19,6 +19,7 @@
 | `REQ-0.1.5-002` | `Accepted` | `Codex` | `Done` | 单栏空间扫描测试版、Canvas treemap、钻取、选择和音效 | `Passed` |
 | `REQ-0.1.5-003` | `Accepted` | `Codex` | `Done / native follow-up implemented in REQ-0.1.5-004` | 空间视图线性布局优化、全链路历史搜索审计、后续原生索引计划 | `Passed; MFT/USN implementation and probe recorded in REQ-0.1.5-004` |
 | `REQ-0.1.5-004` | `Accepted` | `Codex` | `Done / beta.1 delivered` | MFT/USN provider、隔离 helper、索引控制及最终测试 EXE/SHA256 | `148 Rust + 86 frontend + 93 Edge and quality gates passed; final native probe/GUI/space recheck passed` |
+| `BUG-0.1.5-001` | `Accepted` | `Codex` | `Pending native GUI verification/packaging` | 真实渐进扫描、紧凑方块、微小项汇总入口、SVG 细白边线与直角高亮 | `102 frontend + 153 Rust + 96 Edge and quality gates passed; final EXE GUI/packaging pending` |
 
 <a id="req-0-1-5-001"></a>
 
@@ -259,3 +260,33 @@
 - 文件名查询复用内存，并按页补充大小、修改时间等元数据；明确要求大小/时间排序或时间过滤时，会读取更多匹配候选的元数据。
 - MFT 文件名索引不提供文件夹字节总量；空间视图仍单独扫描逻辑大小。百万级索引就绪截图不能替代空间扫描、帧率、内存或百万级查询的性能基准。
 - 非 NTFS、USN 日志不可用、原生服务未启用或授权取消时，继续使用可取消的目录遍历降级。原生模式不会自行创建、删除系统 USN 日志或修改用户文件内容；探针仅写入并清理自行建立的唯一临时测试目录。
+
+<a id="bug-0-1-5-001"></a>
+
+## `BUG-0.1.5-001` - 空间视图布局与渐进渲染修复
+
+- 原始反馈：[01-original-input.md](01-original-input.md#bug-0-1-5-001)。评审：[02-review.md](02-review.md#bug-0-1-5-001)，Accepted。
+- 状态：`Pending native GUI verification/packaging`；实现提交 `546f843`，目标测试包 `0.1.5-beta.2`，保留 beta.1 以供追溯。
+- T01：Rust 发现/增长/完成节点按批 upsert，传递扫描状态与 partial，按时间或批量限频；测试 Done 前增长、取消和无重复累计。
+- T02：client 使用路径索引维护树并合并批次，App 首批挂载地图，progress 显示实际已统计大小/状态；覆盖会话隔离与取消竞争。
+- T03：squarified 布局、微小项汇总、Platinum 画布/信息栏，按稳定 ID 在 Canvas 插值，命中当前帧，减少动画配置生效；扫描快照不得清空钻取历史。
+- T03 补充验收：独立方块的短边至少 `28 CSS px` 且面积至少 `1600 CSS px²`；任一低于门槛的项按实际字节合并，并通过可点击列表入口查看、选择和打开成员。绘制保留真实占比，不为了可点击性夸大独立项或汇总项的面积。边线对照 [已批准 SVG](design/space-sniffer-wireframe.svg)，采用细白光线与 90° 直角选择高亮，覆盖普通、悬浮和选中状态。
+- T04：自动化回归以及实际 Windows 截图对照；扫描未结束时能够观察多个不同的真实字节数和矩形面积，最终结果与字节总量一致。
+- T05：相关门禁及完整里程碑检查，依次 req → feat → release，生成 beta.2 EXE/manifest/SHA256 和实测图；不提升 master。
+- 回滚：保留 beta.1 二进制及构建提交；停止当前扫描并退出 beta.2，后续代码通过普通反向提交撤销，不改写文件内容或 Git 历史。
+
+### 当前自动化验证（2026-09-13）
+
+| 验证项 | 结果与边界 |
+|---|---|
+| 实现提交 | `546f843`，修复 Platinum 空间布局与真实渐进扫描 |
+| 前端与 Rust | 102 个前端测试、153 个 Rust 测试通过；另 1 个需提权的直接原生索引测试 ignored |
+| Edge E2E | 全量 96 项通过，其中 5 项空间视图测试覆盖选择/钻取/返回及下述渐进行为 |
+| 质量门禁 | lint、生产构建、Rust fmt、clippy 通过；结果由主代理核对 |
+| 本轮原生索引边界 | 未修改原生索引，未重跑此前 MFT/USN 实机探针；beta.1 探针历史证据不冒充本轮实测 |
+| 剩余验收 | 最终 beta.2 EXE 实际窗口、设计稿截图对照、构建清单与 SHA256；完成前保持待验收状态 |
+
+- 受控 Channel 的多批真实协议消息在 Done 前更新画布；停止扫描保留最后几何状态，后续晚批次不能覆盖。
+- 扫描中钻取取消父会话，子目录仍可收到进度；父子会话状态与面包屑/返回历史保持隔离。
+- 极小目录通过 Smaller items 列表入口可点击到达；系统减少动画设置下布局立即稳定。
+- 上述为自动化行为证据；本节不将受控消息流等同于最终 EXE 的磁盘扫描与实际窗口验收，实机截图及交付哈希由后续记录补齐。
