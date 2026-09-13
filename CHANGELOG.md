@@ -18,7 +18,9 @@ the isolated indexer through UAC; the desktop GUI keeps normal privileges.
   portable walker. Portable snapshots are cached in memory for queries.
 - Includes the existing Canvas space map with selection, folder drill-down,
   breadcrumbs, interface sounds and linear weighted-strip layout.
-- Verified 147 Rust tests, 86 frontend tests and 92 Edge E2E tests, plus a real
+- Space scans now emit file tiles in addition to folder totals; intermediate
+  breadcrumbs restore the correct directory and keep Escape navigation working.
+- Verified 148 Rust tests, 86 frontend tests and 93 Edge E2E tests, plus a real
   NTFS helper probe covering initial enumeration and USN lifecycle changes.
 
 Beta limits: the native index lives in memory and rebuilds on activation;
