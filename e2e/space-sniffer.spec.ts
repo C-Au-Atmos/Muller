@@ -216,7 +216,7 @@ test("space tiles support keyboard neighbor selection and a context menu", async
   await viewport.click({ position: { x: 100, y: 100 } }); await expect(region.getByRole("heading", { level: 2 })).toBeVisible();
   await viewport.press("ArrowRight");
   const box = await viewport.boundingBox(); expect(box).not.toBeNull();
-  await viewport.dispatchEvent("contextmenu", { bubbles: true, clientX: box!.x + box!.width / 2, clientY: box!.y + box!.height / 2, button: 2 });
+  await viewport.dispatchEvent("contextmenu", { bubbles: true, clientX: box!.x + box!.width - 20, clientY: box!.y + box!.height / 2, button: 2 });
   await expect(region.getByRole("menu")).toBeVisible();
   await expect(region.getByRole("menu").getByRole("menuitem", { name: /复制(完整)?路径/ })).toBeVisible();
   await viewport.press("Escape"); await expect(region.getByRole("menu")).not.toBeVisible();
