@@ -6,8 +6,8 @@
 |---|---|
 | 目标版本 | `V0.1.5` |
 | 实现分支 | `feat/0.1.5` |
-| 候选分支 | `release/0.1.5`（`0.1.5-beta.1` 重打包与实机复验已完成） |
-| 文档状态 | `Complete` |
+| 候选分支 | `release/0.1.5`（`0.1.5-beta.2` 已交付，下一目标 `0.1.5-beta.3`） |
+| 文档状态 | `In progress` |
 | 技术负责人 | `Codex` |
 | 最后更新 | `2026-09-13` |
 
@@ -20,6 +20,7 @@
 | `REQ-0.1.5-003` | `Accepted` | `Codex` | `Done / native follow-up implemented in REQ-0.1.5-004` | 空间视图线性布局优化、全链路历史搜索审计、后续原生索引计划 | `Passed; MFT/USN implementation and probe recorded in REQ-0.1.5-004` |
 | `REQ-0.1.5-004` | `Accepted` | `Codex` | `Done / beta.1 delivered` | MFT/USN provider、隔离 helper、索引控制及最终测试 EXE/SHA256 | `148 Rust + 86 frontend + 93 Edge and quality gates passed; final native probe/GUI/space recheck passed` |
 | `BUG-0.1.5-001` | `Accepted` | `Codex` | `beta.2 delivered; native in-progress capture pending` | 真实渐进扫描、紧凑方块、微小项汇总入口、SVG 细白边线与直角高亮 | `102 frontend + 153 Rust + 96 Edge passed; EXE/hash and actual selection screenshot recorded` |
+| `REQ-0.1.5-005` | `Accepted` | `Codex` | `Planned / beta.3` | 方向键空间选框、可选 Target Cursor、黑透色阶、右键文件操作、测试版 EXE | `Pending` |
 
 <a id="req-0-1-5-001"></a>
 
@@ -310,3 +311,61 @@
 用户在最终 EXE 内连续钻取试用时，Windows 输入工具两次检测到并发输入；已停止自动化操作，保留用户窗口。最终 EXE 的连续扫描中截图未完成；扫描增量算法、客户端快照和 Done 前画布变化已有上述自动化证据。此记录不将缺少的原生动画截图标为通过。
 
 本次依次 req → feat → release 同步，master 保持 `78e63c9`。后续文档同步不改变上述 EXE 的构建源和哈希。
+
+<a id="req-0-1-5-005"></a>
+
+## `REQ-0.1.5-005` - 空间视图方向键、Target Cursor、黑透配色与右键操作
+
+### 追踪关系与执行状态
+
+- 原始输入：[`01-original-input.md#req-0-1-5-005`](01-original-input.md#req-0-1-5-005)。
+- 评审记录：[`02-review.md#req-0-1-5-005`](02-review.md#req-0-1-5-005)，`Accepted`。
+- 状态：`Planned`；目标交付 `0.1.5-beta.3`，实现提交和验证证据完成后补录。
+- 实现基线：保留 beta.2 紧凑布局、真实增量统计、可点击小项入口和细白正交边线；不改动 MFT/USN 文件名索引架构。
+
+### 技术设计
+
+- 在空间布局模块提供方向邻居查询，按当前帧矩形、方向投影与距离确定稳定候选，越界不环绕；交互组件保存有效选择 ID，键盘事件只在合适焦点内处理，保留 Enter/Esc 和音效语义。
+- 用户配置新增 `cursorEffect` 枚举，设置外观选项可切换系统/Target Cursor。旧配置、非法枚举和恢复默认均归一到 `system`。入口在应用层单例挂载，React Bits 附件逻辑转换为现有 CSS/TypeScript 与 GSAP。
+- Cursor 通过 DOM 目标和 Canvas 当前帧虚拟矩形统一获取边界；Canvas 报告真实命中项几何，扫描插值时持续更新。使用 ref/GSAP 管理高频移动，禁止为每个 tile 建立光标实例；离开窗口、页面隐藏、触摸、减少动画、停用或卸载时收束动画并恢复光标。
+- 方块色板保持低亮度，以路径稳定映射石墨、墨蓝、烟紫、青黑和暖黑；局部反光增加通透感，不用大面积亮灰提高层次。悬浮/选择只适量增强反光并保留白色细线、90° 拐角和文字可读性。
+- 空间右键菜单复用 Browse 操作能力：先命中当帧真实节点，再按单项/多选及原生能力生成可用项。使用既有确认、冲突处理和回收站流程；操作失败保留当前视图并显示原因，成功修改文件后取消相关旧扫描并重新统计。聚合项先展开真实成员列表，不能将聚合 ID 用作文件路径。
+
+### 实现任务
+
+| 任务 ID | 工作内容 | 主要位置 | 前置依赖 | 状态 |
+|---|---|---|---|---|
+| `REQ-0.1.5-005-T01` | 方向邻居算法与空间选框键盘交互，覆盖初选、边界、焦点和扫描帧 | `src/features/space/` | 评审 Accepted | `Planned` |
+| `REQ-0.1.5-005-T02` | 外观设置、配置持久化/恢复及 React Bits Target Cursor 适配 | 应用配置、设置界面、光标组件、`src/App.tsx` | 评审 Accepted | `Planned` |
+| `REQ-0.1.5-005-T03` | DOM/Canvas 光标锁定与当前帧虚拟矩形，输入/可见性/减少动画清理 | 光标组件、`src/features/space/` | T02 | `Planned` |
+| `REQ-0.1.5-005-T04` | 低亮黑透色板、局部反光与实际运行界面视觉核验 | `src/features/space/` | 评审 Accepted | `Planned` |
+| `REQ-0.1.5-005-T05` | 复用 Browse 右键文件操作、单项/多选命中及修改后扫描失效刷新 | `src/features/space/`、浏览文件操作与应用协调层 | 评审 Accepted | `Planned` |
+| `REQ-0.1.5-005-T06` | 有意义的单测/Edge 回归，完整质量门禁及真实 EXE 交互截图 | `src`、`e2e`、测试包证据 | T01-T05 | `Planned` |
+| `REQ-0.1.5-005-T07` | feat → release、beta.3 元数据/EXE/manifest/SHA256/说明，req 证据同步并非强制推送三分支 | `release/0.1.5`、`release/0.1.5-beta.3`、版本文档 | T06 | `Planned` |
+
+### 验证计划
+
+- [ ] 方向键：不规则矩形四向邻居、没有选择时的初选、边界保持、动画当前帧、扫描新增/移除节点、输入框和菜单焦点隔离；Enter/Esc 与鼠标选择一致。
+- [ ] 配置与光标：旧配置迁移、非法值回退、保存/重启/恢复默认；DOM 按钮和 Canvas tile 锁定；停用/卸载后系统光标恢复，触摸/失焦/隐藏/减少动画不会留下动画和不可见光标；浮层不截获点击。
+- [ ] 色板：真实目录实际运行截图验证深黑层次、低饱和色差、局部反光、标签与白色正交选框；同目录截图用于视觉前后对照，保留 beta.2 文件。
+- [ ] 右键：命中当帧节点、在多选内保留集合、真实文件/目录适用操作、不可用能力禁用、聚合项先选成员、菜单关闭焦点归还；文件修改成功后重扫且旧扫描不能覆盖新结果。
+- [ ] 完整门禁：lint、前端测试、生产构建、Rust fmt/test/clippy、Edge E2E；只按实际执行结果和命令退出状态记录通过。
+- [ ] 交付：beta.3 EXE 的版本/哈希/源提交核对，实际窗口方向键、Target Cursor、右键与配色截图；beta.2 的原生扫描中连续截图缺口独立保留或以相应新增真实证据关闭，不由用户满意或静态截图替代。
+
+### 发布与回滚
+
+- 先提交 req 并合入 feat，再开始对应产品实现；测试后的 feat 提升 release，版本元数据仅在 release 更新为 `0.1.5-beta.3`，交付目录 `D:\Muller\release\0.1.5-beta.3`。
+- 构建、实测及证据补齐后，文档从 req → feat → release 同步，三个长生命周期分支非强制推送；此次不提升 `master`。
+- 保留 beta.2 EXE 和已记录哈希。光标出现兼容问题可立即切回系统光标；发布阻断时保留 beta.2 为可运行回退版本，代码用普通反向提交撤销，不改写 Git 历史或用户文件。
+
+<a id="req-0-1-5-005"></a>
+
+## `REQ-0.1.5-005` - 空间视图交互与材质增强
+
+- 状态：`Accepted / Implementation pending`，目标 beta.3。
+- 原始输入：[01-original-input.md](01-original-input.md#req-0-1-5-005)，评审：[02-review.md](02-review.md#req-0-1-5-005)。
+- T01：SpaceSniffer 键盘邻居选择、右键菜单和当前帧命中注册。
+- T02：App/Explorer 操作回调、侧栏空间模式保持、新扫描会话隔离。
+- T03：Preferences/Settings 持久化 cursorEffect，Target Cursor 生命周期和 reduced/touch 处理。
+- T04：深黑透亮低饱和材质与 Canvas palette 回归。
+- T05：全量门禁、beta.3 EXE、manifest/SHA256，beta.2 保留。
