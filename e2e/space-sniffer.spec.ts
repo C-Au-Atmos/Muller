@@ -206,3 +206,18 @@ test("subpixel folders remain reachable through Smaller items and reduced motion
   await region.getByRole("button", { name: "Open folder" }).click(); await expect.poll(() => spaceTaskCount(page)).toBe(2);
   await expect(region.getByRole("navigation", { name: "Folder path" }).locator('[aria-current="page"]')).toHaveText("Media");
 });
+
+test("space tiles support keyboard neighbor selection and a context menu", async ({ page }) => {
+  await openStreamSpace(page);
+  const region = page.getByRole("region", { name: "Space Sniffer" }); const canvas = region.locator("canvas");
+  const viewport = region.getByRole("application", { name: "Folder space map" });
+  await expect.poll(() => spaceTaskCount(page)).toBe(1); await publishSpaceBatch(page, 0, [900_000, 100_000], true);
+  await expect(canvas).toHaveAttribute("data-animation-state", "settled");
+  await viewport.click({ position: { x: 100, y: 100 } }); await expect(region.getByRole("heading", { level: 2 })).toBeVisible();
+  await viewport.press("ArrowRight");
+  const box = await viewport.boundingBox(); expect(box).not.toBeNull();
+  await viewport.dispatchEvent("contextmenu", { bubbles: true, clientX: box!.x + box!.width / 2, clientY: box!.y + box!.height / 2, button: 2 });
+  await expect(region.getByRole("menu")).toBeVisible();
+  await expect(region.getByRole("menu").getByRole("menuitem", { name: "复制路径" })).toBeVisible();
+  await viewport.press("Escape"); await expect(region.getByRole("menu")).not.toBeVisible();
+});

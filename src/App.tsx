@@ -50,6 +50,7 @@ import {
   type CommandPaletteItem,
 } from "./features/command/CommandPalette";
 import { SuccessBurst } from "./features/feedback/SuccessBurst";
+import { TargetCursor } from "./features/feedback/TargetCursor";
 import { useInterfaceAudio } from "./features/feedback/useInterfaceAudio";
 import {
   CompareWorkspace,
@@ -1320,14 +1321,14 @@ export function App({ initialPath }: AppProps) {
   };
   const navigateQuickLocation = (location: QuickLocation, disposition: "current" | "newTab" = "current") => {
     if (disposition === "newTab") {
-      const tab = createWorkspaceTab(`workspace-${crypto.randomUUID()}`, activeTab.path, "browse");
+      const tab = createWorkspaceTab(`workspace-${crypto.randomUUID()}`, activeTab.path, activeTool === "space" ? "space" : "browse");
       if (location.target.kind === "this-pc") {
         tab.title = t("thisPc");
         tab.virtualLocation = "this-pc";
       } else {
         tab.path = location.target.path;
         tab.title = location.target.path;
-        tab.mode = location.target.mode ?? "browse";
+        tab.mode = location.target.mode ?? (activeTool === "space" ? "space" : "browse");
         tab.presentation = tab.mode === "album" ? "album" : activeTab.presentation;
       }
       dispatchWorkspace({ type: "add-tab", tab });
@@ -1338,11 +1339,11 @@ export function App({ initialPath }: AppProps) {
     if (location.target.kind === "this-pc") {
       dispatchWorkspace({
         type: "update-active",
-        patch: { mode: "browse", title: t("thisPc"), virtualLocation: "this-pc" },
+        patch: { mode: activeTool === "space" ? "space" : "browse", title: t("thisPc"), virtualLocation: "this-pc" },
       });
       return;
     }
-    const mode = location.target.mode ?? (activeTool === "album" ? "album" : "browse");
+    const mode = location.target.mode ?? (activeTool === "space" ? "space" : activeTool === "album" ? "album" : "browse");
     dispatchWorkspace({
       type: "update-active",
       patch: {
@@ -1355,6 +1356,14 @@ export function App({ initialPath }: AppProps) {
     });
     if (mode === "album" || mode === "browse") browseRef.current?.navigateActive(location.target.path);
   };
+  const handleSpaceContextAction = useCallback((action: "open" | "copy-path" | "locate", node: SpaceNode) => {
+    if (action === "copy-path") { void navigator.clipboard?.writeText(node.path); return; }
+    if (action === "open") { void openNativePath(node.path).catch(() => undefined); return; }
+    const separator = Math.max(node.path.lastIndexOf("\\"), node.path.lastIndexOf("/"));
+    const parent = separator > 0 ? node.path.slice(0, separator) : node.path;
+    dispatchWorkspace({ type: "update-active", patch: { mode: "browse", path: parent, title: parent, virtualLocation: null } });
+    browseRef.current?.navigateActive(parent);
+  }, [dispatchWorkspace]);
   const openDrive = (path: string) => {
     dispatchWorkspace({
       type: "update-active",
@@ -1531,6 +1540,7 @@ export function App({ initialPath }: AppProps) {
         <span>{stats.messagesPerSecond} msg/s</span>
       </output>
 
+      <TargetCursor enabled={preferences.cursorEffect === "target"} reducedMotion={preferences.motion === "reduced"} />
       {systemRoute === "home" || preferences.glassBackground ? (
         <Suspense fallback={null}>
           <ColorBendsBackground intensity={systemRoute === "home" ? "home" : "workspace"} />
@@ -1826,6 +1836,7 @@ export function App({ initialPath }: AppProps) {
               client={spaceSnifferClient}
               onCancelScan={cancelSpaceScan}
               onSoundEvent={(event) => play(event === "open" ? "navigate" : event === "select" ? "action" : "navigate")}
+              onContextAction={handleSpaceContextAction}
             />
           ) : (
             <section className="result-pane" aria-live="polite">

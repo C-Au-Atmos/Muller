@@ -43,5 +43,6 @@ export interface SpaceSnifferProps {
   onOpenFolder?: (node: SpaceNode) => void;
   onSelectionChange?: (nodes: readonly SpaceNode[]) => void;
   onSoundEvent?: (event: "hover" | "select" | "open") => void;
+  onContextAction?: (action: "open" | "copy-path" | "locate", node: SpaceNode) => void;
   className?: string;
 }

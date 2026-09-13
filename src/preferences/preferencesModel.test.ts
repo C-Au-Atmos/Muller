@@ -43,6 +43,12 @@ describe("Stage 7.10 preferences", () => {
     expect(parsePreferences(JSON.stringify({ mediaAutoplay: "true" })).mediaAutoplay).toBe(false);
   });
 
+  it("persists the optional Target Cursor effect", () => {
+    expect(parsePreferences(null).cursorEffect).toBe("system");
+    expect(parsePreferences(JSON.stringify({ cursorEffect: "target" })).cursorEffect).toBe("target");
+    expect(parsePreferences(JSON.stringify({ cursorEffect: "invalid" })).cursorEffect).toBe("system");
+  });
+
   it("defaults and migrates desktop lifecycle preferences", () => {
     expect(parsePreferences(null).closeBehavior).toBe("hide");
     expect(parsePreferences(null).autostartEnabled).toBe(false);

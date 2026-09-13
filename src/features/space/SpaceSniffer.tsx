@@ -5,10 +5,11 @@ import { useAppI18n } from "../../i18n/i18n";
 import { formatSpaceBytes, spaceSnifferClient } from "./spaceSnifferClient";
 import type { SpaceNode, SpaceScanProgress, SpaceSnifferProps } from "./types";
 import { buildSpaceMapLayout, interpolateSpaceRects, spaceNodeBytes, type SpaceRect } from "./spaceLayout";
+import { registerTargetCursorSurface } from "../feedback/targetCursorRegistry";
 import "./SpaceSniffer.css";
 
 interface Point { x: number; y: number; }
-const palette = [["#27272a", "#18181b"], ["#202023", "#121215"], ["#303035", "#1b1b1f"], ["#232327", "#151518"], ["#27272a", "#1b1b1f"]];
+const palette = [["#22282b", "#101416"], ["#202326", "#0d1012"], ["#29252c", "#131116"], ["#1c292c", "#0d1517"], ["#292722", "#151310"], ["#252b30", "#11171b"]];
 const copy = {
   "en-US": { title: "Space map", items: "items", scanned: "scanned", scanning: "Scanning", complete: "Scan complete", stopped: "Scan stopped", failed: "Scan interrupted", stop: "Stop", legend: "Area = scanned bytes", seams: "Fine lines = folder boundaries", hint: "Click to select · Double-click to open · Drag to select", selected: "Selected item", size: "Size", share: "Of this folder", contents: "Contents", folder: "Folder", file: "File", path: "Path", open: "Open folder", empty: "Select a block to inspect its size and contents.", other: "Smaller items", otherHint: "Combined at their actual size. Choose an item below to inspect or open it.", noBytes: "Discovering folders and file sizes…", zero: "No measured file bytes in this folder", partial: "Incomplete scan", keyboard: "Enter to open · Esc to return", selectItems: "Select a block", more: "Show more", of: "of" },
   "zh-CN": { title: "空间视图", items: "项", scanned: "已扫描", scanning: "扫描中", complete: "扫描完成", stopped: "扫描已停止", failed: "扫描中断", stop: "停止", legend: "面积 = 已扫描字节数", seams: "细线 = 文件夹层级边界", hint: "单击选择 · 双击打开 · 拖动框选", selected: "选中项", size: "大小", share: "占当前目录", contents: "内容", folder: "文件夹", file: "文件", path: "路径", open: "打开文件夹", empty: "选择一个方块，查看大小和内容。", other: "较小项目", otherHint: "按实际总大小合并。可在下方选择项目查看或打开。", noBytes: "正在发现文件夹并统计大小…", zero: "此文件夹暂无已统计文件字节", partial: "统计不完整", keyboard: "Enter 打开 · Esc 返回", selectItems: "选择一个方块", more: "显示更多", of: "/" },
@@ -78,7 +79,7 @@ function drawMap(context: CanvasRenderingContext2D, rects: readonly SpaceRect[],
   }
 }
 
-export function SpaceSniffer({ root, progress, client = spaceSnifferClient, onOpenFolder, onCancelScan, onSelectionChange, onSoundEvent, className }: SpaceSnifferProps) {
+export function SpaceSniffer({ root, progress, client = spaceSnifferClient, onOpenFolder, onCancelScan, onSelectionChange, onSoundEvent, onContextAction, className }: SpaceSnifferProps) {
   const { locale, formatNumber } = useAppI18n(); const words = copy[locale];
   const canvasRef = useRef<HTMLCanvasElement>(null); const viewportRef = useRef<HTMLDivElement>(null);
   const pointerRef = useRef<{ start: Point; current: Point; dragging: boolean } | null>(null);
@@ -90,6 +91,7 @@ export function SpaceSniffer({ root, progress, client = spaceSnifferClient, onOp
   const [hovered, setHovered] = useState<string | null>(null); const [marquee, setMarquee] = useState<{ start: Point; current: Point } | null>(null);
   const [activeRoot, setActiveRoot] = useState(root); const [rootHistory, setRootHistory] = useState<readonly SpaceNode[]>([]);
   const [localProgress, setLocalProgress] = useState<SpaceScanProgress | null>(null); const [groupOpen, setGroupOpen] = useState(false); const [groupLimit, setGroupLimit] = useState(60);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: SpaceNode } | null>(null);
   const activeProgress = localProgress ?? progress; const scanning = activeProgress?.phase === "scanning";
   const total = spaceNodeBytes(activeRoot);
   const { rects, grouped } = useMemo(() => buildSpaceMapLayout(activeRoot.children ?? [], size.width, size.height, activeRoot.id), [activeRoot.children, activeRoot.id, size]);
@@ -111,6 +113,16 @@ export function SpaceSniffer({ root, progress, client = spaceSnifferClient, onOp
     }
   }, [root]);
   useEffect(() => () => { generationRef.current += 1; drillRef.current?.controller.abort(); }, []);
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = (event: KeyboardEvent | MouseEvent) => {
+      if (event instanceof KeyboardEvent && event.key !== "Escape") return;
+      if (event instanceof MouseEvent && (event.target as HTMLElement | null)?.closest(".space-sniffer__context-menu")) return;
+      setContextMenu(null);
+    };
+    window.addEventListener("keydown", close); window.addEventListener("mousedown", close);
+    return () => { window.removeEventListener("keydown", close); window.removeEventListener("mousedown", close); };
+  }, [contextMenu]);
   useEffect(() => {
     const element = viewportRef.current; if (!element) return;
     const observer = new ResizeObserver(([entry]) => {
@@ -178,8 +190,27 @@ export function SpaceSniffer({ root, progress, client = spaceSnifferClient, onOp
     generationRef.current += 1; drillRef.current?.controller.abort(); drillRef.current = null; onCancelScan?.();
     setLocalProgress({ ...activeProgress, phase: "idle", scanned: activeProgress?.scanned ?? 0, total: activeProgress?.total ?? null });
   };
-  const localPoint = (event: ReactPointerEvent<HTMLDivElement>): Point => { const bounds = event.currentTarget.getBoundingClientRect(); return { x: event.clientX - bounds.left, y: event.clientY - bounds.top }; };
+  const localPoint = (event: { currentTarget: HTMLDivElement; clientX: number; clientY: number }): Point => { const bounds = event.currentTarget.getBoundingClientRect(); return { x: event.clientX - bounds.left, y: event.clientY - bounds.top }; };
   const hitTest = (point: Point) => displayedRectsRef.current.find((rect) => point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height);
+  useEffect(() => {
+    const viewport = viewportRef.current; if (!viewport) return;
+    return registerTargetCursorSurface(viewport, (clientX, clientY) => {
+      const bounds = viewport.getBoundingClientRect(); const rect = hitTest({ x: clientX - bounds.left, y: clientY - bounds.top });
+      return rect ? { id: rect.node.id, rect: new DOMRect(bounds.left + rect.x, bounds.top + rect.y, rect.width, rect.height) } : null;
+    });
+  }, [rects]);
+  const moveKeyboardSelection = (key: string) => {
+    const current = currentSelection[0]; const candidates = displayedRectsRef.current.filter((rect) => !rect.members);
+    if (!candidates.length) return;
+    const source = current ? displayedRectsRef.current.find((rect) => rect.node.id === current.id) : null;
+    if (!source) { emitSelection([candidates[0]!.node]); return; }
+    const origin = { x: source.x + source.width / 2, y: source.y + source.height / 2 };
+    const direction: readonly [number, number] = key === "ArrowLeft" ? [-1, 0] : key === "ArrowRight" ? [1, 0] : key === "ArrowUp" ? [0, -1] : [0, 1];
+    const next = candidates.filter((rect) => direction[0] === 0 ? (direction[1] < 0 ? rect.y + rect.height / 2 < origin.y : rect.y + rect.height / 2 > origin.y) : (direction[0] < 0 ? rect.x + rect.width / 2 < origin.x : rect.x + rect.width / 2 > origin.x)).sort((a, b) => {
+      const ac = Math.hypot(a.x + a.width / 2 - origin.x, a.y + a.height / 2 - origin.y); const bc = Math.hypot(b.x + b.width / 2 - origin.x, b.y + b.height / 2 - origin.y); return ac - bc;
+    });
+    const nextRect = next[0]; if (nextRect) emitSelection(nextRect.members ?? [nextRect.node]);
+  };
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => { if (event.button !== 0) return; const point = localPoint(event); pointerRef.current = { start: point, current: point, dragging: false }; event.currentTarget.setPointerCapture(event.pointerId); event.currentTarget.focus(); };
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const point = localPoint(event); const pointer = pointerRef.current;
@@ -197,6 +228,7 @@ export function SpaceSniffer({ root, progress, client = spaceSnifferClient, onOp
   };
   const handleDoubleClick = (event: ReactPointerEvent<HTMLDivElement>) => { const rect = hitTest(localPoint(event)); if (rect && !rect.members) openFolder(rect.node); };
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) { event.preventDefault(); moveKeyboardSelection(event.key); return; }
     if (event.key === "Escape" && rootHistory.length) { event.preventDefault(); restoreHistory(rootHistory.length - 1); }
     else if (event.key === "Enter" && currentSelection.length === 1 && currentSelection[0]?.kind === "folder") { event.preventDefault(); openFolder(currentSelection[0]); }
   };
@@ -216,11 +248,16 @@ export function SpaceSniffer({ root, progress, client = spaceSnifferClient, onOp
       <div className="space-sniffer__body">
         <div className="space-sniffer__map">
           <div className="space-sniffer__legend"><span>{words.legend}</span><span>{words.seams}</span>{activeRoot.partial ? <span>{words.partial}</span> : null}</div>
-          <div ref={viewportRef} className="space-sniffer__viewport" onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={() => { pointerRef.current = null; setMarquee(null); }} onPointerLeave={() => setHovered(null)} onDoubleClick={handleDoubleClick} onKeyDown={handleKeyDown} role="application" aria-label="Folder space map" tabIndex={0}>
+          <div ref={viewportRef} className="space-sniffer__viewport" onContextMenu={(event) => { event.preventDefault(); const rect = hitTest(localPoint(event)) ?? displayedRectsRef.current[0]; if (!rect) return; const node = rect.members?.[0] ?? rect.node; emitSelection([node]); setContextMenu({ x: event.clientX, y: event.clientY, node }); }} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={() => { pointerRef.current = null; setMarquee(null); }} onPointerLeave={() => setHovered(null)} onDoubleClick={handleDoubleClick} onKeyDown={handleKeyDown} role="application" aria-label="Folder space map" tabIndex={0}>
             <canvas ref={canvasRef} className="space-sniffer__canvas" aria-hidden="true" data-visible-count={rects.length} data-area-bytes={total} />
             {!rects.length ? <div className="space-sniffer__awaiting">{scanning ? <span className="space-sniffer__discovery" /> : null}<span>{scanning ? words.noBytes : words.zero}</span></div> : null}
             {marquee ? <div className="space-sniffer__marquee" style={{ left: Math.min(marquee.start.x, marquee.current.x), top: Math.min(marquee.start.y, marquee.current.y), width: Math.abs(marquee.current.x - marquee.start.x), height: Math.abs(marquee.current.y - marquee.start.y) }} /> : null}
           </div>
+          {contextMenu ? <div className="space-sniffer__context-menu" role="menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
+            <button type="button" role="menuitem" onClick={() => { setContextMenu(null); if (contextMenu.node.kind === "folder") openFolder(contextMenu.node); else onContextAction?.("open", contextMenu.node); }}>{contextMenu.node.kind === "folder" ? words.open : "打开"}</button>
+            <button type="button" role="menuitem" onClick={() => { setContextMenu(null); onContextAction?.("locate", contextMenu.node); }}>在浏览器中定位</button>
+            <button type="button" role="menuitem" onClick={() => { setContextMenu(null); onContextAction?.("copy-path", contextMenu.node); }}>复制路径</button>
+          </div> : null}
           <footer className="space-sniffer__map-footer">{grouped.length ? <button type="button" className="space-sniffer__group-toggle" onClick={() => { setGroupOpen(!groupOpen); if (!groupOpen) emitSelection(grouped); }}>{words.other} · {formatNumber(grouped.length)} <span>{formatSpaceBytes(grouped.reduce((sum, node) => sum + spaceNodeBytes(node), 0))}</span></button> : <span>{formatNumber(activeProgress?.scanned ?? activeRoot.children?.length ?? 0)} {words.items}</span>}<span className="space-sniffer__hint">{words.hint}</span></footer>
         </div>
         <aside className="space-sniffer__details" aria-label={words.selected}>
