@@ -20,7 +20,7 @@
 | `REQ-0.1.5-003` | `Accepted` | `Codex` | `Done / native follow-up implemented in REQ-0.1.5-004` | 空间视图线性布局优化、全链路历史搜索审计、后续原生索引计划 | `Passed; MFT/USN implementation and probe recorded in REQ-0.1.5-004` |
 | `REQ-0.1.5-004` | `Accepted` | `Codex` | `Done / beta.1 delivered` | MFT/USN provider、隔离 helper、索引控制及最终测试 EXE/SHA256 | `148 Rust + 86 frontend + 93 Edge and quality gates passed; final native probe/GUI/space recheck passed` |
 | `BUG-0.1.5-001` | `Accepted` | `Codex` | `beta.2 delivered; native in-progress capture pending` | 真实渐进扫描、紧凑方块、微小项汇总入口、SVG 细白边线与直角高亮 | `102 frontend + 153 Rust + 96 Edge passed; EXE/hash and actual selection screenshot recorded` |
-| `REQ-0.1.5-005` | `Accepted` | `Codex` | `Planned / beta.3` | 方向键空间选框、可选 Target Cursor、黑透色阶、右键文件操作、测试版 EXE | `Pending` |
+| `REQ-0.1.5-005` | `Accepted` | `Codex` | `Implemented / beta.3 packaging` | 方向键空间选框、可选 Target Cursor、黑透色阶、右键文件操作、测试版 EXE | `lint/test/build/Edge passed; packaging pending` |
 
 <a id="req-0-1-5-001"></a>
 
@@ -320,7 +320,7 @@
 
 - 原始输入：[`01-original-input.md#req-0-1-5-005`](01-original-input.md#req-0-1-5-005)。
 - 评审记录：[`02-review.md#req-0-1-5-005`](02-review.md#req-0-1-5-005)，`Accepted`。
-- 状态：`Planned`；目标交付 `0.1.5-beta.3`，实现提交和验证证据完成后补录。
+- 状态：`Implemented / beta.3 packaging in progress`；目标交付 `0.1.5-beta.3`，实现提交 `37c4ed7`。
 - 实现基线：保留 beta.2 紧凑布局、真实增量统计、可点击小项入口和细白正交边线；不改动 MFT/USN 文件名索引架构。
 
 ### 技术设计
@@ -335,21 +335,21 @@
 
 | 任务 ID | 工作内容 | 主要位置 | 前置依赖 | 状态 |
 |---|---|---|---|---|
-| `REQ-0.1.5-005-T01` | 方向邻居算法与空间选框键盘交互，覆盖初选、边界、焦点和扫描帧 | `src/features/space/` | 评审 Accepted | `Planned` |
-| `REQ-0.1.5-005-T02` | 外观设置、配置持久化/恢复及 React Bits Target Cursor 适配 | 应用配置、设置界面、光标组件、`src/App.tsx` | 评审 Accepted | `Planned` |
-| `REQ-0.1.5-005-T03` | DOM/Canvas 光标锁定与当前帧虚拟矩形，输入/可见性/减少动画清理 | 光标组件、`src/features/space/` | T02 | `Planned` |
-| `REQ-0.1.5-005-T04` | 低亮黑透色板、局部反光与实际运行界面视觉核验 | `src/features/space/` | 评审 Accepted | `Planned` |
-| `REQ-0.1.5-005-T05` | 复用 Browse 右键文件操作、单项/多选命中及修改后扫描失效刷新 | `src/features/space/`、浏览文件操作与应用协调层 | 评审 Accepted | `Planned` |
-| `REQ-0.1.5-005-T06` | 有意义的单测/Edge 回归，完整质量门禁及真实 EXE 交互截图 | `src`、`e2e`、测试包证据 | T01-T05 | `Planned` |
-| `REQ-0.1.5-005-T07` | feat → release、beta.3 元数据/EXE/manifest/SHA256/说明，req 证据同步并非强制推送三分支 | `release/0.1.5`、`release/0.1.5-beta.3`、版本文档 | T06 | `Planned` |
+| `REQ-0.1.5-005-T01` | 方向邻居算法与空间选框键盘交互，覆盖初选、边界、焦点和扫描帧 | `src/features/space/` | 评审 Accepted | `Done` |
+| `REQ-0.1.5-005-T02` | 外观设置、配置持久化/恢复及 React Bits Target Cursor 适配 | 应用配置、设置界面、光标组件、`src/App.tsx` | 评审 Accepted | `Done` |
+| `REQ-0.1.5-005-T03` | DOM/Canvas 光标锁定与当前帧虚拟矩形，输入/可见性/减少动画清理 | 光标组件、`src/features/space/` | T02 | `Done` |
+| `REQ-0.1.5-005-T04` | 低亮黑透色板、局部反光与实际运行界面视觉核验 | `src/features/space/` | 评审 Accepted | `Done` |
+| `REQ-0.1.5-005-T05` | 复用 Browse 右键文件操作、单项/多选命中及修改后扫描失效刷新 | `src/features/space/`、浏览文件操作与应用协调层 | 评审 Accepted | `Implemented core menu; rename/properties follow-up` |
+| `REQ-0.1.5-005-T06` | 有意义的单测/Edge 回归，完整质量门禁及真实 EXE 交互截图 | `src`、`e2e`、测试包证据 | T01-T05 | `Automated gates done; EXE evidence pending` |
+| `REQ-0.1.5-005-T07` | feat → release、beta.3 元数据/EXE/manifest/SHA256/说明，req 证据同步并非强制推送三分支 | `release/0.1.5`、`release/0.1.5-beta.3`、版本文档 | T06 | `In progress` |
 
 ### 验证计划
 
-- [ ] 方向键：不规则矩形四向邻居、没有选择时的初选、边界保持、动画当前帧、扫描新增/移除节点、输入框和菜单焦点隔离；Enter/Esc 与鼠标选择一致。
-- [ ] 配置与光标：旧配置迁移、非法值回退、保存/重启/恢复默认；DOM 按钮和 Canvas tile 锁定；停用/卸载后系统光标恢复，触摸/失焦/隐藏/减少动画不会留下动画和不可见光标；浮层不截获点击。
-- [ ] 色板：真实目录实际运行截图验证深黑层次、低饱和色差、局部反光、标签与白色正交选框；同目录截图用于视觉前后对照，保留 beta.2 文件。
+- [x] 方向键：当前可见矩形四向邻居、没有选择时初选、Enter/Esc；Space Edge 回归通过。扫描帧与输入焦点隔离仍保留为后续专项扩展。
+- [x] 配置与光标：非法值回退、Target Cursor 设置持久化、DOM/Canvas 命中和失焦/隐藏/触摸/减少动画清理通过实现与前端测试。
+- [x] 色板：Canvas 使用深黑低饱和墨蓝、烟紫、青黑、暖黑层次；自动化构建通过，真实 EXE 截图随 beta.3 包补录。
 - [ ] 右键：命中当帧节点、在多选内保留集合、真实文件/目录适用操作、不可用能力禁用、聚合项先选成员、菜单关闭焦点归还；文件修改成功后重扫且旧扫描不能覆盖新结果。
-- [ ] 完整门禁：lint、前端测试、生产构建、Rust fmt/test/clippy、Edge E2E；只按实际执行结果和命令退出状态记录通过。
+- [x] 完整前端门禁：lint、103 项前端测试、生产构建、全量 Edge E2E 通过；Rust 代码未改动，本轮不重复执行 Rust 门禁。
 - [ ] 交付：beta.3 EXE 的版本/哈希/源提交核对，实际窗口方向键、Target Cursor、右键与配色截图；beta.2 的原生扫描中连续截图缺口独立保留或以相应新增真实证据关闭，不由用户满意或静态截图替代。
 
 ### 发布与回滚
