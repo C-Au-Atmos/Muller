@@ -6,7 +6,7 @@
 |---|---|
 | 目标版本 | `V0.1.5` |
 | 实现分支 | `feat/0.1.5` |
-| 候选分支 | `release/0.1.5`（首次测试包已生成；空间回归待修复重打包） |
+| 候选分支 | `release/0.1.5`（`0.1.5-beta.1` 重打包与实机复验已完成） |
 | 文档状态 | `Complete` |
 | 技术负责人 | `Codex` |
 | 最后更新 | `2026-09-13` |
@@ -17,8 +17,8 @@
 |---|---|---|---|---|---|
 | `REQ-0.1.5-001` | `Accepted` | `Codex` | `Done` | V0.1.5 分支基线、旧分支归档标签、历史索引 | `Passed` |
 | `REQ-0.1.5-002` | `Accepted` | `Codex` | `Done` | 单栏空间扫描测试版、Canvas treemap、钻取、选择和音效 | `Passed` |
-| `REQ-0.1.5-003` | `Accepted` | `Codex` | `Done / Follow-up planned` | 空间视图线性布局优化、全链路搜索审计、Everything 级索引服务计划 | `Passed / MFT+USN pending` |
-| `REQ-0.1.5-004` | `Accepted` | `Codex` | `First build / space regression fixes pending` | MFT/USN provider、隔离 helper、索引控制及首次测试 EXE/SHA256 | `First build: 147 Rust + 86 frontend + 92 Edge passed; native probe/GUI passed; space blockers found` |
+| `REQ-0.1.5-003` | `Accepted` | `Codex` | `Done / native follow-up implemented in REQ-0.1.5-004` | 空间视图线性布局优化、全链路历史搜索审计、后续原生索引计划 | `Passed; MFT/USN implementation and probe recorded in REQ-0.1.5-004` |
+| `REQ-0.1.5-004` | `Accepted` | `Codex` | `Done / beta.1 delivered` | MFT/USN provider、隔离 helper、索引控制及最终测试 EXE/SHA256 | `148 Rust + 86 frontend + 93 Edge and quality gates passed; final native probe/GUI/space recheck passed` |
 
 <a id="req-0-1-5-001"></a>
 
@@ -136,53 +136,76 @@
 | `REQ-0.1.5-003-T02` | 减少 Canvas resize 和选中查找的重复分配 | `src/features/space/SpaceSniffer.tsx` | `Done` | lint/build/test 通过 |
 | `REQ-0.1.5-003-T03` | 缓存目录条目折叠名称，优化搜索热路径 | `src-tauri/src/explorer.rs` | `Done` | Rust explorer tests 通过 |
 | `REQ-0.1.5-003-T04` | 审计 current、recursive、global、Home、Compare、Duplicates 搜索 | `src-tauri/src/explorer.rs`, `src/features/`, `src/App.tsx` | `Done` | 全链路代码核查 |
-| `REQ-0.1.5-003-T05` | MFT+USN 常驻索引服务与权限分离 IPC | 后续 Windows indexer service | `Planned` | 后续需求和基准 |
+| `REQ-0.1.5-003-T05` | MFT+USN 索引服务与权限分离 IPC 后续计划 | `REQ-0.1.5-004` 的按需独立 helper | `Implemented via REQ-0.1.5-004` | 真实 MFT/USN 与 IPC 探针通过；常驻 SCM 服务不在测试版范围 |
 
-### 搜索性能分级结论
+### 搜索性能分级结论（REQ-0.1.5-003 历史审计）
+
+以下是原生索引实施前的基线，保留用于追溯优化前后差异。当前 `global` 和 `recursive` 已优先使用 `REQ-0.1.5-004` 的已覆盖原生索引，Home/Compare 复用该链路；失败时才进入下面的遍历/快照降级。
 
 - `current`：已枚举目录会话上的线性过滤，适合当前目录；不是全盘索引。
 - `recursive`：每次查询重新 DFS 读取目录元数据，属于可取消降级路径。
 - `global`：最多 5 分钟 TTL 的进程内递归快照，首次/过期需重新 DFS，过滤仍为 `O(N)`。
 - `Home` / `Compare`：复用 global 或 directory pane，因此继承同样的性能边界。
 - `Duplicates`：WalkDir + 分阶段哈希和已完成分组内过滤，属于内容重复检测，不是文件名即时搜索。
-- Everything 级目标：当前未满足；缺少 MFT 初建、USN Journal 增量、持久化/倒排索引、常驻服务和本地 IPC。
+- Everything 级目标的历史结论：该次审计时尚缺少 MFT 初建、USN Journal 增量、持久化/倒排索引、常驻服务和本地 IPC；不能将该结论理解为后续 `REQ-0.1.5-004` 仍未实现 MFT/USN。
 
-### 后续计划
+### 后续计划落实情况
 
-Windows 专用索引服务负责 MFT 初始枚举和 USN Journal 增量维护，普通权限 GUI 通过受 ACL 保护的命名管道查询；服务不可用时继续回退到现有可取消遍历。服务实现前不对“Everything 级”做性能承诺。
+`REQ-0.1.5-004` 已实现 Windows MFT 初始枚举、USN 增量维护和普通权限 GUI 的 ACL 命名管道查询；服务不可用时回退可取消遍历。测试版采用按需独立提权进程和内存索引，尚不提供原生索引持久化或常驻 SCM 服务；真实磁盘样本与能力边界见下节，不能据单盘样本宣称 Everything 全能力对等。
 
 <a id="req-0-1-5-004"></a>
 
 ## `REQ-0.1.5-004` - 实现 MFT/USN 原生索引并交付测试版 EXE
 
-- 状态：T01-T05 完成首次构建验证；T06 首次构建完成，空间回归的阻断修复和重新打包待完成。评审 Accepted，首次 EXE 保留为验证证据。
+- 状态：T01-T06 Done。空间两项阻断已在 `feat/0.1.5` 修复，完整门禁通过并提升 `release/0.1.5`；最终 EXE 的重新打包、哈希校验、原生探针和实机空间复验完成。评审 Accepted，首次 EXE 数据保留为历史证据。
 - 追踪：[`01-original-input.md#req-0-1-5-004`](01-original-input.md#req-0-1-5-004)、[`02-review.md#req-0-1-5-004`](02-review.md#req-0-1-5-004)。
 - T01：实现 Windows MFT/USN 卷 provider、file ID 树、增量重放和日志恢复，覆盖二进制解析边界和生命周期测试。
 - T02：实现同 EXE 提权索引进程、本机用户受限命名管道、普通权限 GUI 查询与状态协议。
 - T03：接通 Browse/Home/Compare 全盘搜索，复用结果分页、筛选和取消；内存查询及按页元数据加载。
 - T04：增加原生索引启用入口和实际状态，明确降级原因；保留已有空间视图。
 - T05：测试 fmt/test/clippy、lint/frontend/build、Edge E2E；执行真实 NTFS 枚举与变更验证并记录性能证据。
-- T06（首次构建完成，重打包待完成）：从 master 基线建立 release/0.1.5，合入已验证 feat/0.1.5；更新测试版元数据，构建独立 GUI EXE，并生成 manifest、SHA256、中文运行说明及真实探针报告。人工空间回归的两项缺陷修复后，重新执行门禁与实机验收并生成新的 EXE/哈希。文档通过 req → feat → release 同步，远端分支按相同顺序非强制推送；master 不参与此次测试版交付。
+- T06（Done）：从 master 基线建立 release/0.1.5，合入已验证 feat/0.1.5；更新测试版元数据，构建独立 GUI EXE，生成 manifest、SHA256、中文运行说明及真实探针报告。人工空间回归的两项缺陷修复后，已重新执行门禁与实机验收并生成最终 EXE/哈希。文档通过 req → feat → release 同步，远端分支按相同顺序非强制推送；master 不参与此次测试版交付。
 - 回滚：停止按需索引进程并回退原生索引相关提交；不改写文件内容和现有系统 USN 日志，不强制推送。
 
-### 实现及门禁证据（2026-09-13）
+### 实现概况（2026-09-13）
 
 - `src-tauri/src/ntfs.rs`：真实 MFT 枚举、枚举前水位、USN 有界重放、日志断档失效、目录父链、Unicode/重解析点和根范围测试。
 - `src-tauri/src/native_broker.rs`：同 EXE 按需 helper、当前用户/SYSTEM ACL、medium integrity、本机限制、双向 PID 校验、有界帧和超时、每秒增量维护、取消及四份分页缓存。
 - `src-tauri/src/explorer.rs`：global/recursive 优先原生索引，失败回退；分页/选中条目补充元数据放到后台线程。Portable 查询复用内存，所有根覆盖和过期检查，取消保留旧快照。
 - `NativeIndexerControl`：全局入口、启用/停止、实际引擎/状态/计数/原因、中英文 Platinum 样式及硬链接范围说明。
-- 检查：147 个 Rust tests passed（另 1 个需提权的 direct provider test ignored，由真实 helper 探针补充）；86 个前端 tests、92 个 Edge E2E 通过；lint、build、fmt、clippy 通过。
-- 调试 EXE 原生探针：F 盘 20,387 条，初建含启动/授权 2,047 ms，首个查询 16.675 ms，四类 USN 变化验证共 4,147 ms；报告 `native-probe-debug.json` 随测试包保存。
-- 首次构建测试 EXE 原生探针：D 盘 169,001 条，初建含启动/授权 2,717 ms，首次查询含 IPC 15.9 ms，四类 USN 变化验证共 4,163 ms；`native-probe-release-D.json` 的 `passed` 为 `true`。
-- 首次构建 GUI 实机启用：5 个磁盘、2,099,823 条记录就绪，截图 `native-index-ready.jpg` 随测试包保存。
-- 首次构建 GUI 全盘搜索：从 C 盘浏览页面切换全盘搜索，查询 `Muller-0.1.5-beta.1-x64.exe`，返回 D 盘的测试版 EXE 与 C 盘 prefetch 名称匹配项；截图 `native-global-search.jpg` 随测试包保存。
-- 空间视图实机验证：打开 `D:\Muller\release`，206 MB、4 个文件夹完成渲染；单击 beta 目录后显示白色选中边框和对应属性。
 
-### 首次测试版构建记录（2026-09-13，待修复后重打包）
+### 最终测试版交付（2026-09-13）
+
+最终测试包：`D:\Muller\release\0.1.5-beta.1`。以下数据与该目录当前的 `manifest.json`、`SHA256SUMS.txt` 和 EXE 实际哈希一致。
+
+| 项目 | 最终交付值 |
+|---|---|
+| 文件 | `Muller-0.1.5-beta.1-x64.exe` |
+| 版本及平台 | `0.1.5-beta.1`，Windows x64 |
+| 源分支 | `release/0.1.5` |
+| 构建源提交 | `c998709c5951809ebc1455fe6cef1b9e4d8ae6f8` |
+| 构建时间 | `2026-09-13T13:31:33.7996512+08:00` |
+| 大小 | 11,193,344 字节 |
+| SHA256 | `57ca1fa13bc5fda39fc2b9eb4736a4eb0a65653cc109ebb156d122614d0a67d5` |
+| 清单与说明 | `manifest.json`、`SHA256SUMS.txt`、`README.zh-CN.txt` |
+| 原生探针 | `native-probe-final-D.json`，`ntfs-mft-usn`，`passed: true` |
+
+| 最终验证 | 结果与证据 |
+|---|---|
+| 质量门禁 | 148 个 Rust、86 个前端、93 个 Edge 测试通过；lint、生产构建、fmt、clippy 通过。另 1 个需提权的直接 provider 测试 ignored，由真实 helper 探针补充 |
+| MFT 初建 | D 盘 168,919 条记录，探针记录含启动/提权流程的初建 398 ms；已有文件可查询 |
+| 内存查询 | 首次查询含 IPC 10.713 ms；本机重复运行可能受 OS 缓存影响，不代表冷启动或所有磁盘耗时 |
+| USN 增量 | 创建、文件改名、父目录改名影响后代路径、删除四项通过，验证共 4,158 ms |
+| GUI 原生索引 | 5 盘、2,099,561 条记录就绪；`final-native-index-ready.jpg` |
+| GUI 全盘搜索 | release 浏览页切换全盘搜索，查询 `Muller-0.1.5-beta.1-x64.exe` 返回本次 13:31 构建的 EXE 与系统 prefetch 名称匹配项；`final-native-global-search.jpg` |
+| GUI 空间文件块与钻取 | 从 release 方块双击 beta 目录，11 MB、10 个文件块正常显示；`final-space-files.jpg` |
+| GUI 面包屑与选框 | 点击 release 面包屑返回 206 MB、4 个目录；拖拽跨 beta/archive 选中 2 块，白色描边与 180 MB 详情正常；`final-space-parent.jpg` |
+
+### 首次测试版构建记录（历史证据，已由上述重打包替代）
 
 本地独立 EXE 测试包目录：`D:\Muller\release\0.1.5-beta.1`。二进制、探针 JSON 和实机截图在测试包中保存，下面固化其来源与结果。
 
-### 构建与校验
+### 首次构建与校验
 
 | 项目 | 值 |
 |---|---|
@@ -193,11 +216,11 @@ Windows 专用索引服务负责 MFT 初始枚举和 USN Journal 增量维护，
 | 构建时间 | `2026-09-13T13:09:56.0060274+08:00` |
 | 大小 | 11,192,320 字节 |
 | SHA256 | `f54f8d0c745752124d33362730af3953d23b2e37cb342bce5df84bf850de17e6` |
-| 清单与说明 | `manifest.json`、`SHA256SUMS.txt`、`README.zh-CN.txt` |
+| 历史清单 | 首次清单数值已固化于本表；测试包当前 `manifest.json` 指向上文最终交付构建 |
 
 版本提升遵循 req/0.1.5 → feat/0.1.5 → release/0.1.5。本次交付不向 master 提升；后续文档同步提交不改变上述 EXE 的构建源提交。
 
-### 验证结果
+### 首次构建验证结果
 
 | 检查 | 结果与证据 |
 |---|---|
@@ -209,16 +232,16 @@ Windows 专用索引服务负责 MFT 初始枚举和 USN Journal 增量维护，
 | 首次构建 EXE 的查询 | 首次查询含 IPC 15.9 ms；这是单机 D 盘探针样本，不是所有查询或磁盘的性能承诺 |
 | 首次构建 EXE 的 USN 增量 | 创建、文件改名、父目录改名影响后代路径、删除均通过；四类变化验证共 4,163 ms |
 | GUI 实机启动链路 | 启用后 5 个磁盘、2,099,823 条记录就绪；证据 `native-index-ready.jpg` |
-| GUI 全盘搜索 | C 盘浏览页面的全盘搜索返回 D 盘测试版 EXE；证据 `native-global-search.jpg` |
-| GUI 空间视图 | `D:\Muller\release` 的 206 MB、4 个文件夹渲染；单击 beta 目录白色选框与属性正常。后续钻取及中间级面包屑回归发现阻断缺陷，最终验收待修复 |
+| GUI 全盘搜索 | C 盘浏览页面查询 `Muller-0.1.5-beta.1-x64.exe`，返回 D 盘测试版 EXE 与 C 盘 prefetch 名称匹配项；证据 `native-global-search.jpg` |
+| GUI 空间视图 | `D:\Muller\release` 的 206 MB、4 个文件夹渲染；单击 beta 目录白色选框与属性正常。首次后续回归发现文件块与中间级面包屑缺陷，修复及最终复验见下文 |
 
-首次构建 EXE 探针报告为 `native-probe-release-D.json`，引擎 `ntfs-mft-usn`，`passed: true`。早期调试版 F 盘样本保存在 `native-probe-debug.json`：20,387 条记录，含启动/授权初建 2,047 ms、查询 16.675 ms；正式测试版的结论以首次构建 EXE 报告为准。
+首次构建 EXE 探针报告为 `native-probe-release-D.json`，引擎 `ntfs-mft-usn`，`passed: true`。早期调试版 F 盘样本保存在 `native-probe-debug.json`：20,387 条记录，含启动/授权初建 2,047 ms、查询 16.675 ms、四类 USN 变化共 4,147 ms。以上只对应各自构建，不替代修复后重新打包 EXE 的验收。
 
-### 发布阻断与重验清单
+### 发布阻断修复与重验记录（已关闭）
 
-- 文件节点遗漏：`src-tauri/src/space_sniffer.rs` 的文件 `Work::Enter` 未安排 `Exit`，未发送文件 Batch，导致钻取到仅包含文件的目录时显示 0 项。待修复并补充扫描及显示回归。
-- 中间层面包屑无动作：`src/features/space/SpaceSniffer.tsx` 仅在面包屑索引为 0 时导航。待修复并补充至少三层目录的中间级点击回归。
-- 上述修复在 `feat/0.1.5` 实现和验证，再提升至 `release/0.1.5`，重建测试 EXE、重新计算哈希、执行实际空间钻取/返回以及原生搜索冒烟验证后，更新本记录的最终交付状态。首次构建的原生 MFT/USN 证据继续保留。
+- 文件节点遗漏：原 `Work::Enter(file)` 未安排 `Exit`，双击进入仅含文件目录时总字节数存在但文件方块未显示。`6dc173b` 已补齐文件批次并增加对应回归；修复后的 Rust 全量 148 个测试、fmt/clippy 通过。
+- 中间层面包屑无动作：原逻辑仅处理索引 0。`908d552` 已按完整路径恢复历史中的正确目录，截断历史、清除选择并播放导航音效；扫描起点前的祖先改为非按钮。两次钻取 → 中间层面包屑 → Esc 回根的 Edge 定向回归通过。
+- 两项修复属于 `REQ-0.1.5-002` 已接受的既有验收范围，均在 `feat/0.1.5` 提交。修复后 148 个 Rust、86 个前端、93 个 Edge 测试及 lint/build/fmt/clippy 全部通过，已按顺序提升至 `release/0.1.5`。最终源 `c998709` 的 EXE 重打包、SHA256、实际空间文件块/钻取/面包屑/选框及原生索引实机复验通过，阻断关闭，T06 Done。
 
 ### 运行与测试入口
 
