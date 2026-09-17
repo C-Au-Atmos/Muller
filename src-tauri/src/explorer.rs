@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{State, ipc::Channel};
 
 use crate::indexer::search_persistent_index;
+use crate::natural_sort::natural_cmp;
 
 const MAX_DIRECTORY_PAGE_SIZE: usize = 512;
 const MAX_SEARCH_RESULTS: usize = 200_000;
@@ -1371,8 +1372,13 @@ fn sort_directory_entries(entries: &mut [DirectoryEntry], filter: Option<&Direct
         if !kind_order.is_eq() {
             return kind_order;
         }
+        let name_order = || {
+            natural_cmp(&left.name_lower, &right.name_lower)
+                .then_with(|| left.name.cmp(&right.name))
+                .then_with(|| left.path.cmp(&right.path))
+        };
         let field_order = match sort_by {
-            DirectorySortField::Name => left.name_lower.cmp(&right.name_lower),
+            DirectorySortField::Name => name_order(),
             DirectorySortField::Type => left
                 .extension
                 .as_deref()
@@ -1386,9 +1392,7 @@ fn sort_directory_entries(entries: &mut [DirectoryEntry], filter: Option<&Direct
         } else {
             field_order
         };
-        directed
-            .then_with(|| left.name_lower.cmp(&right.name_lower))
-            .then_with(|| left.name.cmp(&right.name))
+        directed.then_with(name_order)
     });
 }
 
@@ -1789,6 +1793,238 @@ mod tests {
             .expect("sorted session");
         assert_eq!(session.entries[0].name, "large.txt");
         assert_eq!(session.entries[1].name, "small.txt");
+    }
+
+    #[test]
+    fn numeric_names_sort_naturally_in_both_directions_with_folders_first() {
+        let fixture = tempdir().unwrap();
+        for name in ["10", "02", "1", "2"] {
+            fs::create_dir(fixture.path().join(name)).unwrap();
+        }
+        let files = [
+            "1.txt",
+            "2.txt",
+            "02.txt",
+            "002.txt",
+            "10.txt",
+            "20.txt",
+            "image2.jpg",
+            "Image10.jpg",
+            "第2章-3页.txt",
+            "第2章-10页.txt",
+        ];
+        for name in files.iter().rev() {
+            fs::write(fixture.path().join(name), "same size").unwrap();
+        }
+        for direction in [
+            super::DirectorySortDirection::Ascending,
+            super::DirectorySortDirection::Descending,
+        ] {
+            let filter = DirectoryQueryFilter {
+                sort_direction: direction,
+                ..Default::default()
+            };
+            let session =
+                build_directory_session(fixture.path(), Some(&filter), &Default::default())
+                    .unwrap();
+            let mut folders = vec!["1", "2", "02", "10"];
+            let mut expected_files = files.to_vec();
+            if direction == super::DirectorySortDirection::Descending {
+                folders.reverse();
+                expected_files.reverse();
+            }
+            let expected = [folders, expected_files].concat();
+            assert_eq!(
+                session
+                    .entries
+                    .iter()
+                    .map(|entry| entry.name.as_str())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert!(
+                session.entries[..4]
+                    .iter()
+                    .all(|entry| entry.kind == DirectoryEntryKind::Directory)
+            );
+        }
+    }
+
+    #[test]
+    fn numeric_order_is_applied_before_paging_search_and_position_resolution() {
+        let fixture = tempdir().unwrap();
+        for number in (1..=600).rev() {
+            fs::write(fixture.path().join(format!("{number}.txt")), "data").unwrap();
+        }
+        let manager = ExplorerManager::default();
+        let session = build_directory_session(fixture.path(), None, &Default::default()).unwrap();
+        manager.store(81, session);
+        let first = manager.page(81, 0, 512).unwrap();
+        let second = manager.page(81, 512, 512).unwrap();
+        assert_eq!(first.entries.first().unwrap().name, "1.txt");
+        assert_eq!(first.entries.last().unwrap().name, "512.txt");
+        assert_eq!(second.entries.first().unwrap().name, "513.txt");
+        assert_eq!(second.entries.last().unwrap().name, "600.txt");
+        assert_eq!(second.total_entries, 600);
+        let matches = manager.search(81, "2", 0, 512).unwrap();
+        let expected = (1..=600)
+            .map(|number| format!("{number}.txt"))
+            .filter(|name| name.contains('2'))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            matches
+                .entries
+                .iter()
+                .map(|entry| &entry.name)
+                .collect::<Vec<_>>(),
+            expected.iter().collect::<Vec<_>>()
+        );
+        let located = manager.locate(81, "12", None, "").unwrap().unwrap();
+        assert_eq!(located.position, 11);
+        assert_eq!(located.path.file_name().unwrap(), "12.txt");
+        for (query, positions, expected) in [
+            ("2", vec![0, 1, 2], vec!["2.txt", "12.txt", "20.txt"]),
+            ("", vec![511, 512], vec!["512.txt", "513.txt"]),
+        ] {
+            let resolved = manager
+                .resolve_entries(&super::ResolveDirectoryEntriesRequest {
+                    session_id: 81,
+                    query: query.into(),
+                    positions,
+                })
+                .unwrap();
+            assert_eq!(
+                resolved
+                    .iter()
+                    .map(|entry| entry.name.as_str())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn recursive_and_cached_index_search_share_numeric_name_order() {
+        let fixture = tempdir().unwrap();
+        for directory in ["a", "b"] {
+            fs::create_dir(fixture.path().join(directory)).unwrap();
+            for number in [10, 2, 1] {
+                fs::write(
+                    fixture
+                        .path()
+                        .join(directory)
+                        .join(format!("{number}-match.txt")),
+                    "match",
+                )
+                .unwrap();
+            }
+        }
+        let manager = ExplorerManager::default();
+        for direction in [
+            super::DirectorySortDirection::Ascending,
+            super::DirectorySortDirection::Descending,
+        ] {
+            let request = StartDirectorySearchRequest {
+                roots: vec![fixture.path().to_owned()],
+                query: "match".into(),
+                recursive: true,
+                indexed: false,
+                filter: Some(DirectoryQueryFilter {
+                    sort_direction: direction,
+                    ..Default::default()
+                }),
+            };
+            let scanned = build_search_session(&request, &Default::default()).unwrap();
+            let indexed = manager
+                .build_indexed_search_session(&request, &Default::default())
+                .unwrap();
+            let mut expected = vec![
+                "1-match.txt",
+                "1-match.txt",
+                "2-match.txt",
+                "2-match.txt",
+                "10-match.txt",
+                "10-match.txt",
+            ];
+            if direction == super::DirectorySortDirection::Descending {
+                expected.reverse();
+            }
+            assert_eq!(
+                scanned
+                    .entries
+                    .iter()
+                    .map(|entry| entry.name.as_str())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert_eq!(
+                indexed
+                    .entries
+                    .iter()
+                    .map(|entry| &entry.path)
+                    .collect::<Vec<_>>(),
+                scanned
+                    .entries
+                    .iter()
+                    .map(|entry| &entry.path)
+                    .collect::<Vec<_>>()
+            );
+            let mut reversed_input = scanned.entries.clone();
+            reversed_input.reverse();
+            super::sort_directory_entries(&mut reversed_input, request.filter.as_ref());
+            assert_eq!(
+                reversed_input
+                    .iter()
+                    .map(|entry| &entry.path)
+                    .collect::<Vec<_>>(),
+                scanned
+                    .entries
+                    .iter()
+                    .map(|entry| &entry.path)
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn equal_metadata_uses_natural_names_without_reading_lazy_native_entries() {
+        let mut entries = ["10.txt", "2.txt", "1.txt"].map(|name| super::DirectoryEntry {
+            path: std::path::PathBuf::from("missing-native-record").join(name),
+            name: name.into(),
+            name_lower: name.into(),
+            kind: DirectoryEntryKind::File,
+            extension: Some("txt".into()),
+            size: 0,
+            modified_unix_ms: None,
+            hidden: false,
+            metadata_pending: true,
+        });
+        for field in [
+            super::DirectorySortField::Type,
+            super::DirectorySortField::Size,
+            super::DirectorySortField::Modified,
+        ] {
+            for direction in [
+                super::DirectorySortDirection::Ascending,
+                super::DirectorySortDirection::Descending,
+            ] {
+                entries.reverse();
+                let filter = DirectoryQueryFilter {
+                    sort_by: field,
+                    sort_direction: direction,
+                    ..Default::default()
+                };
+                super::sort_directory_entries(&mut entries, Some(&filter));
+                assert_eq!(
+                    entries
+                        .iter()
+                        .map(|entry| entry.name.as_str())
+                        .collect::<Vec<_>>(),
+                    ["1.txt", "2.txt", "10.txt"]
+                );
+                assert!(entries.iter().all(|entry| entry.metadata_pending));
+            }
+        }
     }
 
     #[cfg(windows)]

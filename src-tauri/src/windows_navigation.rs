@@ -70,11 +70,7 @@ fn complete_path(input: &str) -> Result<Vec<PathBuf>, String> {
                     .is_some_and(|name| name.to_string_lossy().to_lowercase().starts_with(&prefix))
             })
             .collect::<Vec<_>>();
-        matches.sort_by(|left, right| {
-            left.to_string_lossy()
-                .to_lowercase()
-                .cmp(&right.to_string_lossy().to_lowercase())
-        });
+        // list_unc_shares already returns natural order; filtering preserves it.
         matches.truncate(MAX_COMPLETIONS);
         return Ok(matches);
     }
@@ -92,7 +88,7 @@ fn complete_path(input: &str) -> Result<Vec<PathBuf>, String> {
         )
     };
     let prefix = prefix.to_lowercase();
-    let mut matches = fs::read_dir(parent)
+    let matches = fs::read_dir(parent)
         .map_err(|error| format!("cannot complete {}: {error}", parent.display()))?
         .filter_map(Result::ok)
         .filter_map(|entry| {
@@ -107,13 +103,22 @@ fn complete_path(input: &str) -> Result<Vec<PathBuf>, String> {
             Some(user_path(&entry.path()))
         })
         .collect::<Vec<_>>();
-    matches.sort_by(|left, right| {
-        left.to_string_lossy()
-            .to_lowercase()
-            .cmp(&right.to_string_lossy().to_lowercase())
-    });
+    let mut matches = naturally_sorted_paths(matches);
     matches.truncate(MAX_COMPLETIONS);
     Ok(matches)
+}
+
+fn naturally_sorted_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    // Fold each path once, rather than allocating strings in every comparison.
+    let mut keyed = paths
+        .into_iter()
+        .map(|path| (path.to_string_lossy().to_lowercase(), path))
+        .collect::<Vec<_>>();
+    keyed.sort_by(|(left_key, left_path), (right_key, right_path)| {
+        crate::natural_sort::natural_cmp(left_key, right_key)
+            .then_with(|| left_path.cmp(right_path))
+    });
+    keyed.into_iter().map(|(_, path)| path).collect()
 }
 
 #[cfg(windows)]
@@ -185,12 +190,7 @@ pub(crate) fn list_unc_shares(server: &str) -> Result<Vec<PathBuf>, String> {
             ));
         }
     }
-    shares.sort_by(|left, right| {
-        left.to_string_lossy()
-            .to_lowercase()
-            .cmp(&right.to_string_lossy().to_lowercase())
-    });
-    Ok(shares)
+    Ok(naturally_sorted_paths(shares))
 }
 
 #[cfg(windows)]
@@ -337,7 +337,7 @@ fn user_path(path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, path::PathBuf};
 
     use tempfile::tempdir;
 
@@ -351,6 +351,86 @@ mod tests {
         let matches = super::complete_path(&input).expect("completion");
         assert_eq!(matches.len(), 2);
         assert!(matches.iter().all(|path| path.is_dir()));
+    }
+
+    #[test]
+    fn completion_sorts_numbered_directories_naturally() {
+        let fixture = tempdir().expect("fixture");
+        for name in ["10", "02", "001", "2", "01", "1"] {
+            fs::create_dir(fixture.path().join(name)).expect("directory");
+        }
+        let input = format!(
+            "{}{sep}",
+            fixture.path().display(),
+            sep = std::path::MAIN_SEPARATOR
+        );
+        let matches = super::complete_path(&input).expect("completion");
+        let names = matches
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["1", "01", "001", "2", "02", "10"]);
+    }
+
+    #[test]
+    fn completion_keeps_suffix_order_before_leading_zero_ties() {
+        let fixture = tempdir().expect("fixture");
+        for name in ["Album10", "album2-z", "ALBUM02-a", "album01", "Album1"] {
+            fs::create_dir(fixture.path().join(name)).expect("directory");
+        }
+        let input = fixture.path().join("album").to_string_lossy().into_owned();
+        let matches = super::complete_path(&input).expect("completion");
+        let names = matches
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            ["Album1", "album01", "ALBUM02-a", "album2-z", "Album10"]
+        );
+    }
+
+    #[test]
+    fn completion_sorts_before_applying_the_result_limit() {
+        let fixture = tempdir().expect("fixture");
+        for number in (1..=35).rev() {
+            fs::create_dir(fixture.path().join(format!("folder{number}"))).expect("directory");
+        }
+        let input = fixture.path().join("folder").to_string_lossy().into_owned();
+        let matches = super::complete_path(&input).expect("completion");
+        let names = matches
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        let expected = (1..=super::MAX_COMPLETIONS)
+            .map(|number| format!("folder{number}"))
+            .collect::<Vec<_>>();
+        assert_eq!(names, expected);
+    }
+
+    #[test]
+    fn unc_share_paths_use_natural_order_with_stable_case_ties() {
+        let paths = [
+            r"\\server\Share10",
+            r"\\server\Share02",
+            r"\\server\Share2",
+            r"\\server\share1",
+            r"\\server\Share1",
+        ]
+        .into_iter()
+        .map(PathBuf::from)
+        .collect();
+        let expected = [
+            r"\\server\Share1",
+            r"\\server\share1",
+            r"\\server\Share2",
+            r"\\server\Share02",
+            r"\\server\Share10",
+        ]
+        .into_iter()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+        assert_eq!(super::naturally_sorted_paths(paths), expected);
     }
 
     #[cfg(windows)]
