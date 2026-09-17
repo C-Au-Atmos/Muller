@@ -469,3 +469,15 @@
 截图保存在同一交付目录：`space-folder-preview.jpg`、`space-text-preview.jpg`、`space-history-return.jpg`、`album-pinned-preview.jpg`。实机验收使用普通权限 beta.4 EXE，未安装 NSIS，未修改或删除用户文件；MFT/USN 未在本轮重复探测。空间预览按钮和 Space、共享文本/图片/目录预览已实测，其余媒体类型由对应 Edge 回归覆盖。
 
 beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上述 release 提交，后续纯文档同步不改变产物的构建来源。
+<a id="bug-0-1-5-002"></a>
+
+## `BUG-0.1.5-002` - 数字文件名自然排序
+
+- 原始输入：[01-original-input.md](01-original-input.md#bug-0-1-5-002)；评审：[02-review.md](02-review.md#bug-0-1-5-002)，`Accepted`。
+- 状态：`In progress`，目标 `0.1.5-beta.5`。
+- T01：新增无分配、无整数溢出的共享数字段比较器与顺序性质/案例测试。
+- T02：目录及全部搜索会话名称排序、同字段值名称回退统一自然序，分页前排序且按完整路径稳定区分同名结果。
+- T03：地址补全和 UNC 共享列表复用比较器，候选限制前排序，缓存小写键。
+- T04：真实临时目录回归数字前缀/降序/分页/搜索/补全，运行完整前端和 Rust 门禁及 Edge；req → feat → release 同步后更新 beta.5、构建并核验 EXE/NSIS/哈希。
+- T05：使用实际 EXE 核验包含 1/2/10、前导零及多段数字的安全验收目录，保留 beta.4 包。
+- 回滚：回退本条实现提交，使用保留的 beta.4；不改写用户文件名或数据。
