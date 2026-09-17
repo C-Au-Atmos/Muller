@@ -6,15 +6,16 @@
 |---|---|
 | 目标版本 | `V0.1.5` |
 | 实现分支 | `feat/0.1.5` |
-| 候选分支 | `release/0.1.5`（`0.1.5-beta.4` 已交付） |
+| 候选分支 | `release/0.1.5`（`0.1.5-beta.5` 已交付，保留 `0.1.5-beta.4`） |
 | 文档状态 | `In progress` |
 | 技术负责人 | `Codex` |
-| 最后更新 | `2026-09-14` |
+| 最后更新 | `2026-09-17` |
 
 ## 执行索引
 
 | 条目 ID | 评审结论 | 实现负责人 | 状态 | 主要交付物 | 验证状态 |
 |---|---|---|---|---|---|
+| [`BUG-0.1.5-002`](#bug-0-1-5-002) | `Accepted` | `Codex` | `Done / beta.5 delivered` | 共享自然排序、目录/搜索/补全接入及回归测试；beta.5 EXE、NSIS 与实机证据 | `130 frontend + 166 Rust (1 ignored) + 109 Edge; quality gates, native sorting/search/completion and artifact hashes verified` |
 | `REQ-0.1.5-007` | `Accepted` | `Codex` | `Done / beta.4 delivered` | 统一地址导航、空间及共享预览、完整瀑布列；beta.4 候选 | `130 frontend + 109 Edge; quality gates and native EXE navigation/preview passed` |
 | `REQ-0.1.5-006` | `Accepted` | `Codex` | `Done / beta.4 delivered` | 空间视图父目录/历史快捷键与焦点隔离；beta.4 候选 | `17 space Edge + native Backspace/Alt navigation passed` |
 | `REQ-0.1.5-001` | `Accepted` | `Codex` | `Done` | V0.1.5 分支基线、旧分支归档标签、历史索引 | `Passed` |
@@ -474,10 +475,59 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 ## `BUG-0.1.5-002` - 数字文件名自然排序
 
 - 原始输入：[01-original-input.md](01-original-input.md#bug-0-1-5-002)；评审：[02-review.md](02-review.md#bug-0-1-5-002)，`Accepted`。
-- 状态：`In progress`，目标 `0.1.5-beta.5`。
-- T01：新增无分配、无整数溢出的共享数字段比较器与顺序性质/案例测试。
-- T02：目录及全部搜索会话名称排序、同字段值名称回退统一自然序，分页前排序且按完整路径稳定区分同名结果。
-- T03：地址补全和 UNC 共享列表复用比较器，候选限制前排序，缓存小写键。
-- T04：真实临时目录回归数字前缀/降序/分页/搜索/补全，运行完整前端和 Rust 门禁及 Edge；req → feat → release 同步后更新 beta.5、构建并核验 EXE/NSIS/哈希。
-- T05：使用实际 EXE 核验包含 1/2/10、前导零及多段数字的安全验收目录，保留 beta.4 包。
+- 状态：`Done / beta.5 delivered`，交付 `0.1.5-beta.5`，记录日期 `2026-09-17`。
+
+| 任务 ID | 实现与主要位置 | 状态 |
+|---|---|---|
+| `BUG-0.1.5-002-T01` | `src-tauri/src/natural_sort.rs` 提供无分配、无整数溢出的共享数字段比较器，覆盖前缀/嵌入、多段数字、前导零、超长数字、Unicode 和比较顺序性质 | `Verified` |
+| `BUG-0.1.5-002-T02` | `src-tauri/src/explorer.rs` 统一目录与搜索会话自然名称排序、同字段回退；分页前排序、按完整路径稳定区分同名结果，新增 600 项跨页、当前搜索/定位/选择位置解析及递归/缓存索引回归 | `Verified` |
+| `BUG-0.1.5-002-T03` | `src-tauri/src/windows_navigation.rs` 使地址补全和 UNC 共享列表复用比较器；每项缓存小写键，候选限制前排序，补充编号/前导零/后缀/截断回归 | `Verified` |
+| `BUG-0.1.5-002-T04` | 完整前端/Rust/Edge 门禁，req → feat → release 同步、beta.5 元数据和 EXE/NSIS/哈希 | `Done` |
+| `BUG-0.1.5-002-T05` | 实际 beta.5 EXE 使用 1/2/10、前导零及多段数字的安全目录验收；保留 beta.4 包 | `Done; native EXE screenshots recorded` |
+
+### 实现说明
+
+- 数字段先去除前导零，再比较有效长度和数字内容，避免机器整数及 JavaScript 安全整数范围限制。同数值时先比较剩余名称，整名自然相同时才按更少前导零确定顺序；非数字文本保留既有大小写折叠后的字符序。
+- 浏览、相册、比较页文件浏览及主页搜索通过同一目录会话排序接收结果。当前目录过滤继承会话顺序；递归、内存索引、持久索引和 native 索引搜索在展示分页前调用同一排序入口。名称降序反转名称顺序，目录优先不变；类型、大小、修改时间主排序不变，同值时名称自然升序回退。
+- 比较器复用缓存名称，不增加比较期间分配或逐项元数据读取；地址补全每项构建一次小写排序键。MFT/USN 原始记录分页、搜索匹配规则、空间面积排序和文件夹比较报告的匹配身份不作改动。
+
+<a id="beta5-delivery-evidence"></a>
+
+### beta.5 验证与交付证据（BUG-0.1.5-002，2026-09-17）
+
+| 项目 | 结果与交付证据 |
+|---|---|
+| lint | 本轮通过 |
+| 前端测试 | 本轮 130 项通过 |
+| 生产构建 | 本轮通过 |
+| Edge 完整回归 | 本轮 109/109 通过；覆盖完整现有 Edge suite。排序算法与真实目录结果另由 Rust 回归及最终 EXE 核验验证 |
+| Rust workspace 测试 | `cargo test --workspace --locked` 通过，166 passed / 1 ignored（需要管理员 NTFS 实测）；新增 13 项排序回归通过，包含 `resolve_entries` 过滤后位置与 512 项分页边界断言 |
+| Rust fmt / clippy | `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` 通过 |
+| 实现提交 | `feat/0.1.5` / `530b5f68b38e8269d02817cce8d176661b780c85` |
+| 发布候选源 | `release/0.1.5` / `216cd4aba552fbf110bd3ccd0b11d51ee96e1903` |
+| 版本 / 交付目录 | `0.1.5-beta.5` / `D:\Muller\release\0.1.5-beta.5`；2026-09-17 23:43 +08:00 构建 |
+| EXE / NSIS / SHA256 | 文件、字节数与 SHA256 见下表；`manifest.json`、`SHA256SUMS.txt` 与 README 已写入并读回核对，EXE Windows ProductVersion/FileVersion 均为 `0.1.5-beta.5`；NSIS 已构建但未安装 |
+| 原生 EXE 核验 | 普通权限 EXE 在安全目录 `D:\Muller\release\0.1.5-beta.5\numeric-sort-fixture` 验证两个浏览栏的升降序、目录优先、当前目录搜索和地址补全；四张实机截图保存在交付目录 |
+| 需求同步 | 本条需求已从 req 合入 feat；本轮收尾证据按 req → feat → release 同步，具体提交沿分支历史追溯 |
+
+### 最终产物与实机证据
+
+| 产物 | 字节数 | SHA256 |
+|---|---:|---|
+| `Muller-0.1.5-beta.5-x64.exe` | 11,249,664 | `26576c60e2ee1cf3898f16b69042d8d977ce4ebe647efd30ff9506ab08718a7f` |
+| `Muller-0.1.5-beta.5-x64-setup.exe` | 4,887,248 | `be3dca5e22eb475e60cf15a940c928d46990a5cab862c13268a9a476f491d968` |
+
+| 实机操作 | 结果 | 截图（位于同一交付目录） |
+|---|---|---|
+| 两个浏览栏名称升序 | 目录为 `1、2、10`；文件为 `1.txt、2.txt、02.txt、10.txt、11.txt、100.txt、image2.txt、image10.txt、第2章-3页.txt、第2章-10页.txt` | `numeric-sort-ascending.jpg` |
+| 名称降序 | 目录组与文件组分别完整反转名称顺序，目录仍排在文件之前 | `numeric-sort-descending.jpg` |
+| 当前目录搜索 `.txt` | 匹配结果保持相同的自然名称顺序 | `numeric-sort-search.jpg` |
+| 顶部地址补全 | 数字目录候选为 `1、2、10` | `numeric-sort-completion.jpg` |
+
+实机验收使用测试包的普通权限 EXE 和独立安全 fixture；NSIS 未执行安装，原生 MFT/USN 索引未在本轮重新探测。beta.4 的 EXE 与安装包哈希已重新核对，与原有记录一致。构建来源固定为上述 release 提交，后续纯文档同步不改变构建来源或产物哈希。
+
+### 发布与回滚
+
+- 自动化门禁、beta.5 构建和实机核验已完成；本条以独立的 release 构建源、产物哈希和实机截图归档。
+- 保留 beta.4 EXE、NSIS、manifest 和哈希；本次不向 `master` 晋级，更新的长期分支使用非强制推送。
 - 回滚：回退本条实现提交，使用保留的 beta.4；不改写用户文件名或数据。
