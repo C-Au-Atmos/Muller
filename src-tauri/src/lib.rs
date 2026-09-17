@@ -8,6 +8,7 @@ mod mutation;
 mod native_broker;
 mod native_index;
 mod native_probe;
+mod natural_sort;
 mod ntfs;
 mod preview;
 mod scan;
