@@ -2,6 +2,21 @@
 
 All notable changes to Muller are documented in this file.
 
+## [0.1.5-beta.5] - 2026-09-17
+
+BUG-0.1.5-002 fixes numeric filename ordering: `1, 2, 10` now follows
+numeric order in directory views, search sessions and address completion.
+
+- Compare digit runs without integer parsing, overflow, per-comparison allocation
+  or filesystem reads. Embedded numbers and long numeric identifiers are supported.
+- Preserve folders first, case-folded text ordering and metadata sort priorities.
+  Equivalent numbers compare their suffixes before leading-zero tie breaks.
+- Sort complete sessions before paging and completion candidates before truncation;
+  same-name search results have a deterministic path tie break.
+- Verified 130 frontend tests, 166 Rust tests and all 109 Edge cases, plus lint,
+  production build, Rust formatting and clippy. One administrator-only NTFS test
+  remains ignored; the native indexing engine is unchanged.
+
 ## [0.1.5-beta.4] - 2026-09-14
 
 REQ-0.1.5-006/007 unify Space navigation with the top address bar and add
