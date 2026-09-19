@@ -2,6 +2,19 @@
 
 All notable changes to Muller are documented in this file.
 
+## [0.1.5-beta.6] - 2026-09-19
+
+BUG-0.1.5-003 fixes the smaller-items detail list in Space Sniffer.
+
+- Reserve space for the selected row marker so the first character stays visible;
+  keep the size column readable with a stable right inset and non-wrapping values.
+- A member click emits one selection sound. The shared pointer sound skips controls
+  that emit their own semantic event, while keyboard and canvas selection sounds remain.
+- Add a keyboard accessible “Back to smaller items” action that closes preview,
+  restores the aggregate selection and keeps the current directory and scan intact.
+- Verified 130 frontend tests, 166 Rust tests (one administrator-only NTFS test
+  ignored), 112 Edge tests, lint, production build, Rust fmt and clippy.
+
 ## [0.1.5-beta.5] - 2026-09-17
 
 BUG-0.1.5-002 fixes numeric filename ordering: `1, 2, 10` now follows
