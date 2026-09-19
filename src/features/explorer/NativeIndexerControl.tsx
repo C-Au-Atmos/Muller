@@ -114,7 +114,7 @@ export function NativeIndexerControl({ roots, onAction }: {
   const stateLabel = t(STATE_LABELS[state]);
   const busy = pending !== null || state === "starting" || state === "building";
   const canEnable = native && roots.length > 0 && !busy && state !== "ready";
-  const canStop = native && (status.state === "starting" || status.state === "building" || status.state === "ready" || (status.state === "degraded" && status.volumes > 0));
+  const canStop = native && status.state !== "disabled";
 
   return (
     <div className="native-indexer" ref={controlRef} data-state={state}>

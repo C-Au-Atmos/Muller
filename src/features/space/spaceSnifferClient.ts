@@ -15,7 +15,7 @@ interface SpaceScanItem {
 }
 
 export interface SpaceScanEvent {
-  type: "started" | "batch" | "done" | "cancelled" | "error";
+  type: "cached" | "started" | "batch" | "done" | "cancelled" | "error";
   taskId: number;
   root?: string | SpaceScanItem;
   items?: SpaceScanItem[];
@@ -136,6 +136,7 @@ class SpaceTree {
       name: item.name,
       path: item.path,
       kind: item.kind === "directory" ? "folder" : "file",
+      extension: item.kind === "file" && item.name.lastIndexOf(".") > 0 ? item.name.slice(item.name.lastIndexOf(".") + 1).toLowerCase() || undefined : undefined,
       bytes: item.bytes,
       size: item.bytes,
       parent: item.parent ?? undefined,
@@ -168,7 +169,12 @@ class SpaceTree {
 
 function scanNative(path: string, signal?: AbortSignal, onProgress?: SpaceScanProgressCallback): Promise<SpaceNode> {
   return new Promise<SpaceNode>((resolve, reject) => {
-    const tree = new SpaceTree(path);
+    // Never merge the old snapshot into the fresh scan. A fresh tree must be
+    // able to omit deleted/renamed files when verification finishes.
+    const freshTree = new SpaceTree(path);
+    let cachedTree: SpaceTree | null = null;
+    let cachedTotalBytes = 0;
+    let freshDataStarted = false;
     let taskId: number | null = null;
     let cancelledTaskId: number | null = null;
     let settled = false;
@@ -200,7 +206,10 @@ function scanNative(path: string, signal?: AbortSignal, onProgress?: SpaceScanPr
     };
     const publish = () => {
       publishTimer = undefined;
-      if (!settled && !aborted) onProgress?.(tree.snapshot(), progress);
+      if (settled || aborted) return;
+      if (cachedTree) {
+        onProgress?.({ ...cachedTree.snapshot(), scanning: true }, { ...progress, totalBytes: cachedTotalBytes, cachePreview: true });
+      } else onProgress?.(freshTree.snapshot(), progress);
     };
     const updateProgress = (event: SpaceScanEvent, phase: SpaceScanProgress["phase"]) => {
       const files = event.fileCount ?? progress.files ?? 0;
@@ -213,6 +222,7 @@ function scanNative(path: string, signal?: AbortSignal, onProgress?: SpaceScanPr
         files,
         directories,
         skipped: event.skippedCount ?? progress.skipped,
+        cachePreview: cachedTree !== null,
       };
     };
     const channel = new Channel<SpaceScanEvent>((event) => {
@@ -220,17 +230,30 @@ function scanNative(path: string, signal?: AbortSignal, onProgress?: SpaceScanPr
       if (taskId !== event.taskId) return;
       if (aborted) { cancelTask(); return; }
       if (settled) return;
-      if (event.type === "batch") {
-        for (const item of event.items ?? []) tree.upsert(item);
-        tree.updateRoot(event.totalBytes);
+      if (event.type === "cached") {
+        // Cached chunks precede live batches. Once live data has arrived, a
+        // delayed cache payload cannot replace the in-progress fresh tree.
+        if (freshDataStarted) return;
+        const firstCachedBatch = cachedTree === null;
+        cachedTree ??= new SpaceTree(path);
+        for (const item of event.items ?? []) cachedTree.upsert(item);
+        cachedTotalBytes = event.totalBytes ?? cachedTotalBytes;
+        cachedTree.updateRoot(cachedTotalBytes);
+        if (firstCachedBatch) publish();
+        else if (onProgress && publishTimer === undefined) publishTimer = setTimeout(publish, 100);
+      } else if (event.type === "batch") {
+        freshDataStarted = true;
+        for (const item of event.items ?? []) freshTree.upsert(item);
+        freshTree.updateRoot(event.totalBytes);
         updateProgress(event, "scanning");
         if (onProgress && publishTimer === undefined) publishTimer = setTimeout(publish, 100);
       } else if (event.type === "done") {
-        if (event.root && typeof event.root !== "string") tree.upsert(event.root);
-        tree.updateRoot(event.totalBytes, true);
+        cachedTree = null;
+        if (event.root && typeof event.root !== "string") freshTree.upsert(event.root);
+        freshTree.updateRoot(event.totalBytes, true);
         updateProgress(event, "complete");
         cleanup();
-        const root = tree.snapshot();
+        const root = freshTree.snapshot();
         onProgress?.(root, progress);
         settled = true;
         resolve(root);

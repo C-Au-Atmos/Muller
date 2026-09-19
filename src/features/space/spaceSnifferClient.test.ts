@@ -121,6 +121,89 @@ describe("native space scan stream", () => {
     expect(onProgress).toHaveBeenCalledTimes(3);
   });
 
+  it("shows cached chunks immediately while verifying separately and replaces deleted records at Done", async () => {
+    const onProgress = vi.fn<SpaceScanProgressCallback>();
+    const promise = spaceSnifferClient.scan("D:\\", undefined, onProgress);
+    send({ type: "cached", taskId: 7, items: [item("D:\\Projects", 30, "directory"), item("D:\\Projects\\deleted.txt", 30)], totalBytes: 40 });
+    expect(onProgress).toHaveBeenCalledTimes(2);
+    expect(onProgress.mock.lastCall?.[0]).toMatchObject({ bytes: 40, scanning: true });
+    expect(onProgress.mock.lastCall?.[1]).toMatchObject({ phase: "scanning", cachePreview: true, totalBytes: 40 });
+    send({ type: "cached", taskId: 7, items: [item("D:\\old.txt", 10)], totalBytes: 40 });
+    send({ type: "started", taskId: 7, root: "D:\\" });
+    send({ type: "batch", taskId: 7, items: [item("D:\\Projects", 5, "directory", true), item("D:\\Projects\\new.txt", 5)], totalBytes: 5, fileCount: 1, directoryCount: 1 });
+    await vi.advanceTimersByTimeAsync(100);
+    const cachedSnapshot = onProgress.mock.lastCall?.[0];
+    expect(cachedSnapshot?.children?.map((node) => node.name)).toEqual(["Projects", "old.txt"]);
+    expect(cachedSnapshot?.children?.[0]?.children?.map((node) => node.name)).toEqual(["deleted.txt"]);
+    expect(onProgress.mock.lastCall?.[1]).toMatchObject({ cachePreview: true, scanned: 2, totalBytes: 40 });
+    send({ type: "done", taskId: 7, totalBytes: 5, fileCount: 1, directoryCount: 1 });
+    const fresh = await promise;
+    expect(fresh.children?.map((node) => node.name)).toEqual(["Projects"]);
+    expect(fresh.children?.[0]?.children?.map((node) => node.name)).toEqual(["new.txt"]);
+    expect(cachedSnapshot?.children?.[0]?.children?.map((node) => node.name)).toEqual(["deleted.txt"]);
+    expect(onProgress.mock.lastCall?.[1]).toMatchObject({ phase: "complete", cachePreview: false, totalBytes: 5 });
+    send({ type: "cached", taskId: 7, items: [item("D:\\late.txt", 900)], totalBytes: 900 });
+    await vi.advanceTimersByTimeAsync(200);
+    expect(onProgress.mock.lastCall?.[0]).toBe(fresh);
+  });
+
+  it("replaces a cached directory with an empty verified tree and ignores cache after live batches", async () => {
+    const onProgress = vi.fn<SpaceScanProgressCallback>();
+    const promise = spaceSnifferClient.scan("D:\\", undefined, onProgress);
+    send({ type: "cached", taskId: 7, items: [item("D:\\removed.txt", 10)], totalBytes: 10 });
+    send({ type: "done", taskId: 7, totalBytes: 0, fileCount: 0, directoryCount: 0 });
+    expect((await promise).children).toEqual([]);
+    expect(onProgress.mock.lastCall?.[1]).toMatchObject({ cachePreview: false, totalBytes: 0 });
+
+    const next = spaceSnifferClient.scan("E:\\", undefined, onProgress);
+    send({ type: "batch", taskId: 7, items: [item("E:\\fresh.txt", 20)], totalBytes: 20 }, 1);
+    send({ type: "cached", taskId: 7, items: [item("E:\\obsolete.txt", 30)], totalBytes: 30 }, 1);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(onProgress.mock.lastCall?.[0].children?.map((node) => node.name)).toEqual(["fresh.txt"]);
+    expect(onProgress.mock.lastCall?.[1].cachePreview).toBe(false);
+    send({ type: "done", taskId: 7, totalBytes: 20 }, 1);
+    await next;
+  });
+
+  it("cancels cached verification without publishing buffered or late cached and fresh events", async () => {
+    const controller = new AbortController();
+    const onProgress = vi.fn<SpaceScanProgressCallback>();
+    const promise = spaceSnifferClient.scan("D:\\", controller.signal, onProgress);
+    const rejected = expect(promise).rejects.toMatchObject({ name: "AbortError" });
+    send({ type: "cached", taskId: 7, items: [item("D:\\cached.txt", 10)], totalBytes: 10 });
+    const visible = onProgress.mock.lastCall?.[0];
+    send({ type: "cached", taskId: 7, items: [item("D:\\buffered.txt", 20)], totalBytes: 30 });
+    send({ type: "batch", taskId: 7, items: [item("D:\\fresh.txt", 1)], totalBytes: 1 });
+    controller.abort();
+    await rejected;
+    send({ type: "cached", taskId: 7, items: [item("D:\\late.txt", 100)], totalBytes: 100 });
+    send({ type: "done", taskId: 7, totalBytes: 1 });
+    await vi.advanceTimersByTimeAsync(200);
+    expect(onProgress).toHaveBeenCalledTimes(2);
+    expect(onProgress.mock.lastCall?.[0]).toBe(visible);
+    expect(tauri.invoke).toHaveBeenLastCalledWith("cancel_space_scan", { taskId: 7 });
+  });
+
+  it("isolates cached snapshots, task IDs and fresh results across concurrent scan sessions", async () => {
+    tauri.invoke.mockResolvedValueOnce({ taskId: 7 }).mockResolvedValueOnce({ taskId: 8 });
+    const firstProgress = vi.fn<SpaceScanProgressCallback>();
+    const secondProgress = vi.fn<SpaceScanProgressCallback>();
+    const first = spaceSnifferClient.scan("D:\\", undefined, firstProgress);
+    const second = spaceSnifferClient.scan("E:\\", undefined, secondProgress);
+    send({ type: "started", taskId: 7, root: "D:\\" }, 0);
+    send({ type: "started", taskId: 8, root: "E:\\" }, 1);
+    send({ type: "cached", taskId: 7, items: [item("D:\\old-d.txt", 10)], totalBytes: 10 }, 0);
+    send({ type: "cached", taskId: 8, items: [item("E:\\old-e.txt", 20)], totalBytes: 20 }, 1);
+    send({ type: "cached", taskId: 7, items: [item("E:\\wrong-task.txt", 500)], totalBytes: 500 }, 1);
+    expect(secondProgress.mock.lastCall?.[0].children?.map((node) => node.name)).toEqual(["old-e.txt"]);
+    send({ type: "batch", taskId: 7, items: [item("D:\\new-d.txt", 5)], totalBytes: 5 }, 0);
+    send({ type: "done", taskId: 7, totalBytes: 5 }, 0);
+    send({ type: "batch", taskId: 8, items: [item("E:\\new-e.txt", 6)], totalBytes: 6 }, 1);
+    send({ type: "done", taskId: 8, totalBytes: 6 }, 1);
+    expect((await first).children?.map((node) => node.path)).toEqual(["D:\\new-d.txt"]);
+    expect((await second).children?.map((node) => node.path)).toEqual(["E:\\new-e.txt"]);
+  });
+
   it("links out-of-order descendants by parent and preserves scan and incomplete flags", async () => {
     const onProgress = vi.fn<SpaceScanProgressCallback>();
     const promise = spaceSnifferClient.scan("D:\\", undefined, onProgress);

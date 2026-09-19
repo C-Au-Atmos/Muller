@@ -1,6 +1,9 @@
-//! Per-GUI, read-only NTFS helper. The GUI stays at normal integrity; only an
-//! explicit launch uses UAC. The helper has no file mutation or shell commands.
+//! Per-GUI NTFS helper. The GUI stays at normal integrity; enabling the index
+//! opts into UAC at future starts. Only cache persistence writes files and it
+//! impersonates the ordinary GUI token. IPC exposes no mutation commands.
 
+#[cfg(not(windows))]
+use std::path::Path;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -57,6 +60,9 @@ enum Request {
     },
     Status {},
     Cancel {},
+    SpaceStamp {
+        root: PathBuf,
+    },
     Search {
         roots: Vec<PathBuf>,
         query: String,
@@ -70,6 +76,7 @@ enum Request {
 enum Response {
     Status { status: NativeStatus },
     Page { page: NativeSearchPage },
+    Stamp { stamp: String },
     Error { message: String },
 }
 
@@ -129,6 +136,9 @@ fn validate_request(request: &Request) -> Result<(), String> {
                 return Err("native index query exceeds protocol limits".into());
             }
         }
+        Request::SpaceStamp { root } => {
+            volume_roots(std::slice::from_ref(root))?;
+        }
         Request::Status {} | Request::Cancel {} => {}
     }
     Ok(())
@@ -136,9 +146,14 @@ fn validate_request(request: &Request) -> Result<(), String> {
 
 #[cfg(windows)]
 pub use windows_impl::{
-    cancel_native_indexer, launch_native_indexer, native_helper_entry, native_status,
-    search_native_index, search_native_index_cancellable,
+    cancel_native_indexer, launch_native_indexer, native_helper_entry, native_space_stamp,
+    native_status, restore_native_indexer, search_native_index, search_native_index_cancellable,
 };
+
+#[cfg(not(windows))]
+pub fn native_space_stamp(_: &Path, _: &muller_core::CancellationToken) -> Result<String, String> {
+    Err("NTFS native indexing requires Windows".into())
+}
 
 #[cfg(not(windows))]
 pub fn native_helper_entry() -> bool {
@@ -158,6 +173,10 @@ pub fn launch_native_indexer(_: Vec<PathBuf>) -> Result<(), String> {
 #[cfg(not(windows))]
 pub fn cancel_native_indexer() -> Result<(), String> {
     Ok(())
+}
+#[cfg(not(windows))]
+pub fn restore_native_indexer() -> Result<bool, String> {
+    Ok(false)
 }
 #[cfg(not(windows))]
 pub fn search_native_index(
@@ -187,12 +206,14 @@ mod windows_impl {
     use std::{
         collections::{HashMap, VecDeque},
         ffi::OsStr,
+        fs,
         mem::{size_of, zeroed},
         os::windows::ffi::OsStrExt,
+        path::Path,
         ptr::{null, null_mut},
         sync::{
             Arc, Mutex, MutexGuard, OnceLock, TryLockError,
-            atomic::{AtomicU64, Ordering},
+            atomic::{AtomicBool, AtomicU64, Ordering},
             mpsc,
         },
         thread,
@@ -209,7 +230,9 @@ mod windows_impl {
                 SDDL_REVISION_1,
             },
             Cryptography::{BCRYPT_USE_SYSTEM_PREFERRED_RNG, BCryptGenRandom},
-            GetTokenInformation, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
+            DuplicateTokenEx, GetTokenInformation, ImpersonateLoggedOnUser, RevertToSelf,
+            SECURITY_ATTRIBUTES, SecurityImpersonation, TOKEN_DUPLICATE, TOKEN_IMPERSONATE,
+            TOKEN_QUERY, TOKEN_USER, TokenImpersonation, TokenUser,
         },
         Storage::FileSystem::{
             CreateFileW, FILE_FLAG_FIRST_PIPE_INSTANCE, OPEN_EXISTING, PIPE_ACCESS_DUPLEX,
@@ -224,7 +247,7 @@ mod windows_impl {
             },
             Threading::{
                 GetCurrentProcess, GetProcessId, OpenProcess, OpenProcessToken,
-                PROCESS_QUERY_LIMITED_INFORMATION, WaitForSingleObject,
+                PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW, WaitForSingleObject,
             },
         },
         UI::{
@@ -235,6 +258,154 @@ mod windows_impl {
 
     const IO_TIMEOUT: Duration = Duration::from_secs(10);
     const POLL: Duration = Duration::from_millis(5);
+    const SPACE_STAMP_TIMEOUT: Duration = Duration::from_millis(250);
+    const SPACE_STAMP_WORK_BUDGET: Duration = Duration::from_millis(180);
+
+    /// The first candidate keeps the index beside a portable executable. A
+    /// normal installed build may live below Program Files, so probe that
+    /// directory before falling back to the per-user state directory. The
+    /// paths are fixed, and every helper filesystem operation runs under the
+    /// parent's token. IPC never accepts a caller-selected write destination.
+    fn native_storage_path() -> Result<PathBuf, String> {
+        let sid = process_sid(unsafe { GetCurrentProcess() })?;
+        let executable_dir = std::env::current_exe()
+            .ok()
+            .and_then(|path| path.parent().map(Path::to_path_buf));
+        let portable =
+            executable_dir.map(|path| path.join("Muller-data").join("native-index-v1").join(&sid));
+        if let Some(path) = portable.filter(|path| writable_directory(path)) {
+            return Ok(path);
+        }
+        let base = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let fallback = base.join("Muller").join("native-index-v1").join(sid);
+        if writable_directory(&fallback) {
+            Ok(fallback)
+        } else {
+            Err("native index storage is not writable; indexing will run in memory".into())
+        }
+    }
+
+    fn writable_directory(path: &Path) -> bool {
+        if crate::ntfs::reject_reparse_path(path).is_err()
+            || fs::create_dir_all(path).is_err()
+            || crate::ntfs::reject_reparse_path(path).is_err()
+        {
+            return false;
+        }
+        let probe = path.join(format!(".write-probe-{}", std::process::id()));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&probe)
+        {
+            Ok(file) => {
+                drop(file);
+                let _ = fs::remove_file(probe);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    fn snapshot_path(storage: &Path, root: &Path) -> PathBuf {
+        let text = root.to_string_lossy();
+        let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
+        let drive = text
+            .as_bytes()
+            .first()
+            .copied()
+            .filter(u8::is_ascii_alphabetic)
+            .map(|value| (value as char).to_ascii_uppercase())
+            .unwrap_or('V');
+        storage.join(format!("{drive}.json"))
+    }
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct StartupPreference {
+        version: u32,
+        enabled: bool,
+        roots: Vec<PathBuf>,
+    }
+
+    fn load_startup_preference(storage: &Path) -> Result<Option<Vec<PathBuf>>, String> {
+        let path = storage.join("startup.json");
+        crate::ntfs::reject_reparse_path(&path)?;
+        let file = match fs::File::open(path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.to_string()),
+        };
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        file.take(16_385)
+            .read_to_end(&mut bytes)
+            .map_err(|error| error.to_string())?;
+        if bytes.len() > 16_384 {
+            return Err("native index startup preference exceeds its size limit".into());
+        }
+        let preference: StartupPreference =
+            serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+        if preference.version != 1 {
+            return Err("unsupported native index startup preference".into());
+        }
+        if preference.enabled {
+            Ok(Some(volume_roots(&preference.roots)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn save_startup_preference(storage: &Path, roots: &[PathBuf]) -> Result<(), String> {
+        let preference = StartupPreference {
+            version: 1,
+            enabled: !roots.is_empty(),
+            roots: if roots.is_empty() {
+                Vec::new()
+            } else {
+                volume_roots(roots)?
+            },
+        };
+        let bytes = serde_json::to_vec(&preference).map_err(|error| error.to_string())?;
+        crate::ntfs::atomic_snapshot_write(&storage.join("startup.json"), &bytes)
+    }
+
+    pub fn restore_native_indexer() -> Result<bool, String> {
+        static ATTEMPTED: AtomicBool = AtomicBool::new(false);
+        let result = restore_once(
+            &ATTEMPTED,
+            || load_startup_preference(&native_storage_path()?),
+            launch_native_indexer,
+        );
+        if let Err(error) = &result {
+            let mut state = lock(broker());
+            set_broker_status(
+                &mut state,
+                NativeStatus::new(
+                    "degraded",
+                    Some(format!("Saved NTFS index was not resumed: {error}")),
+                ),
+            );
+        }
+        result
+    }
+
+    fn restore_once(
+        attempted: &AtomicBool,
+        load: impl FnOnce() -> Result<Option<Vec<PathBuf>>, String>,
+        launch: impl FnOnce(Vec<PathBuf>) -> Result<(), String>,
+    ) -> Result<bool, String> {
+        if attempted.swap(true, Ordering::AcqRel) {
+            return Ok(false);
+        }
+        let Some(roots) = load()? else {
+            return Ok(false);
+        };
+        launch(roots)?;
+        Ok(true)
+    }
 
     fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         mutex.lock().unwrap_or_else(|error| error.into_inner())
@@ -290,6 +461,76 @@ mod windows_impl {
                 CloseHandle(self.0);
             }
         }
+    }
+
+    /// A duplicated impersonation token carries only the GUI's privileges.
+    /// Keep it immutable and use it exclusively while reading/writing caches;
+    /// MFT/USN calls still run with the helper process token after restoration.
+    struct CacheIdentity(HANDLE);
+    unsafe impl Send for CacheIdentity {}
+    unsafe impl Sync for CacheIdentity {}
+    impl Drop for CacheIdentity {
+        fn drop(&mut self) {
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+
+    struct RevertIdentity;
+    impl Drop for RevertIdentity {
+        fn drop(&mut self) {
+            // Continuing with an unknown identity after failure would be
+            // unsafe. There is no useful recovery for this OS invariant.
+            if unsafe { RevertToSelf() } == 0 {
+                std::process::abort();
+            }
+        }
+    }
+
+    impl CacheIdentity {
+        fn from_parent(parent: HANDLE) -> Result<Self, String> {
+            let mut token = null_mut();
+            if unsafe { OpenProcessToken(parent, TOKEN_QUERY | TOKEN_DUPLICATE, &mut token) } == 0 {
+                return Err(last_error("open native index parent cache token"));
+            }
+            let token = Handle(token);
+            let mut impersonation = null_mut();
+            if unsafe {
+                DuplicateTokenEx(
+                    token.0,
+                    TOKEN_QUERY | TOKEN_IMPERSONATE,
+                    null(),
+                    SecurityImpersonation,
+                    TokenImpersonation,
+                    &mut impersonation,
+                )
+            } == 0
+            {
+                return Err(last_error("duplicate native index cache token"));
+            }
+            Ok(Self(impersonation))
+        }
+
+        fn run<T>(&self, operation: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+            if unsafe { ImpersonateLoggedOnUser(self.0) } == 0 {
+                return Err(last_error(
+                    "use parent identity for native index persistence",
+                ));
+            }
+            let _restore = RevertIdentity;
+            operation()
+        }
+    }
+
+    fn process_executable(process: HANDLE) -> Result<PathBuf, String> {
+        let mut path = vec![0u16; 32_768];
+        let mut length = path.len() as u32;
+        if unsafe { QueryFullProcessImageNameW(process, 0, path.as_mut_ptr(), &mut length) } == 0 {
+            return Err(last_error("read native index executable identity"));
+        }
+        use std::os::windows::ffi::OsStringExt;
+        Ok(PathBuf::from(std::ffi::OsString::from_wide(
+            &path[..length as usize],
+        )))
     }
 
     fn process_sid(process: HANDLE) -> Result<String, String> {
@@ -492,11 +733,18 @@ mod windows_impl {
     }
 
     fn request(endpoint: &Endpoint, request: &Request) -> Result<Response, String> {
+        request_until(endpoint, request, Instant::now() + IO_TIMEOUT)
+    }
+
+    fn request_until(
+        endpoint: &Endpoint,
+        request: &Request,
+        deadline: Instant,
+    ) -> Result<Response, String> {
         validate_request(request)?;
         if unsafe { WaitForSingleObject(endpoint.process.0, 0) } != WAIT_TIMEOUT {
             return Err("native index helper has exited".into());
         }
-        let deadline = Instant::now() + IO_TIMEOUT;
         let pipe = loop {
             let raw = unsafe {
                 CreateFileW(
@@ -539,6 +787,7 @@ mod windows_impl {
 
     pub fn launch_native_indexer(roots: Vec<PathBuf>) -> Result<(), String> {
         let roots = volume_roots(&roots)?;
+        let storage_path = native_storage_path();
         let mut state = lock(broker());
         if let Some(endpoint) = state.endpoint.clone()
             && let Ok(Response::Status { status }) = request(
@@ -549,6 +798,9 @@ mod windows_impl {
             )
         {
             set_broker_status(&mut state, status);
+            if let Ok(path) = &storage_path {
+                save_startup_preference(path, &roots)?;
+            }
             return Ok(());
         }
         state.endpoint = None;
@@ -593,7 +845,12 @@ mod windows_impl {
                 process_id: unsafe { GetProcessId(process.0) },
                 process,
             };
-            match request(&endpoint, &Request::Start { roots })? {
+            match request(
+                &endpoint,
+                &Request::Start {
+                    roots: roots.clone(),
+                },
+            )? {
                 Response::Status { status } => Ok((endpoint, status)),
                 Response::Error { message } => Err(message),
                 _ => Err("unexpected native index start response".into()),
@@ -603,6 +860,9 @@ mod windows_impl {
             Ok((endpoint, status)) => {
                 state.endpoint = Some(endpoint);
                 set_broker_status(&mut state, status);
+                if let Ok(path) = &storage_path {
+                    save_startup_preference(path, &roots)?;
+                }
                 Ok(())
             }
             Err(error) => {
@@ -638,6 +898,11 @@ mod windows_impl {
 
     pub fn cancel_native_indexer() -> Result<(), String> {
         let mut state = lock(broker());
+        // Disabling next-start restore must succeed even if the old helper is
+        // already gone or its IPC channel is broken.
+        if let Ok(storage) = native_storage_path() {
+            save_startup_preference(&storage, &[])?;
+        }
         if let Some(endpoint) = &state.endpoint {
             match request(endpoint, &Request::Cancel {})? {
                 Response::Status { status } => set_broker_status(&mut state, status),
@@ -682,6 +947,45 @@ mod windows_impl {
             Response::Error { message } => Err(message),
             _ => Err("unexpected native index search response".into()),
         }
+    }
+
+    pub fn native_space_stamp(root: &Path, cancel: &CancellationToken) -> Result<String, String> {
+        // Do not wait on a UAC prompt or initial indexing to paint the map.
+        if !matches!(lock(status_cache()).state.as_str(), "ready" | "degraded") {
+            return Err("native index is not ready for space cache validation".into());
+        }
+        if cancel.is_cancelled() {
+            return Err("space cache validation cancelled".into());
+        }
+        let state = match broker().try_lock() {
+            Ok(state) => state,
+            Err(TryLockError::Poisoned(error)) => error.into_inner(),
+            Err(TryLockError::WouldBlock) => {
+                return Err("native index is busy; space cache skipped".into());
+            }
+        };
+        let endpoint = state.endpoint.as_ref().ok_or("native index is disabled")?;
+        match request_until(
+            endpoint,
+            &Request::SpaceStamp {
+                root: root.to_path_buf(),
+            },
+            Instant::now() + SPACE_STAMP_TIMEOUT,
+        )? {
+            Response::Stamp { stamp } => Ok(stamp),
+            Response::Error { message } => Err(message),
+            _ => Err("unexpected space cache validation response".into()),
+        }
+    }
+
+    enum WorkerRequest {
+        Search(WorkerQuery),
+        SpaceStamp {
+            root: PathBuf,
+            reply: mpsc::Sender<Response>,
+            deadline: Instant,
+            cancel: CancellationToken,
+        },
     }
 
     struct WorkerQuery {
@@ -750,16 +1054,23 @@ mod windows_impl {
         generation: AtomicU64,
         revision: AtomicU64,
         cancel: Mutex<CancellationToken>,
-        queries: Mutex<Option<mpsc::Sender<WorkerQuery>>>,
+        queries: Mutex<Option<mpsc::Sender<WorkerRequest>>>,
+        cache_identity: CacheIdentity,
+        storage: Result<PathBuf, String>,
+        checkpoint_gate: Mutex<()>,
     }
     impl Service {
-        fn new() -> Self {
+        fn new(cache_identity: CacheIdentity) -> Self {
+            let storage = cache_identity.run(native_storage_path);
             Self {
                 status: Mutex::new(NativeStatus::new("starting", None)),
                 generation: AtomicU64::new(0),
                 revision: AtomicU64::new(0),
                 cancel: Mutex::new(CancellationToken::default()),
                 queries: Mutex::new(None),
+                cache_identity,
+                storage,
+                checkpoint_gate: Mutex::new(()),
             }
         }
         fn set_status(&self, generation: u64, status: NativeStatus) {
@@ -767,6 +1078,26 @@ mod windows_impl {
             if self.generation.load(Ordering::Acquire) == generation {
                 *current = status;
             }
+        }
+
+        fn load_volume(
+            &self,
+            root: &Path,
+            cancel: &CancellationToken,
+        ) -> Result<NativeVolume, String> {
+            let storage = self.storage.as_ref().map_err(Clone::clone)?;
+            self.cache_identity
+                .run(|| NativeVolume::load_persisted(&snapshot_path(storage, root), cancel))
+        }
+
+        fn persist_volume(&self, generation: u64, volume: &NativeVolume) -> Result<(), String> {
+            let _gate = lock(&self.checkpoint_gate);
+            if self.generation.load(Ordering::Acquire) != generation {
+                return Err("native index checkpoint superseded".into());
+            }
+            let storage = self.storage.as_ref().map_err(Clone::clone)?;
+            self.cache_identity
+                .run(|| volume.persist(&snapshot_path(storage, volume.root())))
         }
         fn dispatch(self: &Arc<Self>, request: Request) -> Response {
             if let Err(message) = validate_request(&request) {
@@ -815,13 +1146,13 @@ mod windows_impl {
                     }
                     let (reply, result) = mpsc::channel();
                     let sent = lock(&self.queries).as_ref().is_some_and(|send| {
-                        send.send(WorkerQuery {
+                        send.send(WorkerRequest::Search(WorkerQuery {
                             roots,
                             query,
                             offset,
                             limit,
                             reply,
-                        })
+                        }))
                         .is_ok()
                     });
                     if !sent {
@@ -835,6 +1166,37 @@ mod windows_impl {
                             message: "native index query timed out; use fallback".into(),
                         })
                 }
+                Request::SpaceStamp { root } => {
+                    if !matches!(lock(&self.status).state.as_str(), "ready" | "degraded") {
+                        return Response::Error {
+                            message: "native index is not ready for space cache validation".into(),
+                        };
+                    }
+                    let (reply, result) = mpsc::channel();
+                    let deadline = Instant::now() + SPACE_STAMP_WORK_BUDGET;
+                    let cancel = CancellationToken::default();
+                    if !lock(&self.queries).as_ref().is_some_and(|send| {
+                        send.send(WorkerRequest::SpaceStamp {
+                            root,
+                            reply,
+                            deadline,
+                            cancel: cancel.clone(),
+                        })
+                        .is_ok()
+                    }) {
+                        return Response::Error {
+                            message: "native index worker is unavailable".into(),
+                        };
+                    }
+                    result
+                        .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                        .unwrap_or_else(|_| Response::Error {
+                            message: {
+                                cancel.cancel();
+                                "space cache validation timed out; use traversal".into()
+                            },
+                        })
+                }
             }
         }
 
@@ -843,16 +1205,44 @@ mod windows_impl {
             generation: u64,
             roots: Vec<PathBuf>,
             cancel: CancellationToken,
-            receive: mpsc::Receiver<WorkerQuery>,
+            receive: mpsc::Receiver<WorkerRequest>,
         ) {
             let mut volumes = Vec::new();
             let mut failures = HashMap::new();
+            let mut restored_count = 0;
+            let mut rebuilt_count = 0;
             for root in &roots {
                 if cancel.is_cancelled() {
                     return;
                 }
+                let mut restored = false;
+                if let Ok(mut volume) = self.load_volume(root, &cancel)
+                    && volume.root() == root
+                    && volume.refresh(&cancel).is_ok()
+                {
+                    restored = true;
+                    restored_count += 1;
+                    if let Err(error) = self.persist_volume(generation, &volume) {
+                        failures.insert(
+                            root.clone(),
+                            format!("native index restored but snapshot update failed: {error}"),
+                        );
+                    }
+                    volumes.push(volume);
+                    self.revision.fetch_add(1, Ordering::AcqRel);
+                }
+                if restored {
+                    continue;
+                }
                 match NativeVolume::build(root, &cancel) {
                     Ok(volume) => {
+                        rebuilt_count += 1;
+                        if let Err(error) = self.persist_volume(generation, &volume) {
+                            failures.insert(
+                                root.clone(),
+                                format!("native index ready but snapshot was not saved: {error}"),
+                            );
+                        }
                         volumes.push(volume);
                         self.revision.fetch_add(1, Ordering::AcqRel);
                     }
@@ -864,17 +1254,60 @@ mod windows_impl {
             if cancel.is_cancelled() {
                 return;
             }
-            self.publish(generation, &volumes, &failures);
+            self.publish(
+                generation,
+                &volumes,
+                &failures,
+                restored_count,
+                rebuilt_count,
+            );
             let mut next_refresh = Instant::now() + Duration::from_secs(1);
+            let mut next_checkpoint = Instant::now() + Duration::from_secs(30);
+            let mut saved_watermarks: HashMap<_, _> = volumes
+                .iter()
+                .map(|volume| (volume.root().to_path_buf(), volume.watermark()))
+                .collect();
             let mut cache = QueryCache::default();
             loop {
                 if cancel.is_cancelled() {
                     return;
                 }
                 if let Ok(query) = receive.recv_timeout(Duration::from_millis(100)) {
-                    let _ = query
-                        .reply
-                        .send(self.query(&volumes, &failures, &query, &mut cache));
+                    match query {
+                        WorkerRequest::Search(query) => {
+                            let _ = query
+                                .reply
+                                .send(self.query(&volumes, &failures, &query, &mut cache));
+                        }
+                        WorkerRequest::SpaceStamp {
+                            root,
+                            reply,
+                            deadline,
+                            cancel: stamp_cancel,
+                        } => {
+                            let response =
+                                volume_roots(std::slice::from_ref(&root)).and_then(|roots| {
+                                    if stamp_cancel.is_cancelled() || Instant::now() >= deadline {
+                                        return Err(
+                                            "space cache request expired before validation".into(),
+                                        );
+                                    }
+                                    let volume = volumes
+                                        .iter()
+                                        .find(|v| roots.contains(&v.root().to_path_buf()))
+                                        .ok_or("space root is not indexed")?;
+                                    volume.validate_current(&stamp_cancel)?;
+                                    volume.space_stamp_until(&root, &stamp_cancel, deadline)
+                                });
+                            if response.is_err() {
+                                next_refresh = Instant::now();
+                            }
+                            let _ = reply.send(match response {
+                                Ok(stamp) => Response::Stamp { stamp },
+                                Err(message) => Response::Error { message },
+                            });
+                        }
+                    }
                 }
                 if Instant::now() < next_refresh {
                     continue;
@@ -907,8 +1340,16 @@ mod windows_impl {
                             );
                             match NativeVolume::build(&root, &cancel) {
                                 Ok(volume) => {
+                                    rebuilt_count += 1;
+                                    if let Err(persist) = self.persist_volume(generation, &volume) {
+                                        failures.insert(
+                                            root.clone(),
+                                            format!("native index rebuilt but snapshot was not saved: {persist}"),
+                                        );
+                                    } else {
+                                        failures.remove(&root);
+                                    }
                                     volumes.insert(index, volume);
-                                    failures.remove(&root);
                                     index += 1;
                                     self.revision.fetch_add(1, Ordering::AcqRel);
                                 }
@@ -919,7 +1360,34 @@ mod windows_impl {
                         }
                     }
                 }
-                self.publish(generation, &volumes, &failures);
+                if Instant::now() >= next_checkpoint {
+                    for volume in &volumes {
+                        if saved_watermarks.get(volume.root()) == Some(&volume.watermark()) {
+                            continue;
+                        }
+                        match self.persist_volume(generation, volume) {
+                            Ok(()) => {
+                                saved_watermarks
+                                    .insert(volume.root().to_path_buf(), volume.watermark());
+                                failures.remove(volume.root());
+                            }
+                            Err(error) => {
+                                failures.insert(
+                                    volume.root().to_path_buf(),
+                                    format!("native index update could not be persisted: {error}"),
+                                );
+                            }
+                        }
+                    }
+                    next_checkpoint = Instant::now() + Duration::from_secs(30);
+                }
+                self.publish(
+                    generation,
+                    &volumes,
+                    &failures,
+                    restored_count,
+                    rebuilt_count,
+                );
                 next_refresh = Instant::now() + Duration::from_secs(1);
             }
         }
@@ -929,9 +1397,17 @@ mod windows_impl {
             generation: u64,
             volumes: &[NativeVolume],
             failures: &HashMap<PathBuf, String>,
+            restored_count: usize,
+            rebuilt_count: usize,
         ) {
             let message = if failures.is_empty() {
-                None
+                Some(format!(
+                    "Restored {restored_count} saved NTFS index(es) with USN updates; rebuilt {rebuilt_count} volume(s). Index directory: {}",
+                    self.storage
+                        .as_ref()
+                        .map(|path| path.display().to_string())
+                        .unwrap_or_else(|error| error.clone())
+                ))
             } else {
                 Some(
                     failures
@@ -946,7 +1422,10 @@ mod windows_impl {
                 NativeStatus {
                     provider: if volumes.is_empty() {
                         "portable-snapshot-walker"
-                    } else if failures.is_empty() {
+                    } else if failures
+                        .keys()
+                        .all(|root| volumes.iter().any(|volume| volume.root() == root))
+                    {
                         PROVIDER
                     } else {
                         "mixed-native-portable"
@@ -1055,8 +1534,17 @@ mod windows_impl {
         if process_sid(parent.0)? != sid {
             return Err("native index parent and helper must have the same Windows user".into());
         }
+        let parent_executable = process_executable(parent.0)?;
+        let helper_executable = process_executable(unsafe { GetCurrentProcess() })?;
+        if !parent_executable
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&helper_executable.to_string_lossy())
+        {
+            return Err("native index parent and helper must run the same executable".into());
+        }
+        let cache_identity = CacheIdentity::from_parent(parent.0)?;
         let pipe = create_pipe(&name, &sid)?;
-        let service = Arc::new(Service::new());
+        let service = Arc::new(Service::new(cache_identity));
         loop {
             if unsafe { WaitForSingleObject(parent.0, 0) } != WAIT_TIMEOUT {
                 lock(&service.cancel).cancel();
@@ -1115,6 +1603,167 @@ mod windows_impl {
     #[cfg(test)]
     mod tests {
         use super::*;
+        #[test]
+        fn startup_preference_survives_restart_and_stop_disables_it() {
+            let storage = tempfile::tempdir().unwrap();
+            assert!(load_startup_preference(storage.path()).unwrap().is_none());
+            save_startup_preference(storage.path(), &[r"c:\files".into(), r"D:\".into()]).unwrap();
+            assert_eq!(
+                load_startup_preference(storage.path()).unwrap(),
+                Some(vec![r"C:\".into(), r"D:\".into()])
+            );
+            save_startup_preference(storage.path(), &[]).unwrap();
+            assert!(load_startup_preference(storage.path()).unwrap().is_none());
+            fs::write(
+                storage.path().join("startup.json"),
+                br#"{"version":1,"enabled":true,"roots":["C:relative"]}"#,
+            )
+            .unwrap();
+            assert!(load_startup_preference(storage.path()).is_err());
+        }
+
+        #[test]
+        fn startup_resume_attempts_once_and_does_not_repeat_cancelled_uac() {
+            let attempted = AtomicBool::new(false);
+            let launches = std::cell::Cell::new(0);
+            assert!(
+                restore_once(
+                    &attempted,
+                    || Ok(Some(vec![r"C:\".into()])),
+                    |roots| {
+                        assert_eq!(roots, vec![PathBuf::from(r"C:\")]);
+                        launches.set(launches.get() + 1);
+                        Err("UAC cancelled".into())
+                    }
+                )
+                .is_err()
+            );
+            assert!(
+                !restore_once(
+                    &attempted,
+                    || panic!("must not reload"),
+                    |_| panic!("must not retry")
+                )
+                .unwrap()
+            );
+            assert_eq!(launches.get(), 1);
+            let new_process = AtomicBool::new(false);
+            assert!(
+                restore_once(&new_process, || Ok(Some(vec![r"C:\".into()])), |_| Ok(())).unwrap()
+            );
+        }
+
+        #[test]
+        fn space_cache_validation_skips_a_busy_broker_without_waiting() {
+            let mut state = lock(broker());
+            let previous = state.status.clone();
+            set_broker_status(&mut state, NativeStatus::new("ready", None));
+            let (send, receive) = mpsc::channel();
+            let worker = thread::spawn(move || {
+                send.send(native_space_stamp(
+                    Path::new(r"C:\"),
+                    &CancellationToken::default(),
+                ))
+                .unwrap();
+            });
+            assert!(
+                receive
+                    .recv_timeout(Duration::from_millis(250))
+                    .unwrap()
+                    .unwrap_err()
+                    .contains("busy")
+            );
+            worker.join().unwrap();
+            set_broker_status(&mut state, previous);
+        }
+
+        #[test]
+        fn space_cache_queue_expires_and_cancels_work_before_it_starts() {
+            let storage = tempfile::tempdir().unwrap();
+            let (send, receive) = mpsc::channel();
+            let service = Arc::new(Service {
+                status: Mutex::new(NativeStatus::new("ready", None)),
+                generation: AtomicU64::new(1),
+                revision: AtomicU64::new(1),
+                cancel: Mutex::new(CancellationToken::default()),
+                queries: Mutex::new(Some(send)),
+                cache_identity: CacheIdentity::from_parent(unsafe { GetCurrentProcess() }).unwrap(),
+                storage: Ok(storage.path().to_path_buf()),
+                checkpoint_gate: Mutex::new(()),
+            });
+            assert!(matches!(
+                service.dispatch(Request::SpaceStamp {
+                    root: r"C:\".into()
+                }),
+                Response::Error { .. }
+            ));
+            let WorkerRequest::SpaceStamp {
+                cancel, deadline, ..
+            } = receive.try_recv().unwrap()
+            else {
+                panic!("wrong request");
+            };
+            assert!(cancel.is_cancelled());
+            assert!(Instant::now() >= deadline);
+        }
+
+        #[test]
+        fn optional_space_request_respects_the_short_pipe_deadline() {
+            let raw = unsafe {
+                OpenProcess(
+                    SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                    0,
+                    std::process::id(),
+                )
+            };
+            assert!(!raw.is_null());
+            let endpoint = Endpoint {
+                name: endpoint_name(&"d".repeat(64), std::process::id()).unwrap(),
+                process_id: std::process::id(),
+                process: Arc::new(ProcessHandle(raw)),
+            };
+            let started = Instant::now();
+            assert!(
+                request_until(
+                    &endpoint,
+                    &Request::SpaceStamp {
+                        root: r"C:\".into()
+                    },
+                    started + Duration::from_millis(30)
+                )
+                .is_err()
+            );
+            assert!(started.elapsed() < SPACE_STAMP_TIMEOUT);
+        }
+
+        #[test]
+        fn helper_cache_identity_round_trips_and_restores_the_thread_token() {
+            use windows_sys::Win32::System::Threading::{GetCurrentThread, OpenThreadToken};
+            let parent = unsafe { GetCurrentProcess() };
+            let identity = CacheIdentity::from_parent(parent).unwrap();
+            identity
+                .run(|| {
+                    let mut token = null_mut();
+                    assert_ne!(
+                        unsafe { OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, 1, &mut token) },
+                        0
+                    );
+                    let _token = Handle(token);
+                    Ok(())
+                })
+                .unwrap();
+            let mut token = null_mut();
+            assert_eq!(
+                unsafe { OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, 1, &mut token) },
+                0
+            );
+            assert_eq!(unsafe { GetLastError() }, 1008); // ERROR_NO_TOKEN
+            assert_eq!(
+                process_executable(parent).unwrap(),
+                std::env::current_exe().unwrap()
+            );
+        }
+
         #[test]
         fn queued_search_cancels_without_waiting_for_uac_or_earlier_ipc() {
             let mut state = lock(broker());
@@ -1316,6 +1965,13 @@ mod tests {
             limit: MAX_PAGE + 1,
         };
         assert!(validate_request(&request).is_err());
+
+        assert!(
+            serde_json::from_str::<Request>(
+                r#"{"command":"start","roots":["C:\\"],"storagePath":"C:\\Windows\\System32"}"#
+            )
+            .is_err()
+        );
     }
     #[test]
     fn roots_reject_network_device_relative_and_parent_traversal_paths() {
