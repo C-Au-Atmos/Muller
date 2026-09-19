@@ -17,9 +17,9 @@
 |---|---|---|---|---|---|
 | [`BUG-0.1.5-002`](#bug-0-1-5-002) | `Accepted` | `Codex` | `Done / beta.5 delivered` | 共享自然排序、目录/搜索/补全接入及回归测试；beta.5 EXE、NSIS 与实机证据 | `130 frontend + 166 Rust (1 ignored) + 109 Edge; quality gates, native sorting/search/completion and artifact hashes verified` |
 | [`BUG-0.1.5-003`](#bug-0-1-5-003) | `Accepted` | `Codex` | `Done / beta.6 delivered` | 较小项目列表布局、单击音效去重、空间返回入口；beta.6 EXE、NSIS、哈希和运行时截图 | `130 frontend + 166 Rust (1 ignored) + 112 Edge; quality gates and targeted smaller-items checks passed` |
-| [`REQ-0.1.5-008`](#req-0-1-5-008) | `Accepted` | `Codex` | `Planned / beta.7` | 空间内框自适应右键菜单、Browse 一致的文件操作快捷键及回归测试 | `Pending` |
-| [`REQ-0.1.5-009`](#req-0-1-5-009) | `Accepted` | `Codex` | `Planned / beta.7` | Portable NTFS/MFT/USN 持久化快照、启动增量校正、空间索引加速 | `Pending` |
-| [`REQ-0.1.5-010`](#req-0-1-5-010) | `Accepted` | `Codex` | `Planned / beta.7` | 可配置 1/2/3 个最大文件夹两级内容只读缩略图 | `Pending` |
+| [`REQ-0.1.5-008`](#req-0-1-5-008) | `Accepted` | `Codex` | `Done / beta.7 delivered` | 空间内框自适应右键菜单、Browse 一致的文件操作快捷键及回归测试 | `Verified` |
+| [`REQ-0.1.5-009`](#req-0-1-5-009) | `Accepted` | `Codex` | `Done / beta.7 delivered` | Portable NTFS/MFT/USN 持久化快照、启动增量校正、空间索引加速 | `Verified` |
+| [`REQ-0.1.5-010`](#req-0-1-5-010) | `Accepted` | `Codex` | `Done / beta.7 delivered` | 可配置 1/2/3 个最大文件夹两级内容只读缩略图 | `Verified` |
 | `REQ-0.1.5-007` | `Accepted` | `Codex` | `Done / beta.4 delivered` | 统一地址导航、空间及共享预览、完整瀑布列；beta.4 候选 | `130 frontend + 109 Edge; quality gates and native EXE navigation/preview passed` |
 | `REQ-0.1.5-006` | `Accepted` | `Codex` | `Done / beta.4 delivered` | 空间视图父目录/历史快捷键与焦点隔离；beta.4 候选 | `17 space Edge + native Backspace/Alt navigation passed` |
 | `REQ-0.1.5-001` | `Accepted` | `Codex` | `Done` | V0.1.5 分支基线、旧分支归档标签、历史索引 | `Passed` |
@@ -592,7 +592,7 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 
 ## `REQ-0.1.5-008` - 空间内框右键菜单与浏览一致的快捷键操作
 
-- 状态：`Planned / beta.7`；实现分支：`feat/0.1.5`。
+- 状态：`Done / beta.7 delivered`；实现分支：`feat/0.1.5`。
 - 任务：
   - `REQ-0.1.5-008-T01`：将 Space 菜单定位改为地图内框坐标，测量菜单尺寸并做边界翻转、最大高度和内部滚动。
   - `REQ-0.1.5-008-T02`：复用 Browse 文件操作快捷键路由，接入真实空间选择、确认对话框、剪贴板和回收站语义。
@@ -603,7 +603,7 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 
 ## `REQ-0.1.5-009` - Portable NTFS 索引持久化、增量校正与空间加速
 
-- 状态：`Planned / beta.7`；实现分支：`feat/0.1.5`。
+- 状态：`Done / beta.7 delivered`；实现分支：`feat/0.1.5`。
 - 任务：
   - `REQ-0.1.5-009-T01`：定义版本化 portable 索引文件、卷身份/USN 水位和原子写入恢复协议。
   - `REQ-0.1.5-009-T02`：启动加载快照并按水位增量重放 USN；处理断档、损坏、卷变化、只读目录和权限失败。
@@ -615,9 +615,38 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 
 ## `REQ-0.1.5-010` - 最大文件夹两级内容预览缩略图
 
-- 状态：`Planned / beta.7`；实现分支：`feat/0.1.5`。
+- 状态：`Done / beta.7 delivered`；实现分支：`feat/0.1.5`。
 - 任务：
   - `REQ-0.1.5-010-T01`：增加 1/2/3 数量设置并持久化，按当前目录直接子目录大小选取候选。
   - `REQ-0.1.5-010-T02`：复用扫描元数据，在最大外层文件夹方块内生成两级只读 treemap 缩略图，缓存布局并支持渐进更新和取消。
   - `REQ-0.1.5-010-T03`：隔离缩略图的命中和快捷键，补无权限/空目录/未完成扫描和尺寸回归。
 - 回滚：隐藏缩略图并保留设置值，不影响主地图和详情预览。
+
+<a id="beta7-delivery-evidence"></a>
+
+### beta.7 验证与交付证据（REQ-0.1.5-008/009/010，2026-09-19）
+
+| 项目 | 结果 |
+|---|---|
+| 实现来源 | `feat/0.1.5` / `1a438235e8b675628cef5124caf35c786a17d000`；主体实现 `d78cfac`，此前缩略图与快照提交沿该分支追溯 |
+| release 构建源 | `ab90bf12a8d9d12a2ca6d2c5dad7144dc04148ce` / `0.1.5-beta.7` |
+| 前端门禁 | lint、140 项单元测试和生产构建通过；既有大 chunk 提示保留 |
+| Rust 门禁 | fmt、184 项 workspace 测试和全 target/feature clippy 通过；1 项管理员 NTFS 单测 ignored，另执行真实探针 |
+| Edge 门禁 | 121/121，含最终空间专项 28/28 和其余页面 93/93。原索引说明断言已更新，菜单用真实右击并验证缩窗/调宽四边界，停止截图先验证稳定帧 |
+| 界面证据 | 同源码 Edge 前端运行时 `largest-folder-preview.png`、`space-context-menu.png`；目视核验缩略图名称/两层边界和菜单不越过地图内框，不冒充已安装 EXE 截图 |
+| 原生开发探针 | 普通 GUI + 独立提权 helper，约 188,849 条记录；首次含授权 2,643ms，查询 21.355ms；重载快照含启动 2,093ms，restored 1 / rebuilt 0；文件创建/改名/删除及停机父目录改名均校正 |
+| 最终 EXE 探针 | 最终便携 EXE 的 `--native-index-probe` 通过：188,504 条记录，首次含启动 654ms，查询 10.562ms，快照恢复含启动 302ms，restored 1 / rebuilt 0；报告 `native-probe.json`。探针重启 helper worker 并读取磁盘，不冒充完整 GUI 退出重启演示；GUI 自动启动配置另有单次恢复/取消/停止测试 |
+| 交付目录 | `D:\Muller\release\0.1.5-beta.7`，含便携 EXE、NSIS、manifest、SHA256SUMS、中文说明、探针报告和两张界面截图；EXE FileVersion/ProductVersion 均为 `0.1.5-beta.7` |
+
+| 产物 | 字节数 | SHA256 |
+|---|---:|---|
+| `Muller-0.1.5-beta.7-x64.exe` | 11,415,552 | `a8ca7046670203d82bb303d773faad1cbfc35c978e4121b7db66dc81e08e2400` |
+| `Muller-0.1.5-beta.7-x64-setup.exe` | 4,945,636 | `a6d65f8f3960410bc425c76a60ab2c54f0d4f06a822b2da14b9d116107a54965` |
+
+#### 实现与操作边界
+
+- `008`：菜单自适应地图与自身尺寸，滚动只发生在菜单；地图和详情列表接共享文件命令、属性与解压选择器，失败可见；汇总块不会被当作可删除文件。预览/编辑/对话框保留自身按键，同名粘贴冲突显式报错，不静默覆盖。
+- `009`：NTFS 快照使用 UTF-16 名称、卷身份、journal/watermark、校验值，30 秒合并 checkpoint；helper 持久化在普通 GUI token 下执行，固定目录按 SID 隔离。启动单次恢复，取消 UAC 不重试，停止先禁用下次恢复。
+- 空间测量缓存在用户数据目录最多保存 8 份，每份不超过 100,000 节点/32MiB；IPC 校验预算 250ms，helper 排队/计算预算 180ms，忙或落后立即回退。缓存树与新扫描树分离，终态整体替换并清理消失项选择/预览/菜单。只加速重复访问首屏，不减少最终遍历，首次扫描仍读取元数据。
+- `010`：默认最大 1 个文件夹、菜单可切 2/3，并与设置双向同步；缩略图嵌在外层目录块内，最多两级，每层有界 top-k 与余量汇总。十万子项测试验证权重读取有界、稳定顺序和面积守恒；内层不独立导航或执行文件操作。
+- 原生探针的毫秒结果是本机单次数据，不等同跨设备基准；NSIS 只构建、不自动安装；测试版不晋级 `master`，保留 beta.6 回滚。
