@@ -2,6 +2,26 @@
 
 All notable changes to Muller are documented in this file.
 
+## [0.1.5-beta.7] - 2026-09-19
+
+REQ-0.1.5-008/009/010 improve the Space cleanup workflow and save the native
+NTFS index between portable sessions.
+
+- Keep context menus inside the map with independent scrolling and resize
+  constraints. Share copy/cut/paste, recycle, rename, select-all and refresh
+  commands with Browse; expose operation failures and reuse Properties.
+- Show read-only two-level thumbnails inside the largest 1/2/3 folder blocks.
+  Preferences persist, layouts are cached, and large child sets use bounded top-k.
+- Save versioned MFT/USN snapshots under the portable directory, with per-user
+  fallback. Restore once at startup after enabling; stopping disables resume.
+  The helper uses the ordinary GUI token for all cache writes.
+- Validate saved space measurements with bounded NTFS subtree stamps. Cached
+  previews accelerate repeat visits while a full ordinary scan verifies sizes;
+  cold scanning and final traversal counts are unchanged.
+- Verified 140 frontend tests, 184 Rust tests and 121 Edge cases, plus lint,
+  production build, Rust formatting and clippy. A real NTFS probe also verified
+  snapshot reload and offline USN changes; the admin-only unit test stays ignored.
+
 ## [0.1.5-beta.6] - 2026-09-19
 
 BUG-0.1.5-003 fixes the smaller-items detail list in Space Sniffer.
