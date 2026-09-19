@@ -51,7 +51,10 @@ button.space-sniffer__crumb:hover, .space-sniffer__crumb.is-current { color: var
 .space-sniffer__group-toggle { padding: 4px 0; border: 0; color: #c2c2ca; background: transparent; font: inherit; text-align: left; cursor: pointer; }
 .space-sniffer__group-toggle span { margin-left: 8px; color: #71717a; }
 .space-sniffer__details { display: flex; flex-direction: column; min-width: 0; padding: 20px 16px; overflow: auto; border: 1px solid var(--space-border); background: var(--space-panel); }
-.space-sniffer__details-label { margin-bottom: 18px; font-size: 13px; }
+.space-sniffer__details-label { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; font-size: 13px; }
+.space-sniffer__details-back { display: inline-flex; align-items: center; justify-content: center; gap: 5px; max-width: 100%; margin-left: auto; padding: 5px 8px; border: 1px solid #ffffff30; border-radius: 3px; color: #c2c2ca; background: #ffffff06; font: inherit; font-size: 11px; line-height: 1.4; cursor: pointer; }
+.space-sniffer__details-back:hover, .space-sniffer__details-back:focus-visible { border-color: #ffffff70; color: #fff; background: #ffffff10; }
+.space-sniffer__details-back:focus-visible { outline: 1px solid #a1a1aa; outline-offset: 2px; }
 .space-sniffer__selection-card { padding: 14px 12px; border: 1px solid #ffffffb0; background: linear-gradient(135deg,#27272a,#18181b); }
 .space-sniffer__selection-card h2 { margin: 0 0 8px; overflow: hidden; font-size: 14px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .space-sniffer__selection-card > span { color: var(--space-muted); font-size: 10px; }
@@ -70,11 +73,11 @@ button.space-sniffer__crumb:hover, .space-sniffer__crumb.is-current { color: var
 .space-sniffer__discovery { width: 48px; height: 38px; border: 1px solid #ffffff45; box-shadow: inset 18px 0 #ffffff0a; animation: space-pulse 1.6s ease-in-out infinite; }
 .space-sniffer__group-list { margin-top: 20px; border-top: 1px solid var(--space-border); }
 .space-sniffer__group-list p { color: #85858f; font-size: 11px; line-height: 1.7; }
-.space-sniffer__group-list button { display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 9px 0; border: 0; border-bottom: 1px solid #2f2f35; color: #d4d4d8; background: transparent; font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
+.space-sniffer__group-list button { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 9px 12px; border: 0; border-bottom: 1px solid #2f2f35; color: #d4d4d8; background: transparent; font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
 .space-sniffer__group-list button:hover, .space-sniffer__group-list button:focus-visible { color: #fff; background: #27272a; outline: none; }
 .space-sniffer__group-list button.is-selected { color: #fff; background: #303037; box-shadow: inset 2px 0 #fff; }
-.space-sniffer__group-list button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.space-sniffer__group-list button small { flex-shrink: 0; color: #85858f; font-size: 10px; }
+.space-sniffer__group-list button span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.space-sniffer__group-list button small { flex-shrink: 0; color: #85858f; font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 @keyframes space-pulse { 50% { opacity: .4; } }
 @container (max-width: 850px) { .space-sniffer__body { grid-template-columns: minmax(0,1fr) 10px minmax(180px, var(--space-details-width, 208px)); gap: 4px; padding: 0 14px 14px; } .space-sniffer__map { padding: 0 12px; } .space-sniffer__toolbar { padding: 14px; } .space-sniffer__title { font-size: 18px; } .space-sniffer__hint { display: none; } }
 @container (max-width: 620px) { .space-sniffer__body { grid-template-columns: minmax(0,1fr); } .space-sniffer__resize-handle { display: none; } .space-sniffer__details { max-height: 180px; padding: 12px; } .space-sniffer__body:has(.space-sniffer__selection-card) { grid-template-rows: minmax(140px,1fr) auto; } .space-sniffer__details:not(:has(.space-sniffer__selection-card)) { display: none; } .space-sniffer__metrics { gap: 4px; margin: 12px 0; } .space-sniffer__keyboard { display: none; } }

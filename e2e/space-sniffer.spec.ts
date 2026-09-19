@@ -63,13 +63,43 @@ test("top-level space breadcrumbs create history entries and Escape returns to t
 
 interface SpaceMockChannel { onmessage: (message: unknown) => void; }
 interface SpaceMockTask { id: number; root: string; channel: SpaceMockChannel; }
-interface SpaceMockRuntime { tasks: SpaceMockTask[]; cancelled: number[]; previews: SpaceMockTask[]; cancelledPreviews: number[]; statisticsPaths: string[]; }
+interface SpaceMockRuntime { tasks: SpaceMockTask[]; cancelled: number[]; previews: SpaceMockTask[]; cancelledPreviews: number[]; statisticsPaths: string[]; audioStarts: number; }
 
-async function installSpaceStreamMock(page: import("@playwright/test").Page) {
-  await page.addInitScript(() => {
+async function installSpaceStreamMock(page: import("@playwright/test").Page, audioEnabled = false) {
+  await page.addInitScript(({ initialAudioEnabled }) => {
     localStorage.clear();
-    localStorage.setItem("muller.preferences.v1", JSON.stringify({ version: 1, locale: "en-US", theme: "platinum", audioEnabled: false, motion: "full" }));
-    const state: SpaceMockRuntime = { tasks: [], cancelled: [], previews: [], cancelledPreviews: [], statisticsPaths: [] };
+    localStorage.setItem("muller.preferences.v1", JSON.stringify({ version: 1, locale: "en-US", theme: "platinum", audioEnabled: initialAudioEnabled, motion: "full" }));
+    const state: SpaceMockRuntime = { tasks: [], cancelled: [], previews: [], cancelledPreviews: [], statisticsPaths: [], audioStarts: 0 };
+    if (initialAudioEnabled) {
+      class AudioParamMock {
+        value = 0;
+        setTargetAtTime() {}
+        setValueAtTime() {}
+        exponentialRampToValueAtTime() {}
+      }
+      class AudioNodeMock { connect() { return this; } }
+      class AudioContextMock {
+        currentTime = 0;
+        destination = new AudioNodeMock();
+        createGain() { return Object.assign(new AudioNodeMock(), { gain: new AudioParamMock() }); }
+        createDynamicsCompressor() {
+          return Object.assign(new AudioNodeMock(), {
+            threshold: new AudioParamMock(), knee: new AudioParamMock(), ratio: new AudioParamMock(),
+            attack: new AudioParamMock(), release: new AudioParamMock(),
+          });
+        }
+        createOscillator() {
+          return Object.assign(new AudioNodeMock(), {
+            type: "sine", frequency: new AudioParamMock(),
+            start: () => { state.audioStarts += 1; }, stop() {},
+          });
+        }
+        createBiquadFilter() { return Object.assign(new AudioNodeMock(), { type: "lowpass", frequency: new AudioParamMock() }); }
+        resume() { return Promise.resolve(); }
+        close() { return Promise.resolve(); }
+      }
+      Object.defineProperty(window, "AudioContext", { configurable: true, value: AudioContextMock });
+    }
     const runtime = globalThis as typeof globalThis & { isTauri: boolean; __spaceStream: SpaceMockRuntime };
     runtime.isTauri = true; runtime.__spaceStream = state;
     let id = 0; let callbackId = 0;
@@ -114,7 +144,7 @@ async function installSpaceStreamMock(page: import("@playwright/test").Page) {
         return null;
       },
     };
-  });
+  }, { initialAudioEnabled: audioEnabled });
 }
 
 async function publishSpaceBatch(page: import("@playwright/test").Page, index: number, weights: [number, number], done = false, kind: "directory" | "file" = "directory") {
@@ -145,8 +175,8 @@ async function spaceTaskCount(page: import("@playwright/test").Page) {
   return page.evaluate(() => (globalThis as typeof globalThis & { __spaceStream: SpaceMockRuntime }).__spaceStream.tasks.length);
 }
 
-async function openStreamSpace(page: import("@playwright/test").Page) {
-  await installSpaceStreamMock(page); await page.goto("/");
+async function openStreamSpace(page: import("@playwright/test").Page, audioEnabled = false) {
+  await installSpaceStreamMock(page, audioEnabled); await page.goto("/");
   await expect(page.getByRole("button", { name: "Space map", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Space map", exact: true }).click();
 }
@@ -662,4 +692,104 @@ test("Space on a focused Smaller item previews that row instead of the previous 
   await smallItem.press("Space");
   await expect(preview).not.toBeVisible();
   await expect(region).toHaveAttribute("data-root-path", "D:\\Muller");
+});
+
+test("Smaller item clicks emit one selection sound even when the pointer is held", async ({ page }) => {
+  await openStreamSpace(page, true);
+  const region = page.getByRole("region", { name: "Space Sniffer" });
+  await expect.poll(() => spaceTaskCount(page)).toBe(1);
+  await publishSpaceBatch(page, 0, [1_000_000_000, 1], true);
+  await region.getByRole("button", { name: /^Smaller items/ }).click();
+  const row = region.locator(".space-sniffer__group-list").getByRole("button", { name: "Media 1 B" });
+  const audioStarts = () => page.evaluate(() => (globalThis as typeof globalThis & { __spaceStream: SpaceMockRuntime }).__spaceStream.audioStarts);
+  // An action sound contains two tones. Separate activations by more than
+  // its 55 ms rate limit, and hold the pointer to expose pointerdown/click duplication.
+  for (const delay of [0, 125]) {
+    await page.waitForTimeout(80);
+    const before = await audioStarts();
+    await row.click({ delay });
+    expect(await audioStarts() - before).toBe(2);
+    await expect(row).toHaveAttribute("aria-pressed", "true");
+  }
+  await page.waitForTimeout(80);
+  let before = await audioStarts();
+  await row.press("Space");
+  expect(await audioStarts() - before).toBe(2);
+  await expect(region.getByRole("complementary", { name: "File preview" })).toBeVisible();
+  // Ordinary buttons continue to use the shared pointer sound.
+  await page.waitForTimeout(80);
+  before = await audioStarts();
+  await region.locator(".space-sniffer__preview-button").click({ delay: 125 });
+  expect(await audioStarts() - before).toBe(2);
+  await page.waitForTimeout(80);
+  before = await audioStarts();
+  await region.getByRole("application", { name: "Folder space map" }).press("ArrowLeft");
+  expect(await audioStarts() - before).toBe(2);
+  await expect(region.getByRole("heading", { level: 2 })).toHaveText("Projects");
+});
+
+test("Smaller item details return to their group without changing the directory or rescanning", async ({ page }) => {
+  await openStreamSpace(page);
+  const region = page.getByRole("region", { name: "Space Sniffer" });
+  await expect.poll(() => spaceTaskCount(page)).toBe(1);
+  await publishSpaceBatch(page, 0, [1_000_000_000, 1], true);
+  await region.getByRole("button", { name: /^Smaller items/ }).click();
+  const row = region.locator(".space-sniffer__group-list").getByRole("button", { name: "Media 1 B" });
+  const back = region.getByRole("button", { name: "Back to smaller items" });
+  await expect(region.getByRole("heading", { level: 2 })).toHaveText("Smaller items");
+  await expect(back).not.toBeVisible();
+  await row.click();
+  await expect(back).toBeVisible();
+  await row.press("Space");
+  await expect(region.getByRole("complementary", { name: "File preview" })).toBeVisible();
+  await back.press("Enter");
+  await expect(region.getByRole("heading", { level: 2 })).toHaveText("Smaller items");
+  await expect(region.getByRole("complementary", { name: "File preview" })).not.toBeVisible();
+  await expect(back).not.toBeVisible();
+  await expect(row).toHaveAttribute("aria-pressed", "true");
+  await expect(region.getByRole("application", { name: "Folder space map" })).toBeFocused();
+  await region.getByRole("application", { name: "Folder space map" }).press("Enter");
+  await expect(region).toHaveAttribute("data-root-path", "D:\\Muller");
+  expect(await spaceTaskCount(page)).toBe(1);
+  await row.click();
+  await expect(back).toBeVisible();
+  await expect(region.getByRole("heading", { level: 2 })).toHaveText("Media");
+});
+
+test("Smaller item names and MB sizes keep clear insets at narrow and wide detail widths", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openStreamSpace(page);
+  const region = page.getByRole("region", { name: "Space Sniffer" });
+  await expect.poll(() => spaceTaskCount(page)).toBe(1);
+  await publishSpaceBatch(page, 0, [1_000_000_000_000, 1_234_567], true, "file");
+  await region.getByRole("button", { name: /^Smaller items/ }).click();
+  const row = region.locator(".space-sniffer__group-list").getByRole("button", { name: "Media 1.2 MB" });
+  await row.click();
+  const separator = region.getByRole("separator");
+  for (const width of [180, 248, 460]) {
+    await separator.dblclick();
+    for (let index = 0; index < Math.ceil(Math.abs(width - 248) / 16); index += 1) {
+      await separator.press(width < 248 ? "ArrowRight" : "ArrowLeft");
+    }
+    await expect.poll(() => region.locator(".space-sniffer__details").evaluate((element) => element.getBoundingClientRect().width)).toBe(width);
+    const bounds = await row.evaluate((element) => {
+      const name = element.querySelector("span")!;
+      const size = element.querySelector("small")!;
+      const rowBounds = element.getBoundingClientRect();
+      return {
+        leftInset: name.getBoundingClientRect().left - rowBounds.left,
+        rightInset: rowBounds.right - size.getBoundingClientRect().right,
+        sizeOverflow: size.scrollWidth - size.clientWidth,
+        rowOverflow: element.scrollWidth - element.clientWidth,
+      };
+    });
+    expect(bounds.leftInset).toBeGreaterThanOrEqual(10);
+    expect(bounds.rightInset).toBeGreaterThanOrEqual(10);
+    expect(bounds.sizeOverflow).toBeLessThanOrEqual(0);
+    expect(bounds.rowOverflow).toBeLessThanOrEqual(0);
+    const back = region.getByRole("button", { name: "Back to smaller items" });
+    const backBounds = await back.boundingBox();
+    const detailsBounds = await region.locator(".space-sniffer__details").boundingBox();
+    expect(backBounds!.x + backBounds!.width).toBeLessThanOrEqual(detailsBounds!.x + detailsBounds!.width - 12);
+  }
 });
