@@ -5,16 +5,21 @@
 use std::{
     collections::{BTreeMap, HashSet},
     ffi::OsString,
+    fs,
     path::{Path, PathBuf},
 };
 
 use muller_core::CancellationToken;
+use serde::{Deserialize, Serialize};
 
 const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
 const REASON_DELETE: u32 = 0x200;
 const REASON_RENAME_OLD: u32 = 0x1000;
 const REASON_RENAME_NEW: u32 = 0x2000;
+const SNAPSHOT_VERSION: u32 = 1;
+const MAX_SNAPSHOT_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_SNAPSHOT_NODES: usize = 2_000_000;
 
 #[derive(Debug, Clone)]
 pub struct NativeHit {
@@ -49,6 +54,26 @@ struct Journal {
     first: i64,
     next: i64,
     lowest_valid: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PersistedVolume {
+    version: u32,
+    root: PathBuf,
+    root_id: u64,
+    serial: u32,
+    journal_id: u64,
+    next_usn: i64,
+    nodes: Vec<PersistedNode>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PersistedNode {
+    id: u64,
+    parent: u64,
+    name: String,
+    attributes: u32,
+    usn: i64,
 }
 
 /// No OS handles are retained, so an index can move between worker threads.
@@ -97,6 +122,100 @@ impl NativeVolume {
         {
             Err("NTFS MFT/USN indexing is only available on Windows".into())
         }
+    }
+
+    /// Load a previous MFT snapshot before opening the volume. The snapshot
+    /// only contains names, parent IDs and the USN watermark; callers must
+    /// replay the journal before exposing it as ready. A malformed, stale or
+    /// oversized file is rejected so the caller can perform a clean rebuild.
+    pub fn load_persisted(path: &Path, cancel: &CancellationToken) -> Result<Self, String> {
+        check_cancel(cancel)?;
+        let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
+        if metadata.len() > MAX_SNAPSHOT_BYTES {
+            return Err("NTFS snapshot exceeds the safety size limit".into());
+        }
+        let bytes = fs::read(path).map_err(|error| error.to_string())?;
+        check_cancel(cancel)?;
+        let persisted: PersistedVolume = serde_json::from_slice(&bytes)
+            .map_err(|error| format!("invalid NTFS snapshot: {error}"))?;
+        if persisted.version != SNAPSHOT_VERSION {
+            return Err("unsupported NTFS snapshot version".into());
+        }
+        if persisted.nodes.len() > MAX_SNAPSHOT_NODES {
+            return Err("NTFS snapshot contains too many records".into());
+        }
+        let mut nodes = BTreeMap::new();
+        for node in persisted.nodes {
+            check_cancel(cancel)?;
+            if node.id == persisted.root_id || node.name.is_empty() || nodes.contains_key(&node.id)
+            {
+                return Err("invalid NTFS snapshot node graph".into());
+            }
+            let name = OsString::from(node.name);
+            let folded_name = name.to_string_lossy().to_lowercase();
+            nodes.insert(
+                node.id,
+                Node {
+                    parent: node.parent,
+                    name,
+                    folded_name,
+                    attributes: node.attributes,
+                    usn: node.usn,
+                },
+            );
+        }
+        Ok(Self {
+            root: persisted.root,
+            root_id: persisted.root_id,
+            serial: persisted.serial,
+            journal_id: persisted.journal_id,
+            next_usn: persisted.next_usn,
+            nodes,
+            valid: true,
+        })
+    }
+
+    /// Atomically write the current MFT/USN state. The temporary file is
+    /// synced before replacement so a process or power loss cannot destroy a
+    /// previously valid snapshot.
+    pub fn persist(&self, path: &Path) -> Result<(), String> {
+        if !self.valid {
+            return Err("cannot persist an invalid NTFS index".into());
+        }
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let persisted = PersistedVolume {
+            version: SNAPSHOT_VERSION,
+            root: self.root.clone(),
+            root_id: self.root_id,
+            serial: self.serial,
+            journal_id: self.journal_id,
+            next_usn: self.next_usn,
+            nodes: self
+                .nodes
+                .iter()
+                .map(|(id, node)| PersistedNode {
+                    id: *id,
+                    parent: node.parent,
+                    name: node.name.to_string_lossy().into_owned(),
+                    attributes: node.attributes,
+                    usn: node.usn,
+                })
+                .collect(),
+        };
+        let bytes = serde_json::to_vec(&persisted).map_err(|error| error.to_string())?;
+        if bytes.len() as u64 > MAX_SNAPSHOT_BYTES {
+            return Err("NTFS snapshot exceeds the safety size limit".into());
+        }
+        let temporary = path.with_extension("json.tmp");
+        {
+            use std::io::Write;
+            let mut file = fs::File::create(&temporary).map_err(|error| error.to_string())?;
+            file.write_all(&bytes).map_err(|error| error.to_string())?;
+            file.sync_all().map_err(|error| error.to_string())?;
+        }
+        fs::rename(&temporary, path).map_err(|error| error.to_string())
     }
 
     pub fn root(&self) -> &Path {
@@ -736,6 +855,61 @@ mod tests {
         let (second, more) = v.search_page("needle", &roots, 1, 1);
         assert_eq!(second[0].name, "NeedleB");
         assert!(!more);
+    }
+
+    #[test]
+    fn persisted_snapshot_round_trips_mft_nodes_and_watermark() {
+        let output = tempfile::tempdir().unwrap();
+        let path = output.path().join("C-00000001.json");
+        let mut original = volume();
+        original.apply(record(10, 5, "目录", 101, 0), false);
+        original.apply(record(11, 10, "needle.txt", 102, 0), false);
+        original.persist(&path).unwrap();
+
+        let loaded = NativeVolume::load_persisted(&path, &CancellationToken::default()).unwrap();
+        assert_eq!(loaded.root(), Path::new("C:\\"));
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded.next_usn, original.next_usn);
+        assert_eq!(loaded.journal_id, original.journal_id);
+        assert_eq!(
+            loaded
+                .search_page("NEEDLE", &[PathBuf::from("c:\\")], 0, 10)
+                .0[0]
+                .name,
+            "needle.txt"
+        );
+    }
+
+    #[test]
+    fn malformed_or_duplicate_persisted_nodes_are_rejected() {
+        let output = tempfile::tempdir().unwrap();
+        let path = output.path().join("bad.json");
+        let payload = PersistedVolume {
+            version: SNAPSHOT_VERSION,
+            root: PathBuf::from("C:\\"),
+            root_id: 5,
+            serial: 1,
+            journal_id: 7,
+            next_usn: 100,
+            nodes: vec![
+                PersistedNode {
+                    id: 10,
+                    parent: 5,
+                    name: "a".into(),
+                    attributes: 0,
+                    usn: 1,
+                },
+                PersistedNode {
+                    id: 10,
+                    parent: 5,
+                    name: "b".into(),
+                    attributes: 0,
+                    usn: 2,
+                },
+            ],
+        };
+        fs::write(&path, serde_json::to_vec(&payload).unwrap()).unwrap();
+        assert!(NativeVolume::load_persisted(&path, &CancellationToken::default()).is_err());
     }
 
     #[test]

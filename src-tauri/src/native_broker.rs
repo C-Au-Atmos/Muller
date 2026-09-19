@@ -1,7 +1,7 @@
 //! Per-GUI, read-only NTFS helper. The GUI stays at normal integrity; only an
 //! explicit launch uses UAC. The helper has no file mutation or shell commands.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -54,6 +54,8 @@ pub struct NativeSearchPage {
 enum Request {
     Start {
         roots: Vec<PathBuf>,
+        #[serde(default)]
+        storage_path: Option<PathBuf>,
     },
     Status {},
     Cancel {},
@@ -108,10 +110,29 @@ fn volume_roots(roots: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
     Ok(result)
 }
 
+fn validate_storage_path(path: &Path) -> Result<(), String> {
+    if !path.is_absolute()
+        || path.as_os_str().is_empty()
+        || path.to_string_lossy().len() > 32_767
+        || path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err("native index storage path must be an absolute local path".into());
+    }
+    Ok(())
+}
+
 fn validate_request(request: &Request) -> Result<(), String> {
     match request {
-        Request::Start { roots } => {
+        Request::Start {
+            roots,
+            storage_path,
+        } => {
             volume_roots(roots)?;
+            if let Some(path) = storage_path {
+                validate_storage_path(path)?;
+            }
         }
         Request::Search {
             roots,
@@ -187,8 +208,10 @@ mod windows_impl {
     use std::{
         collections::{HashMap, VecDeque},
         ffi::OsStr,
+        fs,
         mem::{size_of, zeroed},
         os::windows::ffi::OsStrExt,
+        path::Path,
         ptr::{null, null_mut},
         sync::{
             Arc, Mutex, MutexGuard, OnceLock, TryLockError,
@@ -235,6 +258,58 @@ mod windows_impl {
 
     const IO_TIMEOUT: Duration = Duration::from_secs(10);
     const POLL: Duration = Duration::from_millis(5);
+
+    /// The first candidate keeps the index beside a portable executable. A
+    /// normal installed build may live below Program Files, so probe that
+    /// directory before falling back to the per-user state directory. The
+    /// selected path is passed to the elevated helper and is never guessed by
+    /// the helper itself.
+    fn native_storage_path() -> PathBuf {
+        let executable_dir = std::env::current_exe()
+            .ok()
+            .and_then(|path| path.parent().map(Path::to_path_buf));
+        let portable = executable_dir.map(|path| path.join("Muller-data").join("native-index-v1"));
+        if let Some(path) = portable.filter(|path| writable_directory(path)) {
+            return path;
+        }
+        let base = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let fallback = base.join("Muller").join("native-index-v1");
+        let _ = fs::create_dir_all(&fallback);
+        fallback
+    }
+
+    fn writable_directory(path: &Path) -> bool {
+        if fs::create_dir_all(path).is_err() {
+            return false;
+        }
+        let probe = path.join(format!(".write-probe-{}", std::process::id()));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&probe)
+        {
+            Ok(_) => {
+                let _ = fs::remove_file(probe);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    fn snapshot_path(storage: &Path, root: &Path) -> PathBuf {
+        let text = root.to_string_lossy();
+        let text = text.strip_prefix(r"\\?\").unwrap_or(&text);
+        let drive = text
+            .as_bytes()
+            .first()
+            .copied()
+            .filter(u8::is_ascii_alphabetic)
+            .map(|value| (value as char).to_ascii_uppercase())
+            .unwrap_or('V');
+        storage.join(format!("{drive}.json"))
+    }
 
     fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         mutex.lock().unwrap_or_else(|error| error.into_inner())
@@ -539,12 +614,14 @@ mod windows_impl {
 
     pub fn launch_native_indexer(roots: Vec<PathBuf>) -> Result<(), String> {
         let roots = volume_roots(&roots)?;
+        let storage_path = native_storage_path();
         let mut state = lock(broker());
         if let Some(endpoint) = state.endpoint.clone()
             && let Ok(Response::Status { status }) = request(
                 &endpoint,
                 &Request::Start {
                     roots: roots.clone(),
+                    storage_path: Some(storage_path.clone()),
                 },
             )
         {
@@ -593,7 +670,13 @@ mod windows_impl {
                 process_id: unsafe { GetProcessId(process.0) },
                 process,
             };
-            match request(&endpoint, &Request::Start { roots })? {
+            match request(
+                &endpoint,
+                &Request::Start {
+                    roots,
+                    storage_path: Some(storage_path),
+                },
+            )? {
                 Response::Status { status } => Ok((endpoint, status)),
                 Response::Error { message } => Err(message),
                 _ => Err("unexpected native index start response".into()),
@@ -786,8 +869,12 @@ mod windows_impl {
                         status: lock(&self.status).clone(),
                     }
                 }
-                Request::Start { roots } => {
+                Request::Start {
+                    roots,
+                    storage_path,
+                } => {
                     let roots = volume_roots(&roots).expect("request roots were validated");
+                    let storage_path = storage_path.unwrap_or_else(native_storage_path);
                     lock(&self.cancel).cancel();
                     let cancel = CancellationToken::default();
                     *lock(&self.cancel) = cancel.clone();
@@ -796,7 +883,9 @@ mod windows_impl {
                     *lock(&self.queries) = Some(send);
                     *lock(&self.status) = NativeStatus::new("building", None);
                     let service = Arc::clone(self);
-                    thread::spawn(move || service.work(generation, roots, cancel, receive));
+                    thread::spawn(move || {
+                        service.work(generation, roots, storage_path, cancel, receive)
+                    });
                     Response::Status {
                         status: lock(&self.status).clone(),
                     }
@@ -842,6 +931,7 @@ mod windows_impl {
             &self,
             generation: u64,
             roots: Vec<PathBuf>,
+            storage: PathBuf,
             cancel: CancellationToken,
             receive: mpsc::Receiver<WorkerQuery>,
         ) {
@@ -851,8 +941,33 @@ mod windows_impl {
                 if cancel.is_cancelled() {
                     return;
                 }
+                let path = snapshot_path(&storage, root);
+                let mut restored = false;
+                if let Ok(mut volume) = NativeVolume::load_persisted(&path, &cancel)
+                    && volume.root() == root
+                    && volume.refresh(&cancel).is_ok()
+                {
+                    restored = true;
+                    if let Err(error) = volume.persist(&path) {
+                        failures.insert(
+                            root.clone(),
+                            format!("native index restored but snapshot update failed: {error}"),
+                        );
+                    }
+                    volumes.push(volume);
+                    self.revision.fetch_add(1, Ordering::AcqRel);
+                }
+                if restored {
+                    continue;
+                }
                 match NativeVolume::build(root, &cancel) {
                     Ok(volume) => {
+                        if let Err(error) = volume.persist(&path) {
+                            failures.insert(
+                                root.clone(),
+                                format!("native index ready but snapshot was not saved: {error}"),
+                            );
+                        }
                         volumes.push(volume);
                         self.revision.fetch_add(1, Ordering::AcqRel);
                     }
@@ -888,6 +1003,17 @@ mod windows_impl {
                         Ok(changes) => {
                             if changes > 0 {
                                 self.revision.fetch_add(1, Ordering::AcqRel);
+                                let path = snapshot_path(&storage, volumes[index].root());
+                                if let Err(error) = volumes[index].persist(&path) {
+                                    failures.insert(
+                                        volumes[index].root().to_path_buf(),
+                                        format!(
+                                            "native index update could not be persisted: {error}"
+                                        ),
+                                    );
+                                } else {
+                                    failures.remove(volumes[index].root());
+                                }
                             }
                             index += 1;
                         }
@@ -907,8 +1033,16 @@ mod windows_impl {
                             );
                             match NativeVolume::build(&root, &cancel) {
                                 Ok(volume) => {
+                                    let path = snapshot_path(&storage, &root);
+                                    if let Err(persist) = volume.persist(&path) {
+                                        failures.insert(
+                                            root.clone(),
+                                            format!("native index rebuilt but snapshot was not saved: {persist}"),
+                                        );
+                                    } else {
+                                        failures.remove(&root);
+                                    }
                                     volumes.insert(index, volume);
-                                    failures.remove(&root);
                                     index += 1;
                                     self.revision.fetch_add(1, Ordering::AcqRel);
                                 }
@@ -1316,6 +1450,17 @@ mod tests {
             limit: MAX_PAGE + 1,
         };
         assert!(validate_request(&request).is_err());
+
+        let mut start = Request::Start {
+            roots: vec![r"C:\".into()],
+            storage_path: Some(PathBuf::from(r"relative\index")),
+        };
+        assert!(validate_request(&start).is_err());
+        start = Request::Start {
+            roots: vec![r"C:\".into()],
+            storage_path: Some(PathBuf::from(r"C:\Muller-data\native-index-v1")),
+        };
+        assert!(validate_request(&start).is_ok());
     }
     #[test]
     fn roots_reject_network_device_relative_and_parent_traversal_paths() {
