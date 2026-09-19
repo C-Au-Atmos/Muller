@@ -17,6 +17,9 @@
 |---|---|---|---|---|---|
 | [`BUG-0.1.5-002`](#bug-0-1-5-002) | `Accepted` | `Codex` | `Done / beta.5 delivered` | 共享自然排序、目录/搜索/补全接入及回归测试；beta.5 EXE、NSIS 与实机证据 | `130 frontend + 166 Rust (1 ignored) + 109 Edge; quality gates, native sorting/search/completion and artifact hashes verified` |
 | [`BUG-0.1.5-003`](#bug-0-1-5-003) | `Accepted` | `Codex` | `Done / beta.6 delivered` | 较小项目列表布局、单击音效去重、空间返回入口；beta.6 EXE、NSIS、哈希和运行时截图 | `130 frontend + 166 Rust (1 ignored) + 112 Edge; quality gates and targeted smaller-items checks passed` |
+| [`REQ-0.1.5-008`](#req-0-1-5-008) | `Accepted` | `Codex` | `Planned / beta.7` | 空间内框自适应右键菜单、Browse 一致的文件操作快捷键及回归测试 | `Pending` |
+| [`REQ-0.1.5-009`](#req-0-1-5-009) | `Accepted` | `Codex` | `Planned / beta.7` | Portable NTFS/MFT/USN 持久化快照、启动增量校正、空间索引加速 | `Pending` |
+| [`REQ-0.1.5-010`](#req-0-1-5-010) | `Accepted` | `Codex` | `Planned / beta.7` | 可配置 1/2/3 个最大文件夹两级内容只读缩略图 | `Pending` |
 | `REQ-0.1.5-007` | `Accepted` | `Codex` | `Done / beta.4 delivered` | 统一地址导航、空间及共享预览、完整瀑布列；beta.4 候选 | `130 frontend + 109 Edge; quality gates and native EXE navigation/preview passed` |
 | `REQ-0.1.5-006` | `Accepted` | `Codex` | `Done / beta.4 delivered` | 空间视图父目录/历史快捷键与焦点隔离；beta.4 候选 | `17 space Edge + native Backspace/Alt navigation passed` |
 | `REQ-0.1.5-001` | `Accepted` | `Codex` | `Done` | V0.1.5 分支基线、旧分支归档标签、历史索引 | `Passed` |
@@ -583,3 +586,38 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 
 - beta.6 只提升到 `release/0.1.5`，不向 `master` 晋级；保留 beta.5 作为回滚候选。
 - 若发现回归，先在 `feat/0.1.5` 通过普通反向提交修复，再按 `req → feat → release` 同步；不修改用户文件或系统 USN 日志。
+
+
+<a id="req-0-1-5-008"></a>
+
+## `REQ-0.1.5-008` - 空间内框右键菜单与浏览一致的快捷键操作
+
+- 状态：`Planned / beta.7`；实现分支：`feat/0.1.5`。
+- 任务：
+  - `REQ-0.1.5-008-T01`：将 Space 菜单定位改为地图内框坐标，测量菜单尺寸并做边界翻转、最大高度和内部滚动。
+  - `REQ-0.1.5-008-T02`：复用 Browse 文件操作快捷键路由，接入真实空间选择、确认对话框、剪贴板和回收站语义。
+  - `REQ-0.1.5-008-T03`：补齐菜单/快捷键单元测试与 Edge E2E，覆盖四角、窄高窗口、预览栏独立布局和汇总虚拟块保护。
+- 回滚：恢复原菜单定位和空间按键处理，不改变 Browse 文件操作实现。
+
+<a id="req-0-1-5-009"></a>
+
+## `REQ-0.1.5-009` - Portable NTFS 索引持久化、增量校正与空间加速
+
+- 状态：`Planned / beta.7`；实现分支：`feat/0.1.5`。
+- 任务：
+  - `REQ-0.1.5-009-T01`：定义版本化 portable 索引文件、卷身份/USN 水位和原子写入恢复协议。
+  - `REQ-0.1.5-009-T02`：启动加载快照并按水位增量重放 USN；处理断档、损坏、卷变化、只读目录和权限失败。
+  - `REQ-0.1.5-009-T03`：为 Space 扫描接入索引首批候选与安全遍历校正，增加延迟、遍历量和结果一致性基准。
+  - `REQ-0.1.5-009-T04`：补 Rust 持久化/恢复/USN 回归、Windows portable 重启探针和 Edge 状态展示。
+- 回滚：关闭持久化读取和 Space 索引加速，保留现有按需 helper/遍历路径；不修改用户文件和系统 USN 日志。
+
+<a id="req-0-1-5-010"></a>
+
+## `REQ-0.1.5-010` - 最大文件夹两级内容预览缩略图
+
+- 状态：`Planned / beta.7`；实现分支：`feat/0.1.5`。
+- 任务：
+  - `REQ-0.1.5-010-T01`：增加 1/2/3 数量设置并持久化，按当前目录直接子目录大小选取候选。
+  - `REQ-0.1.5-010-T02`：复用统计/索引元数据生成两级只读 treemap 缩略图，支持渐进更新和取消。
+  - `REQ-0.1.5-010-T03`：隔离缩略图的命中和快捷键，补无权限/空目录/未完成扫描和尺寸回归。
+- 回滚：隐藏缩略图并保留设置值，不影响主地图和详情预览。
