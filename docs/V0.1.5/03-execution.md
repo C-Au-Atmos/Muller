@@ -16,6 +16,7 @@
 | 条目 ID | 评审结论 | 实现负责人 | 状态 | 主要交付物 | 验证状态 |
 |---|---|---|---|---|---|
 | [`BUG-0.1.5-002`](#bug-0-1-5-002) | `Accepted` | `Codex` | `Done / beta.5 delivered` | 共享自然排序、目录/搜索/补全接入及回归测试；beta.5 EXE、NSIS 与实机证据 | `130 frontend + 166 Rust (1 ignored) + 109 Edge; quality gates, native sorting/search/completion and artifact hashes verified` |
+| [`BUG-0.1.5-003`](#bug-0-1-5-003) | `Accepted` | `Codex` | `Planned / beta.6` | 较小项目列表布局、单击音效去重、空间返回入口 | `Pending` |
 | `REQ-0.1.5-007` | `Accepted` | `Codex` | `Done / beta.4 delivered` | 统一地址导航、空间及共享预览、完整瀑布列；beta.4 候选 | `130 frontend + 109 Edge; quality gates and native EXE navigation/preview passed` |
 | `REQ-0.1.5-006` | `Accepted` | `Codex` | `Done / beta.4 delivered` | 空间视图父目录/历史快捷键与焦点隔离；beta.4 候选 | `17 space Edge + native Backspace/Alt navigation passed` |
 | `REQ-0.1.5-001` | `Accepted` | `Codex` | `Done` | V0.1.5 分支基线、旧分支归档标签、历史索引 | `Passed` |
@@ -531,3 +532,23 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 - 自动化门禁、beta.5 构建和实机核验已完成；本条以独立的 release 构建源、产物哈希和实机截图归档。
 - 保留 beta.4 EXE、NSIS、manifest 和哈希；本次不向 `master` 晋级，更新的长期分支使用非强制推送。
 - 回滚：回退本条实现提交，使用保留的 beta.4；不改写用户文件名或数据。
+
+<a id="bug-0-1-5-003"></a>
+
+## `BUG-0.1.5-003` - 空间视图较小项目列表交互与布局问题
+
+- 原始输入：[01-original-input.md](01-original-input.md#bug-0-1-5-003)；评审：[02-review.md](02-review.md#bug-0-1-5-003)，`Accepted`。
+- 状态：`Accepted / planned`，目标 `0.1.5-beta.6`，记录日期 `2026-09-19`。
+
+| 任务 ID | 实现与主要位置 | 状态 |
+|---|---|---|
+| `BUG-0.1.5-003-T01` | `SpaceSniffer.css` 调整 group-list 选中条内边距、名称弹性列、容量列留白和窄/宽详情栏布局 | `Planned` |
+| `BUG-0.1.5-003-T02` | `SpaceSniffer.tsx` 收敛列表选择音效触发，保留键盘选择语义并新增返回地图/上一级入口 | `Planned` |
+| `BUG-0.1.5-003-T03` | Space E2E 与组件/样式回归：几何边界、单击音效计数、返回入口和既有预览/导航 | `Planned` |
+
+### 设计与回滚
+
+- 列表行采用 `display:flex`，名称列 `min-width:0; flex:1`，容量列固定不收缩并设置右内边距；选中竖条通过 `box-shadow` 或伪元素绘制在预留的行内边距之外，首字母从可读区域开始。
+- 返回按钮放在较小项目详情标题/列表区域，返回时关闭预览和右键菜单并恢复地图焦点；若存在导航历史则沿现有 Space back/up 语义处理，不新增扫描或改变根路径。
+- 选择音效仅由列表选择回调或统一选择事件发出一次；全局 pointerdown 对带选择标记的行不再重复触发 action，其他页面和键盘音效保持现状。
+- 回滚为普通反向提交；不修改扫描数据、文件名、文件操作或 MFT/USN 提供方。
