@@ -6,17 +6,17 @@
 |---|---|
 | 目标版本 | `V0.1.5` |
 | 实现分支 | `feat/0.1.5` |
-| 候选分支 | `release/0.1.5`（`0.1.5-beta.5` 已交付，保留 `0.1.5-beta.4`） |
+| 候选分支 | `release/0.1.5`（`0.1.5-beta.6` 已交付，保留 `0.1.5-beta.5` 与 `0.1.5-beta.4`） |
 | 文档状态 | `In progress` |
 | 技术负责人 | `Codex` |
-| 最后更新 | `2026-09-17` |
+| 最后更新 | `2026-09-19` |
 
 ## 执行索引
 
 | 条目 ID | 评审结论 | 实现负责人 | 状态 | 主要交付物 | 验证状态 |
 |---|---|---|---|---|---|
 | [`BUG-0.1.5-002`](#bug-0-1-5-002) | `Accepted` | `Codex` | `Done / beta.5 delivered` | 共享自然排序、目录/搜索/补全接入及回归测试；beta.5 EXE、NSIS 与实机证据 | `130 frontend + 166 Rust (1 ignored) + 109 Edge; quality gates, native sorting/search/completion and artifact hashes verified` |
-| [`BUG-0.1.5-003`](#bug-0-1-5-003) | `Accepted` | `Codex` | `Planned / beta.6` | 较小项目列表布局、单击音效去重、空间返回入口 | `Pending` |
+| [`BUG-0.1.5-003`](#bug-0-1-5-003) | `Accepted` | `Codex` | `Done / beta.6 delivered` | 较小项目列表布局、单击音效去重、空间返回入口；beta.6 EXE、NSIS、哈希和运行时截图 | `130 frontend + 166 Rust (1 ignored) + 112 Edge; quality gates and targeted smaller-items checks passed` |
 | `REQ-0.1.5-007` | `Accepted` | `Codex` | `Done / beta.4 delivered` | 统一地址导航、空间及共享预览、完整瀑布列；beta.4 候选 | `130 frontend + 109 Edge; quality gates and native EXE navigation/preview passed` |
 | `REQ-0.1.5-006` | `Accepted` | `Codex` | `Done / beta.4 delivered` | 空间视图父目录/历史快捷键与焦点隔离；beta.4 候选 | `17 space Edge + native Backspace/Alt navigation passed` |
 | `REQ-0.1.5-001` | `Accepted` | `Codex` | `Done` | V0.1.5 分支基线、旧分支归档标签、历史索引 | `Passed` |
@@ -538,13 +538,13 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 ## `BUG-0.1.5-003` - 空间视图较小项目列表交互与布局问题
 
 - 原始输入：[01-original-input.md](01-original-input.md#bug-0-1-5-003)；评审：[02-review.md](02-review.md#bug-0-1-5-003)，`Accepted`。
-- 状态：`Accepted / planned`，目标 `0.1.5-beta.6`，记录日期 `2026-09-19`。
+- 状态：`Done / beta.6 delivered`，目标 `0.1.5-beta.6`，记录日期 `2026-09-19`。
 
 | 任务 ID | 实现与主要位置 | 状态 |
 |---|---|---|
-| `BUG-0.1.5-003-T01` | `SpaceSniffer.css` 调整 group-list 选中条内边距、名称弹性列、容量列留白和窄/宽详情栏布局 | `Planned` |
-| `BUG-0.1.5-003-T02` | `SpaceSniffer.tsx` 收敛列表选择音效触发，保留键盘选择语义并新增返回地图/上一级入口 | `Planned` |
-| `BUG-0.1.5-003-T03` | Space E2E 与组件/样式回归：几何边界、单击音效计数、返回入口和既有预览/导航 | `Planned` |
+| `BUG-0.1.5-003-T01` | `SpaceSniffer.css` 调整 group-list 选中条内边距、名称弹性列、容量列留白和窄/宽详情栏布局 | `Verified` |
+| `BUG-0.1.5-003-T02` | `SpaceSniffer.tsx` 收敛列表选择音效触发，保留键盘选择语义并新增返回地图/上一级入口 | `Verified` |
+| `BUG-0.1.5-003-T03` | Space E2E 与组件/样式回归：几何边界、单击音效计数、返回入口和既有预览/导航 | `Done; targeted and full Edge passed` |
 
 ### 设计与回滚
 
@@ -552,3 +552,34 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 - 返回按钮放在较小项目详情标题/列表区域，返回时关闭预览和右键菜单并恢复地图焦点；若存在导航历史则沿现有 Space back/up 语义处理，不新增扫描或改变根路径。
 - 选择音效仅由列表选择回调或统一选择事件发出一次；全局 pointerdown 对带选择标记的行不再重复触发 action，其他页面和键盘音效保持现状。
 - 回滚为普通反向提交；不修改扫描数据、文件名、文件操作或 MFT/USN 提供方。
+
+
+<a id="beta6-delivery-evidence"></a>
+
+### beta.6 验证与交付证据（BUG-0.1.5-003，2026-09-19）
+
+| 项目 | 结果与交付证据 |
+|---|---|
+| 前端门禁 | `npm run lint`、130 项前端测试、`npm run build` 通过 |
+| Rust 门禁 | `cargo fmt --all -- --check`、166 项 workspace 测试（1 项需要管理员真实 NTFS 环境的测试 ignored）、`cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` 通过 |
+| Edge 回归 | 完整 Edge 112/112 通过；较小项目专项 6/6 通过，覆盖音效去重、成员详情返回、聚合 Enter 和 180/248/460px 详情栏布局 |
+| 实现提交 | `feat/0.1.5` / `861008743f0fc9cc0bc66159d6bc3ccf4cb7555c` |
+| 发布候选源 | `release/0.1.5` / `17ccd388271289a92244ed971e951b9c1c0f4f4e` |
+| 版本 / 交付目录 | `0.1.5-beta.6` / `D:\Muller\release\0.1.5-beta.6` |
+| 构建 | `npm run tauri -- build --bundles nsis` 通过；普通权限便携 EXE 与 NSIS 安装包均生成，未执行安装 |
+| 运行时证据 | `space-smaller-items-beta6.png`：空间视图成员详情、返回按钮和 Platinum 布局的 beta.6 前端运行时截图；该截图由同一提交的 Playwright 运行时生成，不冒充已安装包截图 |
+| 可追溯文件 | `manifest.json`、`SHA256SUMS.txt`、`README.zh-CN.txt` 与产物同目录；`master` 未更新，beta.5 及更早交付保留 |
+
+### 最终产物与实机证据
+
+| 产物 | 字节数 | SHA256 |
+|---|---:|---|
+| `Muller-0.1.5-beta.6-x64.exe` | 11,250,688 | `21b4546d1f57449a994487feffdab4d31167711770247d0302c38fe043a6c0b6` |
+| `Muller-0.1.5-beta.6-x64-setup.exe` | 4,885,991 | `cece8394ee57fad3aeabc5c4ab532aebd0b8ff07ae1c972a7e0a34b0c53ca92e` |
+
+截图和校验文件保存在 `D:\Muller\release\0.1.5-beta.6`。构建来源固定为上述 release 提交；后续文档同步不改变二进制哈希。
+
+### 发布与回滚
+
+- beta.6 只提升到 `release/0.1.5`，不向 `master` 晋级；保留 beta.5 作为回滚候选。
+- 若发现回归，先在 `feat/0.1.5` 通过普通反向提交修复，再按 `req → feat → release` 同步；不修改用户文件或系统 USN 日志。
