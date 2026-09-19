@@ -320,7 +320,16 @@ test("real Channel batches repaint the map before Done and stopping retains the 
   await region.getByRole("button", { name: "Stop", exact: true }).click();
   await expect(region.getByRole("status")).toHaveText("Scan stopped");
   await expect(canvas).toHaveAttribute("data-animation-state", "settled");
-  const stopped = await canvas.screenshot();
+  let stopped = await canvas.screenshot();
+  // Stop changes the toolbar and may deliver a final ResizeObserver repaint.
+  // Capture stable pixels before checking that late scanner events are ignored.
+  await expect.poll(async () => {
+    await expect(canvas).toHaveAttribute("data-animation-state", "settled");
+    const current = await canvas.screenshot();
+    const stable = current.equals(stopped);
+    stopped = current;
+    return stable;
+  }).toBe(true);
   await publishSpaceBatch(page, 0, [8_000_000, 2_000_000], true);
   await expect(canvas).toHaveAttribute("data-area-bytes", "1600000");
   await expect(canvas).toHaveAttribute("data-visible-count", "2");
@@ -380,18 +389,27 @@ test("space tiles support keyboard neighbor selection and a context menu", async
   await viewport.click({ position: { x: 100, y: 100 } }); await expect(region.getByRole("heading", { level: 2 })).toBeVisible();
   await viewport.press("ArrowRight");
   const box = await viewport.boundingBox(); expect(box).not.toBeNull();
-  await viewport.dispatchEvent("contextmenu", { bubbles: true, clientX: box!.x + box!.width - 20, clientY: box!.y + box!.height / 2, button: 2 });
+  await viewport.click({ button: "right", position: { x: box!.width - 20, y: box!.height / 2 } });
   const menu = region.getByRole("menu");
   await expect(menu).toBeVisible();
   await expect(menu.getByRole("menuitem").first()).toBeVisible();
-  const menuBox = await menu.boundingBox();
-  const viewportBox = await viewport.boundingBox();
-  expect(menuBox).not.toBeNull();
-  expect(viewportBox).not.toBeNull();
-  expect(menuBox!.x).toBeGreaterThanOrEqual(viewportBox!.x);
-  expect(menuBox!.y).toBeGreaterThanOrEqual(viewportBox!.y);
-  expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(viewportBox!.x + viewportBox!.width);
-  expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(viewportBox!.y + viewportBox!.height);
+  const expectInsideMap = async () => {
+    // Read both rectangles in one layout snapshot; resize delivery is asynchronous.
+    await expect.poll(() => menu.evaluate((element) => {
+      const own = element.getBoundingClientRect();
+      const map = element.closest(".space-sniffer__viewport")!.getBoundingClientRect();
+      return Math.min(own.left - map.left, own.top - map.top, map.right - own.right, map.bottom - own.bottom);
+    })).toBeGreaterThanOrEqual(7.5);
+  };
+  await expectInsideMap();
+  await page.setViewportSize({ width: 1100, height: 640 });
+  await expectInsideMap();
+  await region.getByRole("separator").press("ArrowLeft");
+  await expectInsideMap();
+  await menu.getByRole("menuitem").first().press("End");
+  await expect(menu.getByRole("menuitem", { name: "Properties", exact: true })).toBeInViewport();
+  expect(await viewport.evaluate((element) => [element.scrollLeft, element.scrollTop])).toEqual([0, 0]);
+  await region.screenshot({ path: test.info().outputPath("space-context-menu-resized.png") });
   await viewport.press("Escape"); await expect(region.getByRole("menu")).not.toBeVisible();
 });
 

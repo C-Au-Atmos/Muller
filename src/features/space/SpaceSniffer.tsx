@@ -228,19 +228,29 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, operation
     const menu = contextMenuRef.current;
     const viewport = viewportRef.current;
     if (!menu || !viewport || !contextMenu) return;
-    const menuBounds = menu.getBoundingClientRect();
-    const viewportBounds = viewport.getBoundingClientRect();
-    const inset = 8;
-    const maxX = Math.max(inset, viewportBounds.width - menuBounds.width - inset);
-    const maxY = Math.max(inset, viewportBounds.height - menuBounds.height - inset);
-    const x = Math.min(Math.max(contextMenu.x, inset), maxX);
-    const y = Math.min(Math.max(contextMenu.y, inset), maxY);
-    if (Math.abs(x - contextMenu.x) >= 0.5 || Math.abs(y - contextMenu.y) >= 0.5) {
-      setContextMenu((current) => current ? { ...current, x, y } : current);
-    }
-    const firstItem = menu.querySelector<HTMLButtonElement>('[role="menuitem"]');
+    const positionMenu = () => {
+      const inset = 8;
+      // ResizeObserver runs before paint. Apply the bounds in the same callback
+      // instead of waiting for the canvas resize and a second React state update.
+      const width = viewport.clientWidth;
+      const height = viewport.clientHeight;
+      menu.style.maxWidth = `${Math.max(0, Math.min(320, width - inset * 2))}px`;
+      menu.style.maxHeight = `${Math.max(0, height - inset * 2)}px`;
+      const maxX = Math.max(inset, width - menu.offsetWidth - inset);
+      const maxY = Math.max(inset, height - menu.offsetHeight - inset);
+      const x = Number.isFinite(contextMenu.x) ? contextMenu.x : inset;
+      const y = Number.isFinite(contextMenu.y) ? contextMenu.y : inset;
+      menu.style.left = `${Math.min(Math.max(x, inset), maxX)}px`;
+      menu.style.top = `${Math.min(Math.max(y, inset), maxY)}px`;
+    };
+    positionMenu();
+    const observer = new ResizeObserver(positionMenu);
+    observer.observe(viewport);
+    observer.observe(menu);
+    const firstItem = menu.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)');
     if (firstItem && !menu.contains(document.activeElement)) firstItem.focus({ preventScroll: true });
-  }, [contextMenu, size.height, size.width]);
+    return () => observer.disconnect();
+  }, [contextMenu]);
   useEffect(() => {
     const handleMove = (event: PointerEvent) => {
       const resize = resizeRef.current; const body = bodyRef.current;
@@ -368,10 +378,10 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, operation
     generationRef.current += 1; drillRef.current?.controller.abort(); drillRef.current = null; onCancelScan?.();
     setLocalProgress({ ...activeProgress, phase: "idle", scanned: activeProgress?.scanned ?? 0, total: activeProgress?.total ?? null });
   };
-  const localPoint = (event: { currentTarget: HTMLDivElement; clientX: number; clientY: number }): Point => { const bounds = event.currentTarget.getBoundingClientRect(); return { x: event.clientX - bounds.left, y: event.clientY - bounds.top }; };
+  const localPoint = (event: { currentTarget: HTMLDivElement; clientX: number; clientY: number }): Point => { const bounds = event.currentTarget.getBoundingClientRect(); return { x: Number.isFinite(event.clientX) ? event.clientX - bounds.left : 8, y: Number.isFinite(event.clientY) ? event.clientY - bounds.top : 8 }; };
   const contextPoint = (event: { clientX: number; clientY: number }): Point => {
     const bounds = viewportRef.current?.getBoundingClientRect();
-    return bounds ? { x: event.clientX - bounds.left, y: event.clientY - bounds.top } : { x: 8, y: 8 };
+    return bounds ? { x: Number.isFinite(event.clientX) ? event.clientX - bounds.left : 8, y: Number.isFinite(event.clientY) ? event.clientY - bounds.top : 8 } : { x: 8, y: 8 };
   };
   const hitTest = (point: Point) => displayedRectsRef.current.find((rect) => point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height);
   const runContextAction = useCallback((action: SpaceContextAction, node: SpaceNode | null = contextMenu?.node ?? null) => {
