@@ -87,6 +87,8 @@ export interface SpaceSnifferProps {
   showBreadcrumbs?: boolean;
   mediaAutoplay?: boolean;
   onMediaAutoplayChange?: (enabled: boolean) => void;
+  /** Number of largest folders that receive a read-only two-level thumbnail. */
+  previewCount?: 1 | 2 | 3;
   root: SpaceNode;
   /** Distinguishes a new host navigation/refresh from streamed updates at the same path. */
   rootRequestId?: number;

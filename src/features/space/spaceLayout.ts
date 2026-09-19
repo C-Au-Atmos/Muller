@@ -75,6 +75,77 @@ export const spaceNodeBytes = (node: SpaceNode): number => {
   return Number.isFinite(value) && value > 0 ? value : 0;
 };
 
+/**
+ * The space map can show a small, read-only content thumbnail for the
+ * largest folders in the current directory. Keep the selection deterministic
+ * so a scan update does not make the thumbnail jump between equally sized
+ * folders.
+ */
+export function selectLargestSpaceFolders(nodes: readonly SpaceNode[], count: number): SpaceNode[] {
+  const limit = Math.min(3, Math.max(1, Math.round(count) || 1));
+  return nodes
+    .filter((node) => node.kind === "folder" && spaceNodeBytes(node) > 0)
+    .slice()
+    .sort((left, right) => spaceNodeBytes(right) - spaceNodeBytes(left) || left.id.localeCompare(right.id))
+    .slice(0, limit);
+}
+
+export interface SpacePreviewRect extends SpaceRect {
+  /** Depth 1 is a direct child of the previewed folder; depth 2 is its child. */
+  depth: 1 | 2;
+}
+
+/**
+ * Build the nested rectangles used by a thumbnail. This is intentionally
+ * separate from the interactive map layout: callers can render these blocks
+ * without adding them to hit testing or keyboard navigation. Each folder is
+ * limited to a bounded number of visible children so a huge directory cannot
+ * turn a paint into a second full treemap pass.
+ */
+export function buildSpacePreviewLayout(
+  root: SpaceNode,
+  width: number,
+  height: number,
+  maxDepth: 2,
+  maxChildren = 24,
+): SpacePreviewRect[] {
+  if (width <= 0 || height <= 0 || maxDepth < 1) return [];
+  const result: SpacePreviewRect[] = [];
+  const boundedChildren = Math.max(4, Math.min(48, Math.round(maxChildren) || 24));
+  const previewNodes = (parent: SpaceNode): SpaceNode[] => {
+    const children = (parent.children ?? [])
+      .filter((node) => spaceNodeBytes(node) > 0)
+      .slice()
+      .sort((left, right) => spaceNodeBytes(right) - spaceNodeBytes(left) || left.id.localeCompare(right.id));
+    if (children.length <= boundedChildren) return children;
+    const kept = children.slice(0, boundedChildren - 1);
+    const remainder = children.slice(boundedChildren - 1);
+    kept.push({
+      id: `\u0000space-preview-other:${parent.id}`,
+      name: "Other items",
+      path: "",
+      kind: "file",
+      bytes: remainder.reduce((sum, node) => sum + spaceNodeBytes(node), 0),
+    });
+    return kept;
+  };
+  const visit = (parent: SpaceNode, x: number, y: number, areaWidth: number, areaHeight: number, depth: 1 | 2) => {
+    const children = previewNodes(parent);
+    if (!children.length) return;
+    const laidOut = layoutNodes(children, areaWidth, areaHeight);
+    for (const rect of laidOut) {
+      const absolute: SpacePreviewRect = { ...rect, x: x + rect.x, y: y + rect.y, depth };
+      result.push(absolute);
+      if (depth < maxDepth && rect.node.kind === "folder" && rect.node.children?.length) {
+        const inset = 2;
+        visit(rect.node, absolute.x + inset, absolute.y + inset, Math.max(0, absolute.width - inset * 2), Math.max(0, absolute.height - inset * 2), 2);
+      }
+    }
+  };
+  visit(root, 0, 0, width, height, 1);
+  return result;
+}
+
 /** Squarify against the remaining viewport's short edge. Sorting is O(n log n),
  * and each item is considered and placed at most twice after sorting. */
 export function layoutNodes(nodes: readonly SpaceNode[], width: number, height: number): SpaceRect[] {

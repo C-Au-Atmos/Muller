@@ -9,6 +9,7 @@ export type AppDensity = "compact" | "standard";
 export type SidebarMode = "option" | "line" | "classic";
 export type MotionPreference = "system" | "full" | "reduced";
 export type CursorEffect = "system" | "target";
+export type SpacePreviewCount = 1 | 2 | 3;
 export type CloseBehavior = "hide" | "quit";
 
 export interface AppPreferencesV1 {
@@ -27,6 +28,8 @@ export interface AppPreferencesV1 {
   hoverDelayMs: number;
   motion: MotionPreference;
   cursorEffect: CursorEffect;
+  /** Number of largest folders with a non-interactive two-level preview. */
+  spacePreviewCount: SpacePreviewCount;
   closeBehavior: CloseBehavior;
   /** Cached UI value only; Windows registration is the source of truth. */
   autostartEnabled: boolean;
@@ -48,6 +51,7 @@ export const DEFAULT_PREFERENCES: AppPreferencesV1 = {
   hoverDelayMs: 40,
   motion: "system",
   cursorEffect: "system",
+  spacePreviewCount: 1,
   closeBehavior: "hide",
   autostartEnabled: false,
 };
@@ -58,6 +62,11 @@ function clamp(value: number, minimum: number, maximum: number): number {
 
 function member<T extends string>(value: unknown, values: readonly T[], fallback: T): T {
   return values.includes(value as T) ? value as T : fallback;
+}
+
+function spacePreviewCount(value: unknown): SpacePreviewCount {
+  const parsed = Math.round(Number(value));
+  return parsed === 2 || parsed === 3 ? parsed : 1;
 }
 
 export function parsePreferences(serialized: string | null, legacyWorkspace?: string | null): AppPreferencesV1 {
@@ -99,6 +108,7 @@ export function parsePreferences(serialized: string | null, legacyWorkspace?: st
     hoverDelayMs: clamp(Number(raw.hoverDelayMs ?? 40) || 0, 0, 300),
     motion: member(raw.motion, ["system", "full", "reduced"], "system"),
     cursorEffect: member(raw.cursorEffect, ["system", "target"], "system"),
+    spacePreviewCount: spacePreviewCount(raw.spacePreviewCount),
     closeBehavior: member(raw.closeBehavior, ["hide", "quit"], "hide"),
     autostartEnabled: typeof raw.autostartEnabled === "boolean" ? raw.autostartEnabled : false,
   };

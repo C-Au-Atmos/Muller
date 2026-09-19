@@ -49,6 +49,14 @@ describe("Stage 7.10 preferences", () => {
     expect(parsePreferences(JSON.stringify({ cursorEffect: "invalid" })).cursorEffect).toBe("system");
   });
 
+  it("persists and clamps the largest-folder space preview count", () => {
+    expect(parsePreferences(null).spacePreviewCount).toBe(1);
+    expect(parsePreferences(JSON.stringify({ spacePreviewCount: 2 })).spacePreviewCount).toBe(2);
+    expect(parsePreferences(JSON.stringify({ spacePreviewCount: 3 })).spacePreviewCount).toBe(3);
+    expect(parsePreferences(JSON.stringify({ spacePreviewCount: 9 })).spacePreviewCount).toBe(1);
+    expect(parsePreferences(JSON.stringify({ spacePreviewCount: "2" })).spacePreviewCount).toBe(2);
+  });
+
   it("defaults and migrates desktop lifecycle preferences", () => {
     expect(parsePreferences(null).closeBehavior).toBe("hide");
     expect(parsePreferences(null).autostartEnabled).toBe(false);

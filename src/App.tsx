@@ -1965,6 +1965,7 @@ export function App({ initialPath }: AppProps) {
               showBreadcrumbs={false}
               mediaAutoplay={preferences.mediaAutoplay}
               onMediaAutoplayChange={(mediaAutoplay) => updatePreferences({ mediaAutoplay })}
+              previewCount={preferences.spacePreviewCount}
               root={spaceRoot}
               rootRequestId={spaceRootRequestId}
               progress={spaceProgress}

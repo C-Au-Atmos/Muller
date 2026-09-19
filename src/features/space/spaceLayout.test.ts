@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildSpaceMapLayout, findDirectionalSpaceRect, interpolateSpaceRects, layoutNodes, spaceNodeBytes, type SpaceRect } from "./spaceLayout";
+import { buildSpaceMapLayout, buildSpacePreviewLayout, findDirectionalSpaceRect, interpolateSpaceRects, layoutNodes, selectLargestSpaceFolders, spaceNodeBytes, type SpaceRect } from "./spaceLayout";
 
 const node = (id: string, bytes: number) => ({ id, name: id, path: id, kind: "folder" as const, bytes });
 const rect = (id: string, x: number, y: number, width: number, height: number): SpaceRect => ({ node: node(id, width * height), x, y, width, height });
@@ -104,6 +104,32 @@ describe("layoutNodes", () => {
       if (source) expect(rect.x).toBeCloseTo((source.x + target.x) / 2, 8);
     }
     expect(interpolateSpaceRects(previous, next, 1)).toEqual(next);
+  });
+
+  it("selects the largest folders deterministically and clamps the configured count", () => {
+    const folders = [
+      { ...node("z", 8), kind: "folder" as const },
+      { ...node("a", 8), kind: "folder" as const },
+      { ...node("file", 99), kind: "file" as const },
+      { ...node("small", 1), kind: "folder" as const },
+    ];
+    expect(selectLargestSpaceFolders(folders, 0).map((item) => item.id)).toEqual(["a"]);
+    expect(selectLargestSpaceFolders(folders, 3).map((item) => item.id)).toEqual(["a", "z", "small"]);
+    expect(selectLargestSpaceFolders(folders, 99)).toHaveLength(3);
+  });
+
+  it("builds a bounded two-level thumbnail without changing interactive layout", () => {
+    const root = {
+      ...node("root", 100),
+      children: [
+        { ...node("folder-a", 70), children: [node("a-file", 40), { ...node("a-folder", 30), children: [node("a-deep", 30)] }] },
+        node("root-file", 30),
+      ],
+    };
+    const preview = buildSpacePreviewLayout(root.children![0]!, 200, 100, 2);
+    expect(preview.filter((rect) => rect.depth === 1).map((rect) => rect.node.id)).toEqual(["a-file", "a-folder"]);
+    expect(preview.filter((rect) => rect.depth === 2).map((rect) => rect.node.id)).toContain("a-deep");
+    expect(preview.every((rect) => rect.x >= 0 && rect.y >= 0 && rect.x + rect.width <= 200 && rect.y + rect.height <= 100)).toBe(true);
   });
 });
 
