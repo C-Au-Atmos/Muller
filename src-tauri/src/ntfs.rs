@@ -71,7 +71,7 @@ struct PersistedVolume {
 struct PersistedNode {
     id: u64,
     parent: u64,
-    name: String,
+    name: Vec<u16>,
     attributes: u32,
     usn: i64,
 }
@@ -151,7 +151,7 @@ impl NativeVolume {
             {
                 return Err("invalid NTFS snapshot node graph".into());
             }
-            let name = OsString::from(node.name);
+            let name = os_name(&node.name);
             let folded_name = name.to_string_lossy().to_lowercase();
             nodes.insert(
                 node.id,
@@ -198,7 +198,7 @@ impl NativeVolume {
                 .map(|(id, node)| PersistedNode {
                     id: *id,
                     parent: node.parent,
-                    name: node.name.to_string_lossy().into_owned(),
+                    name: os_name_units(&node.name),
                     attributes: node.attributes,
                     usn: node.usn,
                 })
@@ -353,6 +353,18 @@ fn os_name(name: &[u16]) -> OsString {
     #[cfg(not(windows))]
     {
         OsString::from(String::from_utf16_lossy(name))
+    }
+}
+
+fn os_name_units(name: &OsString) -> Vec<u16> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        name.encode_wide().collect()
+    }
+    #[cfg(not(windows))]
+    {
+        name.to_string_lossy().encode_utf16().collect()
     }
 }
 
@@ -895,14 +907,14 @@ mod tests {
                 PersistedNode {
                     id: 10,
                     parent: 5,
-                    name: "a".into(),
+                    name: "a".encode_utf16().collect(),
                     attributes: 0,
                     usn: 1,
                 },
                 PersistedNode {
                     id: 10,
                     parent: 5,
-                    name: "b".into(),
+                    name: "b".encode_utf16().collect(),
                     attributes: 0,
                     usn: 2,
                 },
