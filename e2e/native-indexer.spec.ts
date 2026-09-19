@@ -93,7 +93,8 @@ test("fast index starts only on demand and reports real provider and readiness",
   await expect(panel).toContainText("123,456");
   await panel.getByText("Index details", { exact: true }).click();
   await expect(panel).toContainText("ntfs-mft-usn");
-  await expect(panel).toContainText("Space map still scans file sizes separately");
+  await expect(panel).toContainText("validates saved space previews");
+  await expect(panel).toContainText("sizes are verified by a full scan");
   await expect(panel).toContainText("Additional hard-link names are not yet covered");
   expect(await page.evaluate(() => (globalThis as typeof globalThis & { __mullerNativeIndex: NativeMockState }).__mullerNativeIndex.enabledRoots)).toEqual([["D:\\"]]);
   await page.keyboard.press("Escape");
