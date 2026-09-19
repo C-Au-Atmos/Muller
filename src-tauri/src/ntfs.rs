@@ -2,11 +2,14 @@
 //! record; USN replay maintains the parent graph without restating every file.
 //! Hard-link aliases and directory byte totals require separate enumeration.
 
+#[cfg(test)]
+use std::time::Duration;
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     ffi::OsString,
     fs,
     path::{Path, PathBuf},
+    time::Instant,
 };
 
 use muller_core::CancellationToken;
@@ -64,6 +67,7 @@ struct PersistedVolume {
     serial: u32,
     journal_id: u64,
     next_usn: i64,
+    checksum: u64,
     nodes: Vec<PersistedNode>,
 }
 
@@ -130,11 +134,20 @@ impl NativeVolume {
     /// oversized file is rejected so the caller can perform a clean rebuild.
     pub fn load_persisted(path: &Path, cancel: &CancellationToken) -> Result<Self, String> {
         check_cancel(cancel)?;
-        let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
+        reject_reparse_path(path)?;
+        let file = fs::File::open(path).map_err(|error| error.to_string())?;
+        let metadata = file.metadata().map_err(|error| error.to_string())?;
         if metadata.len() > MAX_SNAPSHOT_BYTES {
             return Err("NTFS snapshot exceeds the safety size limit".into());
         }
-        let bytes = fs::read(path).map_err(|error| error.to_string())?;
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        file.take(MAX_SNAPSHOT_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| error.to_string())?;
+        if bytes.len() as u64 > MAX_SNAPSHOT_BYTES {
+            return Err("NTFS snapshot exceeds the safety size limit".into());
+        }
         check_cancel(cancel)?;
         let persisted: PersistedVolume = serde_json::from_slice(&bytes)
             .map_err(|error| format!("invalid NTFS snapshot: {error}"))?;
@@ -144,10 +157,23 @@ impl NativeVolume {
         if persisted.nodes.len() > MAX_SNAPSHOT_NODES {
             return Err("NTFS snapshot contains too many records".into());
         }
+        if persisted.checksum != snapshot_checksum(&persisted) {
+            return Err("NTFS snapshot checksum mismatch".into());
+        }
+        let root_text = persisted.root.to_string_lossy();
+        if root_text.len() != 3
+            || !root_text.as_bytes()[0].is_ascii_alphabetic()
+            || &root_text.as_bytes()[1..] != b":\\"
+            || persisted.next_usn < 0
+        {
+            return Err("invalid NTFS snapshot volume identity".into());
+        }
         let mut nodes = BTreeMap::new();
         for node in persisted.nodes {
             check_cancel(cancel)?;
-            if node.id == persisted.root_id || node.name.is_empty() || nodes.contains_key(&node.id)
+            if node.id == persisted.root_id
+                || !valid_name(&node.name)
+                || nodes.contains_key(&node.id)
             {
                 return Err("invalid NTFS snapshot node graph".into());
             }
@@ -182,16 +208,17 @@ impl NativeVolume {
         if !self.valid {
             return Err("cannot persist an invalid NTFS index".into());
         }
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        if self.nodes.len() > MAX_SNAPSHOT_NODES {
+            return Err("NTFS snapshot contains too many records".into());
         }
-        let persisted = PersistedVolume {
+        let mut persisted = PersistedVolume {
             version: SNAPSHOT_VERSION,
             root: self.root.clone(),
             root_id: self.root_id,
             serial: self.serial,
             journal_id: self.journal_id,
             next_usn: self.next_usn,
+            checksum: 0,
             nodes: self
                 .nodes
                 .iter()
@@ -204,18 +231,12 @@ impl NativeVolume {
                 })
                 .collect(),
         };
+        persisted.checksum = snapshot_checksum(&persisted);
         let bytes = serde_json::to_vec(&persisted).map_err(|error| error.to_string())?;
         if bytes.len() as u64 > MAX_SNAPSHOT_BYTES {
             return Err("NTFS snapshot exceeds the safety size limit".into());
         }
-        let temporary = path.with_extension("json.tmp");
-        {
-            use std::io::Write;
-            let mut file = fs::File::create(&temporary).map_err(|error| error.to_string())?;
-            file.write_all(&bytes).map_err(|error| error.to_string())?;
-            file.sync_all().map_err(|error| error.to_string())?;
-        }
-        fs::rename(&temporary, path).map_err(|error| error.to_string())
+        atomic_snapshot_write(path, &bytes)
     }
 
     pub fn root(&self) -> &Path {
@@ -224,6 +245,139 @@ impl NativeVolume {
 
     pub fn len(&self) -> usize {
         self.nodes.len()
+    }
+
+    pub fn watermark(&self) -> i64 {
+        self.next_usn
+    }
+
+    /// Cache validation must not wait while a busy journal catches up. The
+    /// background refresh owns replay; a lagging watermark simply skips the
+    /// optional space preview for this request.
+    pub fn validate_current(&self, cancel: &CancellationToken) -> Result<(), String> {
+        check_cancel(cancel)?;
+        if !self.valid {
+            return Err("NTFS index is not ready".into());
+        }
+        #[cfg(windows)]
+        {
+            platform::validate_current(self)
+        }
+        #[cfg(not(windows))]
+        {
+            Err("NTFS indexing requires Windows".into())
+        }
+    }
+
+    /// A watermark for a previously measured subtree, not a source of sizes.
+    /// Consumers still verify cached totals with ordinary-privilege traversal.
+    #[cfg(test)]
+    pub fn space_stamp(&self, root: &Path, cancel: &CancellationToken) -> Result<String, String> {
+        self.space_stamp_until(root, cancel, Instant::now() + Duration::from_millis(180))
+    }
+
+    pub fn space_stamp_until(
+        &self,
+        root: &Path,
+        cancel: &CancellationToken,
+        deadline: Instant,
+    ) -> Result<String, String> {
+        use std::hash::{Hash, Hasher};
+        let check = || -> Result<(), String> {
+            check_cancel(cancel)?;
+            if Instant::now() >= deadline {
+                Err("space cache validation budget exceeded".into())
+            } else {
+                Ok(())
+            }
+        };
+        check()?;
+        if !self.valid {
+            return Err("NTFS index is not ready".into());
+        }
+        let scope = folded_path(root);
+        let volume = folded_path(&self.root);
+        if scope != volume && !path_is_within(&scope, &volume) {
+            return Err("space root is outside the indexed volume".into());
+        }
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        (self.serial, self.journal_id, self.root_id, &scope).hash(&mut hash);
+
+        // Match the requested directory by its final component first; only
+        // matching candidates walk their parent chain. No full-volume path
+        // allocation is needed, even for deeply nested files.
+        let components: Vec<_> = scope[volume.len()..]
+            .split('\\')
+            .filter(|part| !part.is_empty())
+            .collect();
+        let mut scope_id = (scope == volume).then_some(self.root_id);
+        let mut ancestors = HashSet::new();
+        if let Some(last) = components.last() {
+            for (&id, node) in &self.nodes {
+                check()?;
+                if node.folded_name != *last || node.attributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
+                    continue;
+                }
+                let mut current = id;
+                let mut chain = Vec::with_capacity(components.len());
+                for name in components.iter().rev() {
+                    check()?;
+                    let Some(part) = self.nodes.get(&current) else {
+                        break;
+                    };
+                    if part.folded_name != *name
+                        || part.attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+                        || part.attributes & FILE_ATTRIBUTE_DIRECTORY == 0
+                    {
+                        break;
+                    }
+                    chain.push(current);
+                    current = part.parent;
+                }
+                if chain.len() == components.len() && current == self.root_id {
+                    ancestors.extend(chain);
+                    scope_id = Some(id);
+                    break;
+                }
+            }
+        }
+        let scope_id = scope_id.ok_or("space root is absent from the native index")?;
+        let mut membership = HashMap::<u64, bool>::new();
+        membership.insert(self.root_id, scope_id == self.root_id);
+        membership.insert(scope_id, true);
+        let mut chain = Vec::new();
+        for (&id, node) in &self.nodes {
+            check()?;
+            let mut current = node.parent;
+            chain.clear();
+            let within = loop {
+                check()?;
+                if let Some(within) = membership.get(&current) {
+                    break *within;
+                }
+                // Mark before walking to bound malformed cycles. Every
+                // directory is resolved once, shared by all its children.
+                membership.insert(current, false);
+                let Some(parent) = self.nodes.get(&current) else {
+                    break false;
+                };
+                if parent.attributes & FILE_ATTRIBUTE_DIRECTORY == 0
+                    || parent.attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+                {
+                    break false;
+                }
+                chain.push(current);
+                current = parent.parent;
+            };
+            for directory in &chain {
+                membership.insert(*directory, within);
+            }
+            if within || id == scope_id || ancestors.contains(&id) {
+                (id, node.parent, node.usn, node.attributes, &node.name).hash(&mut hash);
+            }
+        }
+        check()?;
+        Ok(format!("space-v2-{:016x}", hash.finish()))
     }
 
     /// Filename matching uses the cached folded name; paths are reconstructed
@@ -321,6 +475,7 @@ impl NativeVolume {
             node.parent != record.parent
                 || node.name != name
                 || node.attributes != record.attributes
+                || node.usn != record.usn
         });
         self.nodes.insert(
             record.id,
@@ -334,6 +489,126 @@ impl NativeVolume {
         );
         changed
     }
+}
+
+/// Detect accidental snapshot corruption independently of JSON parsing. This
+/// checksum is not authentication; cache paths are constrained by the broker
+/// and restored state must still pass the live NTFS identity/journal checks.
+fn snapshot_checksum(snapshot: &PersistedVolume) -> u64 {
+    let mut checksum = 0xcbf29ce484222325_u64;
+    let mut update = |bytes: &[u8]| {
+        for byte in bytes {
+            checksum = (checksum ^ u64::from(*byte)).wrapping_mul(0x100000001b3);
+        }
+    };
+    update(&snapshot.version.to_le_bytes());
+    update(snapshot.root.to_string_lossy().as_bytes());
+    update(&snapshot.root_id.to_le_bytes());
+    update(&snapshot.serial.to_le_bytes());
+    update(&snapshot.journal_id.to_le_bytes());
+    update(&snapshot.next_usn.to_le_bytes());
+    for node in &snapshot.nodes {
+        update(&node.id.to_le_bytes());
+        update(&node.parent.to_le_bytes());
+        update(&node.attributes.to_le_bytes());
+        update(&node.usn.to_le_bytes());
+        update(&(node.name.len() as u64).to_le_bytes());
+        for unit in &node.name {
+            update(&unit.to_le_bytes());
+        }
+    }
+    checksum
+}
+
+pub(crate) fn reject_reparse_path(path: &Path) -> Result<(), String> {
+    if !path.is_absolute()
+        || path
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
+        return Err("native index cache requires an absolute path without parent traversal".into());
+    }
+    #[cfg(windows)]
+    {
+        use std::path::{Component, Prefix};
+        if !matches!(path.components().next(), Some(Component::Prefix(prefix))
+            if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_)))
+        {
+            return Err("native index cache requires a local drive path".into());
+        }
+    }
+    for ancestor in path.ancestors() {
+        match fs::symlink_metadata(ancestor) {
+            Ok(metadata) => {
+                #[cfg(windows)]
+                let reparse = {
+                    use std::os::windows::fs::MetadataExt;
+                    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+                };
+                #[cfg(not(windows))]
+                let reparse = metadata.file_type().is_symlink();
+                if reparse {
+                    return Err(
+                        "native index cache cannot use a reparse point or symbolic link".into(),
+                    );
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn atomic_snapshot_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    use std::{
+        io::Write,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+    static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+    reject_reparse_path(path)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    reject_reparse_path(path)?;
+    let temporary = path.with_extension(format!(
+        "json.{}.{}.tmp",
+        std::process::id(),
+        NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+    ));
+    // Never open/truncate an existing temporary path, even if another process
+    // deliberately pre-created a link at that name.
+    let mut created = false;
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|error| error.to_string())?;
+        created = true;
+        file.write_all(bytes).map_err(|error| error.to_string())?;
+        file.sync_all().map_err(|error| error.to_string())?;
+        drop(file);
+        reject_reparse_path(path)?;
+        // Rust implements Windows rename via MoveFileExW(REPLACE_EXISTING).
+        fs::rename(&temporary, path).map_err(|error| error.to_string())
+    })();
+    if created && result.is_err() {
+        // Only remove our regular temporary file. An attacker-controlled link
+        // is never followed, and every helper invocation uses the GUI token.
+        if reject_reparse_path(&temporary).is_ok() {
+            let _ = fs::remove_file(&temporary);
+        }
+    }
+    result
+}
+
+fn valid_name(name: &[u16]) -> bool {
+    !name.is_empty()
+        && name.len() <= 255
+        && name != [46]
+        && name != [46, 46]
+        && !name.iter().any(|unit| matches!(*unit, 0 | 47 | 58 | 92))
 }
 
 fn check_cancel(cancel: &CancellationToken) -> Result<(), String> {
@@ -703,6 +978,20 @@ mod platform {
         replay(volume, &handle, cancel)
     }
 
+    pub(super) fn validate_current(volume: &NativeVolume) -> Result<(), String> {
+        let (root_id, serial) = identity(&volume.root)?;
+        if root_id != volume.root_id || serial != volume.serial {
+            return Err("NTFS volume identity changed; index rebuild required".into());
+        }
+        let handle = open_volume(&volume.root)?;
+        let latest = journal(&handle)?;
+        validate_journal(latest, volume.journal_id, volume.next_usn)?;
+        if latest.next != volume.next_usn {
+            return Err("NTFS journal updates are pending; space cache validation skipped".into());
+        }
+        Ok(())
+    }
+
     fn replay(
         volume: &mut NativeVolume,
         handle: &Handle,
@@ -795,6 +1084,37 @@ mod tests {
             bytes[60 + i * 2..62 + i * 2].copy_from_slice(&unit.to_le_bytes());
         }
         bytes
+    }
+
+    #[test]
+    fn space_stamp_tracks_sizes_names_membership_and_volume_identity() {
+        let mut v = volume();
+        let mut folder = record(10, 5, "measured", 1, 0);
+        folder.attributes = FILE_ATTRIBUTE_DIRECTORY;
+        v.apply(folder, false);
+        v.apply(record(11, 10, "file.txt", 2, 0), false);
+        let token = CancellationToken::default();
+        let root = Path::new("C:\\measured");
+        let initial = v.space_stamp(root, &token).unwrap();
+        v.apply(record(30, 5, "unrelated.txt", 3, 0), true);
+        assert_eq!(initial, v.space_stamp(root, &token).unwrap());
+        v.apply(record(11, 10, "file.txt", 4, 1), true); // DATA_OVERWRITE
+        let resized = v.space_stamp(root, &token).unwrap();
+        assert_ne!(initial, resized);
+        v.apply(record(11, 10, "renamed.txt", 5, REASON_RENAME_NEW), true);
+        let renamed = v.space_stamp(root, &token).unwrap();
+        assert_ne!(resized, renamed);
+        v.apply(record(11, 10, "renamed.txt", 6, REASON_DELETE), true);
+        let deleted = v.space_stamp(root, &token).unwrap();
+        assert_ne!(renamed, deleted);
+        v.serial += 1;
+        assert_ne!(deleted, v.space_stamp(root, &token).unwrap());
+        assert!(v.space_stamp(Path::new("D:\\measured"), &token).is_err());
+        assert!(v.space_stamp(Path::new("C:\\absent"), &token).is_err());
+        token.cancel();
+        assert!(v.space_stamp(root, &token).is_err());
+        v.valid = false;
+        assert!(v.space_stamp(root, &CancellationToken::default()).is_err());
     }
 
     #[test]
@@ -893,16 +1213,102 @@ mod tests {
     }
 
     #[test]
+    fn deep_large_space_stamp_uses_shared_ancestry_and_honors_budget() {
+        let mut v = volume();
+        let mut root = v.root.clone();
+        let mut parent = v.root_id;
+        for depth in 0..600 {
+            let id = 100 + depth;
+            let name = format!("dir{depth}");
+            let mut directory = record(id, parent, &name, depth as i64, 0);
+            directory.attributes = FILE_ATTRIBUTE_DIRECTORY;
+            v.apply(directory, false);
+            root.push(name);
+            parent = id;
+        }
+        for index in 0..50_000 {
+            v.apply(
+                record(
+                    10_000 + index,
+                    parent,
+                    &format!("file{index}"),
+                    index as i64,
+                    0,
+                ),
+                false,
+            );
+        }
+        let cancel = CancellationToken::default();
+        let started = Instant::now();
+        let first = v
+            .space_stamp_until(&root, &cancel, started + Duration::from_secs(2))
+            .unwrap();
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(
+            v.space_stamp_until(&root, &cancel, Instant::now())
+                .unwrap_err()
+                .contains("budget")
+        );
+        cancel.cancel();
+        assert!(
+            v.space_stamp_until(&root, &cancel, Instant::now() + Duration::from_secs(2))
+                .unwrap_err()
+                .contains("cancelled")
+        );
+        v.apply(record(10_001, parent, "file1", 100_000, 0x1), true);
+        let second = v
+            .space_stamp_until(
+                &root,
+                &CancellationToken::default(),
+                Instant::now() + Duration::from_secs(2),
+            )
+            .unwrap();
+        assert_ne!(
+            first, second,
+            "USN-only data changes must invalidate the cache"
+        );
+    }
+
+    #[test]
+    fn space_stamp_excludes_reparse_descendants_and_bounds_parent_cycles() {
+        let mut v = volume();
+        let mut scope = record(10, 5, "scope", 1, 0);
+        scope.attributes = FILE_ATTRIBUTE_DIRECTORY;
+        v.apply(scope, false);
+        let mut junction = record(11, 10, "link", 2, 0);
+        junction.attributes = FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT;
+        v.apply(junction, false);
+        v.apply(record(12, 11, "linked.txt", 3, 0), false);
+        let mut cycle = record(20, 21, "cycle-a", 4, 0);
+        cycle.attributes = FILE_ATTRIBUTE_DIRECTORY;
+        v.apply(cycle, false);
+        let mut cycle = record(21, 20, "cycle-b", 5, 0);
+        cycle.attributes = FILE_ATTRIBUTE_DIRECTORY;
+        v.apply(cycle, false);
+        let root = Path::new(r"C:\scope");
+        let cancel = CancellationToken::default();
+        let first = v.space_stamp(root, &cancel).unwrap();
+        v.apply(record(12, 11, "linked.txt", 6, 0), true);
+        assert_eq!(first, v.space_stamp(root, &cancel).unwrap());
+        assert!(v.space_stamp(Path::new(r"C:\scope\link"), &cancel).is_err());
+        let mut changed = record(11, 10, "link", 7, 0);
+        changed.attributes = FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT;
+        v.apply(changed, true);
+        assert_ne!(first, v.space_stamp(root, &cancel).unwrap());
+    }
+
+    #[test]
     fn malformed_or_duplicate_persisted_nodes_are_rejected() {
         let output = tempfile::tempdir().unwrap();
         let path = output.path().join("bad.json");
-        let payload = PersistedVolume {
+        let mut payload = PersistedVolume {
             version: SNAPSHOT_VERSION,
             root: PathBuf::from("C:\\"),
             root_id: 5,
             serial: 1,
             journal_id: 7,
             next_usn: 100,
+            checksum: 0,
             nodes: vec![
                 PersistedNode {
                     id: 10,
@@ -920,8 +1326,101 @@ mod tests {
                 },
             ],
         };
+        payload.checksum = snapshot_checksum(&payload);
         fs::write(&path, serde_json::to_vec(&payload).unwrap()).unwrap();
         assert!(NativeVolume::load_persisted(&path, &CancellationToken::default()).is_err());
+    }
+
+    #[test]
+    fn snapshot_overwrites_atomically_and_detects_valid_json_corruption() {
+        let output = tempfile::tempdir().unwrap();
+        let path = output.path().join("C.json");
+        let mut original = volume();
+        original.apply(record(10, 5, "before.txt", 10, 0), false);
+        original.persist(&path).unwrap();
+        original.apply(record(10, 5, "after.txt", 11, REASON_RENAME_NEW), true);
+        original.next_usn = 101;
+        original.persist(&path).unwrap();
+        let restored = NativeVolume::load_persisted(&path, &CancellationToken::default()).unwrap();
+        assert_eq!(restored.nodes[&10].name, "after.txt");
+        assert_eq!(restored.watermark(), 101);
+        assert_eq!(fs::read_dir(output.path()).unwrap().count(), 1);
+
+        let mut bytes: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        bytes["next_usn"] = serde_json::json!(102);
+        fs::write(&path, serde_json::to_vec(&bytes).unwrap()).unwrap();
+        assert!(
+            NativeVolume::load_persisted(&path, &CancellationToken::default())
+                .unwrap_err()
+                .contains("checksum")
+        );
+    }
+
+    #[test]
+    fn snapshot_rejects_path_components_and_preserves_last_good_file_on_invalid_index() {
+        let output = tempfile::tempdir().unwrap();
+        let path = output.path().join("C.json");
+        let mut original = volume();
+        original.apply(record(10, 5, "safe.txt", 10, 0), false);
+        original.persist(&path).unwrap();
+        let before = fs::read(&path).unwrap();
+        original.valid = false;
+        assert!(original.persist(&path).is_err());
+        assert_eq!(fs::read(&path).unwrap(), before);
+        let mut payload: PersistedVolume = serde_json::from_slice(&before).unwrap();
+        for name in ["..", ".", "a\\b", "C:escape", "a/b", "bad\0name"] {
+            payload.nodes[0].name = name.encode_utf16().collect();
+            payload.checksum = snapshot_checksum(&payload);
+            fs::write(&path, serde_json::to_vec(&payload).unwrap()).unwrap();
+            assert!(
+                NativeVolume::load_persisted(&path, &CancellationToken::default()).is_err(),
+                "{name}"
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn snapshot_preserves_unpaired_utf16_filename_units() {
+        let output = tempfile::tempdir().unwrap();
+        let path = output.path().join("C.json");
+        let mut original = volume();
+        let mut item = record(10, 5, "x", 10, 0);
+        item.name = vec![0x0061, 0xd800, 0x0062];
+        original.apply(item, false);
+        original.persist(&path).unwrap();
+        let restored = NativeVolume::load_persisted(&path, &CancellationToken::default()).unwrap();
+        assert_eq!(
+            os_name_units(&restored.nodes[&10].name),
+            vec![0x0061, 0xd800, 0x0062]
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn cache_rejects_junctions_without_writing_to_their_target() {
+        let output = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        let junction = output.path().join("redirect");
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(target.path())
+            .output()
+            .unwrap();
+        assert!(
+            status.status.success(),
+            "{}",
+            String::from_utf8_lossy(&status.stderr)
+        );
+        assert!(volume().persist(&junction.join("C.json")).is_err());
+        assert!(
+            NativeVolume::load_persisted(&junction.join("C.json"), &CancellationToken::default())
+                .is_err()
+        );
+        assert_eq!(fs::read_dir(target.path()).unwrap().count(), 0);
+        fs::remove_dir(&junction).unwrap();
     }
 
     #[test]

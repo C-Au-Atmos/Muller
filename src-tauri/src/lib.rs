@@ -12,6 +12,7 @@ mod natural_sort;
 mod ntfs;
 mod preview;
 mod scan;
+mod space_cache;
 mod space_sniffer;
 mod startup_gate;
 mod thumbnail;
@@ -159,6 +160,14 @@ pub fn run() {
             }
 
             refresh_enabled_autostart_registration();
+            let indexer = app.state::<IndexerManager>().inner().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                match native_broker::restore_native_indexer() {
+                    Ok(true) => indexer.cancel_all(),
+                    Ok(false) => {}
+                    Err(error) => log::warn!(target: "muller::indexer", "event=native.restore_failed error={error}"),
+                }
+            });
             let show_item =
                 MenuItem::with_id(app, "show", "Show Muller", true, Some("Ctrl+Shift+Space"))?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit Muller", true, None::<&str>)?;

@@ -154,9 +154,59 @@ fn probe_fixture(fixture: &Path, marker: &str) -> Result<Value, String> {
         },
         Duration::from_secs(20),
     )?;
+    // Tear down the worker, mutate while it is stopped, and require the next
+    // worker to load its disk snapshot before replaying the offline changes.
+    native_broker::cancel_native_indexer()?;
+    let offline = fixture.join(format!("{marker}_offline.txt"));
+    fs::write(&offline, b"created while index was stopped").map_err(|e| e.to_string())?;
+    fs::rename(fixture.join("parent_after"), fixture.join("parent_offline"))
+        .map_err(|e| e.to_string())?;
+    let restarted = Instant::now();
+    native_broker::launch_native_indexer(roots.clone())?;
+    wait_for(
+        || {
+            let status = native_broker::native_status();
+            match status.state.as_str() {
+                "ready" => Ok(true),
+                "error" | "degraded" => Err(status
+                    .message
+                    .unwrap_or_else(|| "snapshot restore unavailable".into())),
+                _ => Ok(false),
+            }
+        },
+        Duration::from_secs(180),
+    )?;
+    let restored = native_broker::native_status();
+    if !restored
+        .message
+        .as_deref()
+        .is_some_and(|message| message.contains("Restored 1"))
+    {
+        return Err(format!(
+            "worker restarted without a saved snapshot: {:?}",
+            restored.message
+        ));
+    }
+    let page = native_broker::search_native_index(&roots, marker, 0, 100)?;
+    if !page
+        .hits
+        .iter()
+        .any(|hit| hit.name.ends_with("_offline.txt"))
+        || !page.hits.iter().any(|hit| {
+            hit.name.ends_with("_nested.txt")
+                && hit.path.to_string_lossy().contains("parent_offline")
+        })
+        || page
+            .hits
+            .iter()
+            .any(|hit| hit.name.ends_with("_before.txt") || hit.name.ends_with("_after.txt"))
+    {
+        return Err("restored snapshot missed offline USN mutations".into());
+    }
     Ok(
         json!({"passed": true, "provider": status.provider, "entries":status.entries, "volumes":status.volumes,
         "buildIncludingElevationMs":build_ms,"initialQueryMs":query_ms,"mutationChecksMs":mutations.elapsed().as_millis(),
-        "checks":["MFT pre-existing file", "USN file rename", "USN create", "USN parent rename changes descendant path", "USN delete"]}),
+        "snapshotRestoreMs":restarted.elapsed().as_millis(),"restoredStatus":restored.message,
+        "checks":["MFT pre-existing file", "USN file rename", "USN create", "USN parent rename changes descendant path", "USN delete", "disk snapshot reload", "offline create/parent rename/delete convergence"]}),
     )
 }

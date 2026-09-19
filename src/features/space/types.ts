@@ -28,6 +28,8 @@ export interface SpaceScanProgress {
   directories?: number;
   skipped?: number;
   message?: string;
+  /** The visible tree is a previous complete scan while a fresh tree is verified. */
+  cachePreview?: boolean;
 }
 
 export type SpaceScanProgressCallback = (root: SpaceNode, progress: SpaceScanProgress) => void;
@@ -63,10 +65,10 @@ export type SpaceContextAction =
   | "refresh"
   | "new-folder"
   | "new-text-document"
-  | "new-empty-file"
-  | "custom-organize";
+  | "new-empty-file";
 
 export interface SpaceSnifferHandle {
+  focus: () => void;
   up: () => void;
   back: () => void;
   forward: () => void;
@@ -89,10 +91,13 @@ export interface SpaceSnifferProps {
   onMediaAutoplayChange?: (enabled: boolean) => void;
   /** Number of largest folders that receive a read-only two-level thumbnail. */
   previewCount?: 1 | 2 | 3;
+  onPreviewCountChange?: (count: 1 | 2 | 3) => void;
   root: SpaceNode;
   /** Distinguishes a new host navigation/refresh from streamed updates at the same path. */
   rootRequestId?: number;
   progress?: SpaceScanProgress;
+  operationError?: string | null;
+  canPaste?: boolean;
   client?: SpaceSnifferClient;
   onCancelScan?: () => void;
   onOpenFolder?: (node: SpaceNode) => void;

@@ -84,6 +84,7 @@ import {
   type BrowseComparisonRequest,
   type BrowseWorkspaceHandle,
 } from "./features/explorer/BrowseWorkspace";
+import { EntryPropertiesDialog } from "./features/explorer/ExplorerOverlays";
 import { DirectorySearchBar } from "./features/explorer/DirectorySearchBar";
 import { ImeAwareSearchInput } from "./features/explorer/ImeAwareSearchInput";
 import { NativeIndexerControl } from "./features/explorer/NativeIndexerControl";
@@ -104,6 +105,7 @@ import type { DirectoryEntry, DirectoryQueryFilter, DirectorySearchMode, FileCli
 import { WorkspaceFilterMenu } from "./features/filter/WorkspaceFilterMenu";
 import { HomeDashboard } from "./features/home/HomeDashboard";
 import { SpaceSniffer } from "./features/space/SpaceSniffer";
+import { spaceParentPath } from "./features/space/spaceNavigation";
 import { spaceSnifferClient } from "./features/space/spaceSnifferClient";
 import type { SpaceContextAction, SpaceNode, SpaceScanProgress, SpaceSnifferHandle, SpaceNavigationState } from "./features/space/types";
 import {
@@ -304,6 +306,13 @@ export function App({ initialPath }: AppProps) {
   const spaceScanController = useRef<AbortController | null>(null);
   const spaceRef = useRef<SpaceSnifferHandle>(null);
   const [spaceScanError, setSpaceScanError] = useState<string | null>(null);
+  const [spaceOperationError, setSpaceOperationError] = useState<string | null>(null);
+  const spaceOperationBusy = useRef(false);
+  const [spacePropertiesTarget, setSpacePropertiesTarget] = useState<DirectoryEntry | null>(null);
+  const spacePropertiesRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (spacePropertiesTarget) spacePropertiesRef.current?.querySelector("button")?.focus({ preventScroll: true });
+  }, [spacePropertiesTarget]);
   const [extensionsLoading, setExtensionsLoading] = useState(false);
   const [compareNavigation, setCompareNavigation] = useState<CompareNavigationState>({
     activePane: "left",
@@ -985,6 +994,8 @@ export function App({ initialPath }: AppProps) {
           if (target instanceof HTMLElement && target.closest("button, a, select, [role=button]")) return;
           event.preventDefault(); spaceRef.current?.togglePreview(); return;
         }
+        // The map and details controls own file commands as well as selection.
+        if (["copySelection", "cutSelection", "paste", "renameSelection", "recycleSelection", "refresh", "selectAll"].includes(command)) return;
         // The map and details controls own ordinary selection keys.
         if (["moveNext", "movePrevious", "moveLeft", "moveRight", "openSelection"].includes(command)) return;
       }
@@ -1430,16 +1441,30 @@ export function App({ initialPath }: AppProps) {
       modifiedUnixMs: entry.modifiedAt ?? null,
       hidden: false,
     }));
-    const parentOf = (path: string) => {
-      const separator = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
-      return separator > 0 ? path.slice(0, separator) : path;
-    };
+    const parentOf = (path: string) => spaceParentPath(path) ?? path;
     const target = node?.path ?? activeTab.path;
-    const destination = node?.kind === "folder" ? node.path : parentOf(target);
-    if (action === "copy-path") { if (node) void navigator.clipboard?.writeText(node.path); return; }
-    if (action === "copy-name") { if (node) void navigator.clipboard?.writeText(node.name); return; }
-    if (action === "open") { if (node) void openNativePath(node.path).catch(() => undefined); return; }
-    if (action === "open-with") { if (node) void openNativePath(node.path, true).catch(() => undefined); return; }
+    const destination = node ? node.kind === "folder" ? node.path : parentOf(target) : activeTab.path;
+    const failed = (error: unknown) => setSpaceOperationError(error instanceof Error ? error.message : String(error));
+    const perform = (operation: () => Promise<unknown>) => {
+      setSpaceOperationError(null);
+      void Promise.resolve().then(operation).catch(failed);
+    };
+    const mutate = (operation: () => Promise<unknown>) => {
+      if (spaceOperationBusy.current) return;
+      spaceOperationBusy.current = true;
+      setSpaceOperationError(null);
+      void operation().then(() => setSpaceRefreshToken((value) => value + 1)).catch(failed).finally(() => { spaceOperationBusy.current = false; });
+    };
+    if (action === "refresh") { setSpaceOperationError(null); setSpaceRefreshToken((value) => value + 1); return; }
+    if (action === "copy-path" || action === "copy-name") {
+      if (node) perform(async () => {
+        if (!navigator.clipboard) throw new Error(t("unableClipboard"));
+        await navigator.clipboard.writeText(action === "copy-path" ? node.path : node.name);
+      });
+      return;
+    }
+    if (action === "open") { if (node) perform(() => openNativePath(node.path)); return; }
+    if (action === "open-with") { if (node) perform(() => openNativePath(node.path, true)); return; }
     if (action === "locate") {
       const parent = parentOf(target);
       dispatchWorkspace({ type: "update-active", patch: { mode: "browse", path: parent, title: parent, virtualLocation: null } });
@@ -1453,41 +1478,58 @@ export function App({ initialPath }: AppProps) {
     if (action === "paste") {
       const clipboard = fileClipboard;
       if (!clipboard) return;
-      void Promise.all(clipboard.entries.map((entry) => transferEntry(entry.path, destination, clipboard.mode, "keep_both"))).catch(() => undefined);
+      mutate(async () => {
+        const failures: DirectoryEntry[] = [];
+        const errors: string[] = [];
+        for (const entry of clipboard.entries) {
+          try { await transferEntry(entry.path, destination, clipboard.mode, "fail"); }
+          catch (error) { failures.push(entry); errors.push(error instanceof Error ? error.message : String(error)); }
+        }
+        if (clipboard.mode === "move") setFileClipboard((current) => current === clipboard ? failures.length ? { ...clipboard, entries: failures } : null : current);
+        if (errors.length && failures.length < clipboard.entries.length) setSpaceRefreshToken((value) => value + 1);
+        if (errors.length) throw new Error(errors.join("\n"));
+      });
       return;
     }
-    if (action === "open-terminal") { void openTerminal(destination).catch(() => undefined); return; }
+    if (action === "open-terminal") { perform(() => openTerminal(destination)); return; }
     if (action === "rename") {
-      if (!node) return;
+      if (!node || spaceOperationBusy.current) return;
       const nextName = window.prompt(t("newName"), node.name)?.trim();
-      if (nextName) void renameEntry(node.path, nextName, "fail").catch(() => undefined);
+      if (nextName && nextName !== node.name) mutate(() => renameEntry(node.path, nextName, "fail"));
       return;
     }
     if (action === "recycle") {
-      if (items.length === 0 || !window.confirm(`${t("recycleSelected")} (${items.length})`)) return;
-      void Promise.all(items.map((entry) => recycleEntry(entry)))
-        .then(() => setSpaceRefreshToken((value) => value + 1))
-        .catch(() => undefined);
+      if (spaceOperationBusy.current || items.length === 0 || !window.confirm(`${t("recycleSelected")} (${items.length})`)) return;
+      mutate(async () => {
+        const results = await Promise.allSettled(items.map((entry) => recycleEntry(entry)));
+        const errors = results.flatMap((result) => result.status === "rejected" ? [result.reason instanceof Error ? result.reason.message : String(result.reason)] : []);
+        if (errors.length && errors.length < items.length) setSpaceRefreshToken((value) => value + 1);
+        if (errors.length) throw new Error(errors.join("\n"));
+      });
       return;
     }
     if (action === "new-folder" || action === "new-text-document" || action === "new-empty-file") {
       const kind = action === "new-folder" ? "directory" : action === "new-text-document" ? "text_file" : "empty_file";
-      void createEntry(destination, kind).catch(() => undefined);
+      mutate(() => createEntry(destination, kind));
       return;
     }
     if (action === "compress-zip") {
-      if (items.length > 0) void createZip(items.map((entry) => entry.path), destination).catch(() => undefined);
+      if (items.length > 0) mutate(() => createZip(items.map((entry) => entry.path), activeTab.path));
       return;
     }
     if (action === "extract-current" || action === "extract-named") {
-      if (node?.kind === "file") void extractZip(node.path, destination, action === "extract-current" ? "current" : "named").catch(() => undefined);
+      if (node?.kind === "file") mutate(() => extractZip(node.path, destination, action === "extract-current" ? "current" : "named"));
       return;
     }
-    if (action === "extract-choose" || action === "custom-organize" || action === "properties" || action === "refresh") {
-      // These actions require a browse dialog (destination chooser, organizer,
-      // properties, or refresh). Keep the request observable for the host shell;
-      // BrowseWorkspace can consume it without duplicating native operations.
-      window.dispatchEvent(new CustomEvent(`muller:space-${action}`, { detail: { node, selection: items, path: destination } }));
+    if (action === "extract-choose") {
+      if (node?.kind === "file" && !spaceOperationBusy.current) perform(async () => {
+        const chosenDestination = await open({ directory: true, multiple: false, defaultPath: activeTab.path, title: t("chooseExtractionDestination") });
+        if (typeof chosenDestination === "string") mutate(() => extractZip(node.path, chosenDestination, "current"));
+      });
+      return;
+    }
+    if (action === "properties") {
+      if (node) setSpacePropertiesTarget(items.find((entry) => entry.path === node.path) ?? null);
     }
   }, [activeTab.path, dispatchWorkspace, fileClipboard, setFileClipboard, t]);
   const openDrive = (path: string) => {
@@ -1966,9 +2008,12 @@ export function App({ initialPath }: AppProps) {
               mediaAutoplay={preferences.mediaAutoplay}
               onMediaAutoplayChange={(mediaAutoplay) => updatePreferences({ mediaAutoplay })}
               previewCount={preferences.spacePreviewCount}
+              onPreviewCountChange={(spacePreviewCount) => updatePreferences({ spacePreviewCount })}
               root={spaceRoot}
               rootRequestId={spaceRootRequestId}
               progress={spaceProgress}
+              operationError={spaceOperationError}
+              canPaste={Boolean(fileClipboard)}
               client={spaceSnifferClient}
               onCancelScan={cancelSpaceScan}
               onSoundEvent={(event) => play(event === "open" ? "navigate" : event === "select" ? "action" : "navigate")}
@@ -2376,6 +2421,10 @@ export function App({ initialPath }: AppProps) {
         onClose={() => setCommandOpen(false)}
       />
       <SuccessBurst token={successToken} message={successMessage} />
+
+      {activePage === "space" && spacePropertiesTarget ? <div ref={spacePropertiesRef} onKeyDown={(event) => {
+        if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setSpacePropertiesTarget(null); spaceRef.current?.focus(); }
+      }}><EntryPropertiesDialog entry={spacePropertiesTarget} onClose={() => { setSpacePropertiesTarget(null); spaceRef.current?.focus(); }} /></div> : null}
 
       {recyclePrompt ? (
         <div className="dialog-backdrop" role="presentation">

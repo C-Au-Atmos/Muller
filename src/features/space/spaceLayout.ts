@@ -83,11 +83,20 @@ export const spaceNodeBytes = (node: SpaceNode): number => {
  */
 export function selectLargestSpaceFolders(nodes: readonly SpaceNode[], count: number): SpaceNode[] {
   const limit = Math.min(3, Math.max(1, Math.round(count) || 1));
-  return nodes
-    .filter((node) => node.kind === "folder" && spaceNodeBytes(node) > 0)
-    .slice()
-    .sort((left, right) => spaceNodeBytes(right) - spaceNodeBytes(left) || left.id.localeCompare(right.id))
-    .slice(0, limit);
+  const largest: SpaceNode[] = [];
+  for (const node of nodes) {
+    const bytes = spaceNodeBytes(node);
+    if (node.kind !== "folder" || !bytes) continue;
+    const position = largest.findIndex((candidate) => bytes > spaceNodeBytes(candidate)
+      || bytes === spaceNodeBytes(candidate) && node.id < candidate.id);
+    if (position < 0) {
+      if (largest.length < limit) largest.push(node);
+    } else {
+      largest.splice(position, 0, node);
+      if (largest.length > limit) largest.pop();
+    }
+  }
+  return largest;
 }
 
 export interface SpacePreviewRect extends SpaceRect {
@@ -109,23 +118,50 @@ export function buildSpacePreviewLayout(
   maxDepth: 2,
   maxChildren = 24,
 ): SpacePreviewRect[] {
-  if (width <= 0 || height <= 0 || maxDepth < 1) return [];
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0 || maxDepth < 1) return [];
   const result: SpacePreviewRect[] = [];
   const boundedChildren = Math.max(4, Math.min(48, Math.round(maxChildren) || 24));
   const previewNodes = (parent: SpaceNode): SpaceNode[] => {
-    const children = (parent.children ?? [])
-      .filter((node) => spaceNodeBytes(node) > 0)
-      .slice()
-      .sort((left, right) => spaceNodeBytes(right) - spaceNodeBytes(left) || left.id.localeCompare(right.id));
-    if (children.length <= boundedChildren) return children;
-    const kept = children.slice(0, boundedChildren - 1);
-    const remainder = children.slice(boundedChildren - 1);
+    // Retain only a small sorted candidate set. A scan batch can update a
+    // folder with hundreds of thousands of children; never copy and sort its
+    // whole array just to paint 24 blocks. Each source weight is read once.
+    const candidates: { node: SpaceNode; bytes: number }[] = [];
+    let omittedBytes = 0;
+    let hasOmitted = false;
+    for (const node of parent.children ?? []) {
+      const bytes = spaceNodeBytes(node);
+      if (!bytes) continue;
+      const last = candidates[candidates.length - 1];
+      if (candidates.length === boundedChildren && last
+        && (bytes < last.bytes || bytes === last.bytes && node.id >= last.node.id)) {
+        omittedBytes += bytes;
+        hasOmitted = true;
+        continue;
+      }
+      let low = 0; let high = candidates.length;
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        const candidate = candidates[middle]!;
+        if (bytes > candidate.bytes || bytes === candidate.bytes && node.id < candidate.node.id) high = middle;
+        else low = middle + 1;
+      }
+      candidates.splice(low, 0, { node, bytes });
+      if (candidates.length > boundedChildren) {
+        omittedBytes += candidates.pop()!.bytes;
+        hasOmitted = true;
+      }
+    }
+    if (!hasOmitted) return candidates.map((candidate) => candidate.node);
+    // Reserve the final block for all omitted bytes, including the last
+    // candidate. At or below the budget every real child remains visible.
+    omittedBytes += candidates.pop()!.bytes;
+    const kept = candidates.map((candidate) => candidate.node);
     kept.push({
       id: `\u0000space-preview-other:${parent.id}`,
       name: "Other items",
       path: "",
       kind: "file",
-      bytes: remainder.reduce((sum, node) => sum + spaceNodeBytes(node), 0),
+      bytes: omittedBytes,
     });
     return kept;
   };
@@ -138,7 +174,10 @@ export function buildSpacePreviewLayout(
       result.push(absolute);
       if (depth < maxDepth && rect.node.kind === "folder" && rect.node.children?.length) {
         const inset = 2;
-        visit(rect.node, absolute.x + inset, absolute.y + inset, Math.max(0, absolute.width - inset * 2), Math.max(0, absolute.height - inset * 2), 2);
+        // Keep a name band on the enclosing folder so its label remains
+        // readable above the next level instead of being painted over.
+        const titleHeight = rect.width >= 54 && rect.height >= 36 ? 17 : inset;
+        visit(rect.node, absolute.x + inset, absolute.y + titleHeight, Math.max(0, absolute.width - inset * 2), Math.max(0, absolute.height - titleHeight - inset), 2);
       }
     }
   };

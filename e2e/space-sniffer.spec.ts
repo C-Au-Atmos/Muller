@@ -61,6 +61,127 @@ test("top-level space breadcrumbs create history entries and Escape returns to t
   await expect(region).toHaveAttribute("data-root-path", rootPath!);
 });
 
+test("largest-folder thumbnails render two real levels, stay read-only, and persist the configured count", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await installSpaceStreamMock(page);
+  await page.addInitScript(() => {
+    const runtime = window as unknown as { __previewDrawn: { text: string; x: number; y: number }[] };
+    runtime.__previewDrawn = [];
+    // Preserve the browser renderer while observing the exact labels it paints.
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    const original = CanvasRenderingContext2D.prototype.fillText;
+    CanvasRenderingContext2D.prototype.fillText = function (text, x, y, maxWidth) {
+      runtime.__previewDrawn.push({ text, x, y });
+      if (maxWidth === undefined) original.call(this, text, x, y);
+      else original.call(this, text, x, y, maxWidth);
+    };
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Space map", exact: true }).click();
+  await expect.poll(() => spaceTaskCount(page)).toBe(1);
+  const region = page.getByRole("region", { name: "Space Sniffer" });
+  const canvas = region.locator("canvas");
+  const viewport = region.getByRole("application", { name: "Folder space map" });
+  const countMenu = region.getByRole("combobox", { name: "Largest folder previews" });
+  const rootPath = await region.getAttribute("data-root-path");
+  await expect(countMenu).toHaveValue("1");
+  await page.evaluate(() => {
+    const task = (globalThis as typeof globalThis & { __spaceStream: SpaceMockRuntime }).__spaceStream.tasks[0];
+    const items = ["Projects", "Media", "Archive"].map((name, index) => ({ path: `${task.root}\\${name}`, parent: task.root, name, kind: "directory", bytes: 6000 - index * 1000, depth: 1, childCount: 2, partial: false, scanning: true }));
+    task.channel.onmessage({ type: "batch", taskId: task.id, items, totalBytes: 15000, fileCount: 0, directoryCount: 3 });
+  });
+  await expect(canvas).toHaveAttribute("data-visible-count", "3");
+  await expect(canvas).toHaveAttribute("data-animation-state", "settled");
+  await expect(canvas).toHaveAttribute("data-preview-count", "0");
+  const before = await canvas.screenshot();
+  await page.evaluate(() => {
+    const task = (globalThis as typeof globalThis & { __spaceStream: SpaceMockRuntime }).__spaceStream.tasks[0];
+    const items = ["Projects", "Media", "Archive"].flatMap((name, index) => {
+      const folder = `${task.root}\\${name}`;
+      const bytes = 6000 - index * 1000;
+      return [
+        { path: `${folder}\\Level one`, parent: folder, name: "Level one", kind: "directory", bytes: bytes * .6, depth: 2, childCount: 1, partial: false },
+        { path: `${folder}\\Direct.txt`, parent: folder, name: "Direct.txt", kind: "file", bytes: bytes * .4, depth: 2, childCount: 0, partial: false },
+        { path: `${folder}\\Level one\\Second.txt`, parent: `${folder}\\Level one`, name: "Second.txt", kind: "file", bytes: bytes * .6, depth: 3, childCount: 0, partial: false },
+      ];
+    });
+    const root = { path: task.root, parent: null, name: "Muller", kind: "directory", bytes: 15000, depth: 0, childCount: 3, partial: false };
+    task.channel.onmessage({ type: "batch", taskId: task.id, items, totalBytes: 15000, fileCount: 6, directoryCount: 6 });
+    task.channel.onmessage({ type: "done", taskId: task.id, root, totalBytes: 15000, fileCount: 6, directoryCount: 6 });
+  });
+  await expect(canvas).toHaveAttribute("data-preview-count", "1");
+  await expect(canvas).toHaveAttribute("data-preview-depth", "2");
+  await expect(canvas).toHaveAttribute("data-animation-state", "settled");
+  expect((await canvas.screenshot()).equals(before)).toBe(false);
+  const drawnNames = () => page.evaluate(() => (window as unknown as { __previewDrawn: { text: string }[] }).__previewDrawn.map((item) => item.text));
+  await expect.poll(drawnNames).toContain("Direct.txt");
+  await expect.poll(drawnNames).toContain("Level one");
+  await expect.poll(drawnNames).toContain("Second.txt");
+  const secondLevel = await page.evaluate(() => (window as unknown as { __previewDrawn: { text: string; x: number; y: number }[] }).__previewDrawn.findLast((item) => item.text === "Second.txt")!);
+  await viewport.click({ position: { x: secondLevel.x + 2, y: secondLevel.y - 4 } });
+  await expect(region.getByRole("heading", { level: 2 })).toHaveText("Projects");
+  await expect(region).toHaveAttribute("data-root-path", rootPath!);
+  expect(await spaceTaskCount(page)).toBe(1);
+  await viewport.dblclick({ position: { x: secondLevel.x + 2, y: secondLevel.y - 4 } });
+  await expect(region).toHaveAttribute("data-root-path", `${rootPath}\\Projects`);
+  await viewport.press("Escape");
+  await expect(region).toHaveAttribute("data-root-path", rootPath!);
+  await countMenu.selectOption("2");
+  await expect(canvas).toHaveAttribute("data-preview-count", "2");
+  await countMenu.selectOption("3");
+  await expect(canvas).toHaveAttribute("data-preview-count", "3");
+  await expect(canvas).toHaveAttribute("data-animation-state", "settled");
+  await region.screenshot({ path: test.info().outputPath("largest-folder-preview.png") });
+  await expect.poll(() => page.evaluate(() => (JSON.parse(localStorage.getItem("muller.preferences.v1")!) as { spacePreviewCount: number }).spacePreviewCount)).toBe(3);
+  await page.getByRole("button", { name: "Open settings", exact: true }).click();
+  const settingsCount = page.getByRole("radiogroup", { name: "Largest folder previews" });
+  await expect(settingsCount.getByRole("radio", { name: "3 folders" })).toHaveAttribute("aria-checked", "true");
+  await settingsCount.getByRole("radio", { name: "2 folders" }).click();
+  await page.getByRole("button", { name: "Space map", exact: true }).click();
+  await expect(countMenu).toHaveValue("2");
+});
+
+test("space cache preview stays visible during verification and switches to the fresh tree at completion", async ({ page }) => {
+  await openStreamSpace(page);
+  const region = page.getByRole("region", { name: "Space Sniffer" });
+  const canvas = region.locator("canvas");
+  await expect.poll(() => spaceTaskCount(page)).toBe(1);
+  await page.evaluate(() => {
+    const task = (globalThis as typeof globalThis & { __spaceStream: SpaceMockRuntime }).__spaceStream.tasks[0];
+    task.channel.onmessage({ type: "cached", taskId: task.id, items: [{ path: `${task.root}\\Removed.txt`, parent: task.root, name: "Removed.txt", kind: "file", bytes: 1000000, depth: 1, childCount: 0, partial: false }], totalBytes: 1000000 });
+  });
+  await expect(region.getByRole("status")).toHaveText("Cached preview · verifying");
+  await expect(canvas).toHaveAttribute("data-area-bytes", "1000000");
+  await expect(canvas).toHaveAttribute("data-visible-count", "1");
+  await expect(canvas).toHaveAttribute("data-animation-state", "settled");
+  const viewport = region.getByRole("application", { name: "Folder space map" });
+  await viewport.click({ position: { x: 100, y: 100 } });
+  await expect(region.getByRole("heading", { level: 2 })).toHaveText("Removed.txt");
+  await region.locator(".space-sniffer__preview-button").click();
+  await expect.poll(() => page.evaluate(() => (globalThis as typeof globalThis & { __spaceStream: SpaceMockRuntime }).__spaceStream.previews.length)).toBeGreaterThan(0);
+  await expect(region.locator(".preview-panel")).toBeVisible();
+  await viewport.click({ button: "right", position: { x: 100, y: 100 } });
+  await expect(region.getByRole("menu")).toBeVisible();
+  await publishSpaceBatch(page, 0, [1_600_000, 400_000]);
+  await expect(region.locator(".space-sniffer__scan-state")).toHaveText("Cached preview · verifying");
+  await expect(canvas).toHaveAttribute("data-area-bytes", "1000000");
+  await publishSpaceBatch(page, 0, [1_600_000, 400_000], true);
+  await expect(region.locator(".space-sniffer__scan-state")).toHaveText("Scan complete");
+  await expect(canvas).toHaveAttribute("data-area-bytes", "2000000");
+  await expect(canvas).toHaveAttribute("data-visible-count", "2");
+  await expect(region.getByRole("heading", { level: 2 })).toHaveCount(0);
+  await expect(region.getByRole("menu")).toHaveCount(0);
+  await expect(region.locator(".preview-panel")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => {
+    const state = (globalThis as typeof globalThis & { __spaceStream: SpaceMockRuntime }).__spaceStream;
+    return state.previews.every((task) => state.cancelledPreviews.includes(task.id));
+  })).toBe(true);
+  await expect(canvas).toHaveAttribute("data-animation-state", "settled");
+  await viewport.click({ position: { x: 100, y: 100 } });
+  await expect(region.getByRole("heading", { level: 2 })).toHaveText("Projects");
+  await expect(region.locator(".space-sniffer__preview-button")).toHaveAttribute("aria-pressed", "false");
+});
+
 interface SpaceMockChannel { onmessage: (message: unknown) => void; }
 interface SpaceMockTask { id: number; root: string; channel: SpaceMockChannel; }
 interface SpaceMockRuntime { tasks: SpaceMockTask[]; cancelled: number[]; previews: SpaceMockTask[]; cancelledPreviews: number[]; statisticsPaths: string[]; audioStarts: number; }
@@ -260,9 +381,248 @@ test("space tiles support keyboard neighbor selection and a context menu", async
   await viewport.press("ArrowRight");
   const box = await viewport.boundingBox(); expect(box).not.toBeNull();
   await viewport.dispatchEvent("contextmenu", { bubbles: true, clientX: box!.x + box!.width - 20, clientY: box!.y + box!.height / 2, button: 2 });
-  await expect(region.getByRole("menu")).toBeVisible();
-  await expect(region.getByRole("menu").getByRole("menuitem").first()).toBeVisible();
+  const menu = region.getByRole("menu");
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitem").first()).toBeVisible();
+  const menuBox = await menu.boundingBox();
+  const viewportBox = await viewport.boundingBox();
+  expect(menuBox).not.toBeNull();
+  expect(viewportBox).not.toBeNull();
+  expect(menuBox!.x).toBeGreaterThanOrEqual(viewportBox!.x);
+  expect(menuBox!.y).toBeGreaterThanOrEqual(viewportBox!.y);
+  expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(viewportBox!.x + viewportBox!.width);
+  expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(viewportBox!.y + viewportBox!.height);
   await viewport.press("Escape"); await expect(region.getByRole("menu")).not.toBeVisible();
+});
+
+test("space file shortcuts copy, paste into the current directory, rename, recycle, and refresh", async ({ page }) => {
+  await openStreamSpace(page);
+  const region = page.getByRole("region", { name: "Space Sniffer" });
+  const viewport = region.getByRole("application", { name: "Folder space map" });
+  const canvas = region.locator("canvas");
+  await page.evaluate(() => {
+    const runtime = window as unknown as { __spaceOperations: { command: string; payload: unknown }[]; __TAURI_INTERNALS__: { invoke: (command: string, payload: unknown) => unknown } };
+    runtime.__spaceOperations = [];
+    const original = runtime.__TAURI_INTERNALS__.invoke;
+    runtime.__TAURI_INTERNALS__.invoke = (command, payload) => {
+      if (["transfer_entry", "rename_entry", "recycle_entry"].includes(command)) {
+        runtime.__spaceOperations.push({ command, payload });
+        return Promise.resolve({});
+      }
+      return original(command, payload);
+    };
+  });
+  const operations = () => page.evaluate(() => (window as unknown as { __spaceOperations: { command: string; payload: unknown }[] }).__spaceOperations);
+  await expect.poll(() => spaceTaskCount(page)).toBe(1);
+  await publishSpaceBatch(page, 0, [900_000, 100_000], true);
+  await expect(canvas).toHaveAttribute("data-animation-state", "settled");
+  await viewport.click({ position: { x: 50, y: 50 } });
+  await viewport.press("Control+c");
+  await viewport.press("Control+v");
+  await expect.poll(operations).toEqual([{ command: "transfer_entry", payload: { request: { taskId: expect.any(Number), source: "D:\\Muller\\Projects", destinationDirectory: "D:\\Muller", mode: "copy", conflict: "fail" } } }]);
+  await expect.poll(() => spaceTaskCount(page)).toBe(2);
+  await publishSpaceBatch(page, 1, [900_000, 100_000], true);
+  await expect(canvas).toHaveAttribute("data-animation-state", "settled");
+  await viewport.click({ position: { x: 50, y: 50 } });
+  page.once("dialog", (dialog) => dialog.accept("Renamed"));
+  await viewport.press("F2");
+  await expect.poll(operations).toHaveLength(2);
+  expect((await operations())[1]).toEqual({ command: "rename_entry", payload: { request: { source: "D:\\Muller\\Projects", newName: "Renamed", conflict: "fail" } } });
+  await expect.poll(() => spaceTaskCount(page)).toBe(3);
+  await publishSpaceBatch(page, 2, [900_000, 100_000], true);
+  await expect(canvas).toHaveAttribute("data-animation-state", "settled");
+  await viewport.click({ position: { x: 50, y: 50 } });
+  page.once("dialog", (dialog) => dialog.accept());
+  await viewport.press("Delete");
+  await expect.poll(operations).toHaveLength(3);
+  expect((await operations())[2]).toMatchObject({ command: "recycle_entry", payload: { expectation: { path: "D:\\Muller\\Projects", kind: "directory" } } });
+  await expect.poll(() => spaceTaskCount(page)).toBe(4);
+  await publishSpaceBatch(page, 3, [900_000, 100_000], true);
+  await viewport.press("F5");
+  await expect.poll(() => spaceTaskCount(page)).toBe(5);
+  await expect(region).toHaveAttribute("data-root-path", "D:\\Muller");
+});
+
+test("space menu scrolls within the map and Smaller item operations do not affect preview controls", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 640 });
+  await openStreamSpace(page);
+  const region = page.getByRole("region", { name: "Space Sniffer" });
+  const viewport = region.getByRole("application", { name: "Folder space map" });
+  await expect.poll(() => spaceTaskCount(page)).toBe(1);
+  await publishSpaceBatch(page, 0, [1_000_000_000, 1], true);
+  await region.getByRole("button", { name: /^Smaller items/ }).click();
+  const row = region.locator(".space-sniffer__group-list").getByRole("button", { name: "Media 1 B" });
+  await row.click({ button: "right" });
+  const menu = region.getByRole("menu");
+  await expect(menu).toBeVisible();
+  const bounds = await menu.evaluate((element) => {
+    const own = element.getBoundingClientRect();
+    const map = element.closest(".space-sniffer__viewport")!.getBoundingClientRect();
+    return { left: own.left - map.left, top: own.top - map.top, right: map.right - own.right, bottom: map.bottom - own.bottom, scrollable: element.scrollHeight > element.clientHeight };
+  });
+  expect(bounds.left).toBeGreaterThanOrEqual(7.5);
+  expect(bounds.top).toBeGreaterThanOrEqual(7.5);
+  expect(bounds.right).toBeGreaterThanOrEqual(7.5);
+  expect(bounds.bottom).toBeGreaterThanOrEqual(7.5);
+  expect(bounds.scrollable).toBe(true);
+  await menu.getByRole("menuitem").first().press("End");
+  await expect(menu.getByRole("menuitem", { name: "Properties", exact: true })).toBeFocused();
+  await expect(menu.getByRole("menuitem", { name: "Properties", exact: true })).toBeInViewport();
+  expect(await viewport.evaluate((element) => ({ top: element.scrollTop, left: element.scrollLeft }))).toEqual({ top: 0, left: 0 });
+  await page.keyboard.press("Escape");
+  await expect(viewport).toBeFocused();
+  await row.click();
+  await row.press("Space");
+  const preview = region.getByRole("complementary", { name: "File preview" });
+  await expect(preview).toBeVisible();
+  let dialogCount = 0;
+  page.on("dialog", (dialog) => { dialogCount += 1; void dialog.dismiss(); });
+  const close = preview.getByRole("button", { name: "Close preview", exact: true });
+  await close.press("Delete");
+  await close.press("F2");
+  await close.press("Control+x");
+  expect(dialogCount).toBe(0);
+  await expect(preview).toBeVisible();
+  expect(await spaceTaskCount(page)).toBe(1);
+});
+
+test("space properties reuses Browse details and keeps file shortcuts outside the dialog", async ({ page }) => {
+  await openStreamSpace(page);
+  const region = page.getByRole("region", { name: "Space Sniffer" });
+  const viewport = region.getByRole("application", { name: "Folder space map" });
+  await expect.poll(() => spaceTaskCount(page)).toBe(1);
+  await publishSpaceBatch(page, 0, [900_000, 100_000], true);
+  await expect(region.locator("canvas")).toHaveAttribute("data-animation-state", "settled");
+  await viewport.click({ button: "right", position: { x: 50, y: 50 } });
+  await region.getByRole("menuitem", { name: "Properties", exact: true }).click();
+  const properties = page.getByRole("dialog", { name: "Properties", exact: true });
+  await expect(properties).toBeVisible();
+  await expect(properties.getByText("Projects", { exact: true })).toBeVisible();
+  await expect(properties.getByText("6.1 KB", { exact: true })).toBeVisible();
+  await expect(properties.getByRole("button", { name: "Close", exact: true })).toBeFocused();
+  let nativeDialogs = 0;
+  page.on("dialog", async (dialog) => { nativeDialogs += 1; await dialog.dismiss(); });
+  await page.keyboard.press("Delete");
+  await page.keyboard.press("F2");
+  await page.keyboard.press("Control+x");
+  await expect(properties).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(properties).toHaveCount(0);
+  await expect(viewport).toBeFocused();
+  expect(nativeDialogs).toBe(0);
+});
+
+test("space menu surfaces native and clipboard failures and extracts into a chosen folder", async ({ page }) => {
+  await openStreamSpace(page);
+  const region = page.getByRole("region", { name: "Space Sniffer" });
+  const viewport = region.getByRole("application", { name: "Folder space map" });
+  await expect.poll(() => spaceTaskCount(page)).toBe(1);
+  await page.evaluate(() => {
+    const runtime = window as unknown as { __spaceOperations: { command: string; payload: unknown }[]; __TAURI_INTERNALS__: { invoke: (command: string, payload: unknown) => unknown } };
+    runtime.__spaceOperations = [];
+    const original = runtime.__TAURI_INTERNALS__.invoke;
+    runtime.__TAURI_INTERNALS__.invoke = (command, payload) => {
+      if (command === "open_native_path" || command === "open_terminal") return Promise.reject(new Error("Native access denied"));
+      if (command === "plugin:dialog|open") {
+        runtime.__spaceOperations.push({ command, payload });
+        return Promise.resolve("D:\\Extracted");
+      }
+      if (command === "extract_zip") {
+        runtime.__spaceOperations.push({ command, payload });
+        return Promise.resolve("D:\\Extracted");
+      }
+      return original(command, payload);
+    };
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: () => Promise.reject(new Error("Clipboard access denied")) } });
+    const task = (globalThis as typeof globalThis & { __spaceStream: SpaceMockRuntime }).__spaceStream.tasks[0];
+    const root = { path: task.root, parent: null, name: "Muller", kind: "directory", bytes: 900_000, depth: 0, childCount: 1, partial: false };
+    const archive = { path: `${task.root}\\Bundle.zip`, parent: task.root, name: "Bundle.zip", kind: "file", bytes: 900_000, depth: 1, childCount: 0, partial: false };
+    task.channel.onmessage({ type: "batch", taskId: task.id, items: [archive, root], totalBytes: 900_000, fileCount: 1, directoryCount: 1 });
+    task.channel.onmessage({ type: "done", taskId: task.id, root, totalBytes: 900_000, fileCount: 1, directoryCount: 1 });
+  });
+  await expect(region.locator("canvas")).toHaveAttribute("data-animation-state", "settled");
+  for (const name of ["Open", "Open with…", "Open in terminal", "Copy file name", "Copy full path · 复制路径"]) {
+    await viewport.click({ button: "right", position: { x: 50, y: 50 } });
+    await region.getByRole("menuitem", { name, exact: true }).click();
+    await expect(region.getByRole("alert")).toHaveText(name.startsWith("Copy") ? "Clipboard access denied" : "Native access denied");
+  }
+  await viewport.click({ button: "right", position: { x: 50, y: 50 } });
+  await region.getByRole("menuitem", { name: "Choose extraction folder…", exact: true }).click();
+  await expect.poll(() => spaceTaskCount(page)).toBe(2);
+  const operations = await page.evaluate(() => (window as unknown as { __spaceOperations: { command: string; payload: unknown }[] }).__spaceOperations);
+  expect(operations).toEqual([
+    { command: "plugin:dialog|open", payload: { options: { directory: true, multiple: false, defaultPath: "D:\\Muller", title: "Choose extraction destination" } } },
+    { command: "extract_zip", payload: { request: { taskId: expect.any(Number), archive: "D:\\Muller\\Bundle.zip", destinationDirectory: "D:\\Extracted", mode: "current" } } },
+  ]);
+  await expect(region.getByRole("alert")).toHaveCount(0);
+});
+
+test("space cut uses the shared clipboard and clears it after a successful move", async ({ page }) => {
+  await openStreamSpace(page);
+  const region = page.getByRole("region", { name: "Space Sniffer" });
+  const viewport = region.getByRole("application", { name: "Folder space map" });
+  const canvas = region.locator("canvas");
+  await page.evaluate(() => {
+    const runtime = window as unknown as { __spaceTransfers: unknown[]; __TAURI_INTERNALS__: { invoke: (command: string, payload: unknown) => unknown } };
+    runtime.__spaceTransfers = [];
+    const original = runtime.__TAURI_INTERNALS__.invoke;
+    runtime.__TAURI_INTERNALS__.invoke = (command, payload) => {
+      if (command === "transfer_entry") { runtime.__spaceTransfers.push(payload); return Promise.resolve({}); }
+      return original(command, payload);
+    };
+  });
+  const transfers = () => page.evaluate(() => (window as unknown as { __spaceTransfers: unknown[] }).__spaceTransfers);
+  await expect.poll(() => spaceTaskCount(page)).toBe(1);
+  await publishSpaceBatch(page, 0, [900_000, 100_000], true);
+  await expect(canvas).toHaveAttribute("data-animation-state", "settled");
+  await viewport.click({ position: { x: 50, y: 50 } });
+  await viewport.press("Control+x");
+  const bounds = await viewport.boundingBox();
+  await viewport.dblclick({ position: { x: bounds!.width - 20, y: bounds!.height - 20 } });
+  await expect.poll(() => spaceTaskCount(page)).toBe(2);
+  await publishSpaceBatch(page, 1, [750, 250], true);
+  await viewport.press("Control+v");
+  await expect.poll(transfers).toEqual([{ request: { taskId: expect.any(Number), source: "D:\\Muller\\Projects", destinationDirectory: "D:\\Muller\\Media", mode: "move", conflict: "fail" } }]);
+  await expect.poll(() => spaceTaskCount(page)).toBe(3);
+  await publishSpaceBatch(page, 2, [1500, 500], true);
+  await viewport.press("Control+v");
+  expect(await transfers()).toHaveLength(1);
+});
+
+test("space right-click preserves a real multi-selection and never operates the aggregate tile", async ({ page }) => {
+  await openStreamSpace(page);
+  const region = page.getByRole("region", { name: "Space Sniffer" });
+  const viewport = region.getByRole("application", { name: "Folder space map" });
+  const canvas = region.locator("canvas");
+  await expect.poll(() => spaceTaskCount(page)).toBe(1);
+  await publishSpaceBatch(page, 0, [900_000, 100_000], true);
+  await expect(canvas).toHaveAttribute("data-animation-state", "settled");
+  await viewport.press("Control+a");
+  await viewport.click({ button: "right", position: { x: 50, y: 50 } });
+  await expect(region.getByRole("heading", { level: 2 })).toHaveText("2 items");
+  await expect(region.getByRole("menu")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await viewport.press("F5");
+  await expect.poll(() => spaceTaskCount(page)).toBe(2);
+  await page.evaluate(() => {
+    const task = (globalThis as typeof globalThis & { __spaceStream: SpaceMockRuntime }).__spaceStream.tasks[1];
+    const root = { path: task.root, parent: null, name: "Muller", kind: "directory", bytes: 400, depth: 0, childCount: 400, partial: false, scanning: false };
+    const items = Array.from({ length: 400 }, (_, index) => ({ path: `${task.root}/${index}`, parent: task.root, name: `Item ${index}`, kind: "file", bytes: 1, depth: 1, childCount: 0, partial: false, scanning: false }));
+    task.channel.onmessage({ type: "batch", taskId: task.id, items: [...items, root], totalBytes: 400, fileCount: 400, directoryCount: 1, skippedCount: 0 });
+    task.channel.onmessage({ type: "done", taskId: task.id, root, totalBytes: 400, fileCount: 400, directoryCount: 1, skippedCount: 0 });
+  });
+  await expect(canvas).toHaveAttribute("data-area-bytes", "400");
+  await expect(canvas).toHaveAttribute("data-animation-state", "settled");
+  await viewport.click({ button: "right", position: { x: 50, y: 50 } });
+  await expect(region.getByRole("menu")).not.toBeVisible();
+  await region.getByRole("button", { name: /^Smaller items/ }).click();
+  await region.getByRole("button", { name: /^Smaller items/ }).click();
+  let dialogCount = 0;
+  page.on("dialog", (dialog) => { dialogCount += 1; void dialog.dismiss(); });
+  await viewport.press("Delete");
+  expect(dialogCount).toBe(0);
+  await expect(region.getByRole("heading", { level: 2 })).toHaveText("Smaller items");
+  expect(await spaceTaskCount(page)).toBe(2);
 });
 
 test("space Backspace goes to the actual parent beyond the scan root and stops at the drive root", async ({ page }) => {

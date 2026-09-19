@@ -117,6 +117,18 @@ test("cancelled administrator approval shows fallback and allows an explicit ret
   await expect(panel.getByRole("alert")).not.toBeVisible();
 });
 
+test("cancelled restore can be stopped even when no NTFS volumes are ready", async ({ page }) => {
+  await installNativeMock(page, true);
+  await page.goto("/");
+  await page.getByRole("button", { name: "NTFS fast index: Not enabled", exact: true }).click();
+  const panel = page.getByRole("region", { name: "NTFS fast index", exact: true });
+  await panel.getByRole("button", { name: "Enable fast index", exact: true }).click();
+  await expect(panel.getByRole("status")).toHaveText("Fallback search");
+  await panel.getByRole("button", { name: "Stop fast index", exact: true }).click();
+  await expect(panel.getByRole("status")).toHaveText("Not enabled");
+  expect(await page.evaluate(() => (globalThis as typeof globalThis & { __mullerNativeIndex: NativeMockState }).__mullerNativeIndex.stops)).toBe(1);
+});
+
 test("browser preview never offers a usable native elevation action", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: /NTFS (fast index|快速索引)/ }).click();

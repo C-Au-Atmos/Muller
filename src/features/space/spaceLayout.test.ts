@@ -126,10 +126,56 @@ describe("layoutNodes", () => {
         node("root-file", 30),
       ],
     };
-    const preview = buildSpacePreviewLayout(root.children![0]!, 200, 100, 2);
+    const preview = buildSpacePreviewLayout(root.children[0]!, 200, 100, 2);
     expect(preview.filter((rect) => rect.depth === 1).map((rect) => rect.node.id)).toEqual(["a-file", "a-folder"]);
     expect(preview.filter((rect) => rect.depth === 2).map((rect) => rect.node.id)).toContain("a-deep");
     expect(preview.every((rect) => rect.x >= 0 && rect.y >= 0 && rect.x + rect.width <= 200 && rect.y + rect.height <= 100)).toBe(true);
+  });
+
+  it("limits thumbnail work and preserves combined bytes for omitted children", () => {
+    const root = { ...node("root", 2000), children: Array.from({ length: 2000 }, (_, index) => node(`child-${index}`, 1)) };
+    const preview = buildSpacePreviewLayout(root, 800, 500, 2);
+    expect(preview).toHaveLength(24);
+    expect(preview.reduce((sum, rect) => sum + spaceNodeBytes(rect.node), 0)).toBe(2000);
+    expect(preview.find((rect) => rect.node.id.startsWith("\u0000space-preview-other:"))?.node.bytes).toBe(1977);
+    expect(buildSpacePreviewLayout(root, Infinity, 500, 2)).toEqual([]);
+  });
+
+  it("keeps all thumbnail children through the budget and orders tied survivors independently of input order", () => {
+    for (const count of [23, 24, 25, 80]) {
+      const children = Array.from({ length: count }, (_, index) => node(`child-${String(index).padStart(3, "0")}`, 1 + index % 7));
+      const bytes = children.reduce((sum, item) => sum + item.bytes, 0);
+      const root = { ...node("root", bytes), children };
+      const preview = buildSpacePreviewLayout(root, 800, 500, 2);
+      const reversed = buildSpacePreviewLayout({ ...root, children: [...children].reverse() }, 800, 500, 2);
+      expect(preview).toEqual(reversed);
+      const survivors = preview.filter((rect) => !rect.node.id.startsWith("\u0000space-preview-other:"));
+      const expected = [...children].sort((left, right) => right.bytes - left.bytes || (left.id < right.id ? -1 : 1)).slice(0, count <= 24 ? count : 23);
+      expect(survivors.map((rect) => rect.node.id)).toEqual(expected.map((item) => item.id));
+      expect(preview.reduce((sum, rect) => sum + spaceNodeBytes(rect.node), 0)).toBe(bytes);
+      expect(preview.some((rect) => rect.node.id.startsWith("\u0000space-preview-other:"))).toBe(count > 24);
+      expect(children[0]?.id).toBe("child-000");
+    }
+  });
+
+  it("selects thumbnail candidates from 100k children with a linear weight-read budget", () => {
+    const count = 100_000;
+    let weightReads = 0;
+    const children = Array.from({ length: count }, (_, index) => {
+      const bytes = 1 + index * 7919 % 100_003;
+      return { id: String(index), name: String(index), path: String(index), kind: "file" as const,
+        get bytes() { weightReads += 1; return bytes; } };
+    });
+    const preview = buildSpacePreviewLayout({ ...node("root", 1), children }, 1000, 700, 2);
+    // Reading each source once plus the bounded final layout is linear. A
+    // full comparator sort repeatedly reads weights and exceeds this budget.
+    expect(weightReads).toBeLessThan(count * 2);
+    expect(preview).toHaveLength(24);
+    const expected = Array.from({ length: count }, (_, index) => ({ id: String(index), bytes: 1 + index * 7919 % 100_003 }))
+      .sort((left, right) => right.bytes - left.bytes || (left.id < right.id ? -1 : 1));
+    const survivors = preview.filter((rect) => !rect.node.id.startsWith("\u0000space-preview-other:"));
+    expect(survivors.map((rect) => rect.node.id)).toEqual(expected.slice(0, 23).map((item) => item.id));
+    expect(preview.reduce((sum, rect) => sum + spaceNodeBytes(rect.node), 0)).toBe(expected.reduce((sum, item) => sum + item.bytes, 0));
   });
 });
 

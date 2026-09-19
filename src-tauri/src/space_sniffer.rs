@@ -52,7 +52,7 @@ pub struct CancelSpaceScanResponse {
     pub cancelled: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpaceNode {
     pub path: PathBuf,
@@ -66,7 +66,7 @@ pub struct SpaceNode {
     pub scanning: bool,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SpaceNodeKind {
     File,
@@ -91,6 +91,11 @@ pub enum SpaceScanEvent {
         file_count: u64,
         directory_count: u64,
         skipped_count: u64,
+    },
+    Cached {
+        task_id: u64,
+        items: Vec<SpaceNode>,
+        total_bytes: u64,
     },
     Done {
         task_id: u64,
@@ -165,7 +170,7 @@ pub fn start_space_scan(
     let manager = manager.inner().clone();
     let (task_id, cancellation) = manager.begin();
     tauri::async_runtime::spawn_blocking(move || {
-        run_space_scan_task(task_id, request, &cancellation, |event| {
+        run_cached_space_scan(task_id, request, &cancellation, |event| {
             on_event.send(event).is_ok()
         });
         manager.finish(task_id);
@@ -269,6 +274,111 @@ impl ScanProgress {
         }
         self.dirty.clear();
         self.last_flush = Instant::now();
+    }
+}
+
+fn run_cached_space_scan<F>(
+    task_id: u64,
+    request: StartSpaceScanRequest,
+    cancellation: &CancellationToken,
+    send: F,
+) where
+    F: FnMut(SpaceScanEvent) -> bool,
+{
+    let cache_path = crate::space_cache::path_for(&request.root);
+    run_scan_with_cache(
+        task_id,
+        request,
+        cancellation,
+        cache_path,
+        |root| crate::native_broker::native_space_stamp(root, cancellation).ok(),
+        send,
+    );
+}
+
+fn run_scan_with_cache<F, S>(
+    task_id: u64,
+    request: StartSpaceScanRequest,
+    cancellation: &CancellationToken,
+    cache_path: Option<PathBuf>,
+    mut stamp: S,
+    mut send: F,
+) where
+    F: FnMut(SpaceScanEvent) -> bool,
+    S: FnMut(&std::path::Path) -> Option<String>,
+{
+    let root = request.root.clone();
+    let depth = request.max_depth();
+    if !send(SpaceScanEvent::Started {
+        task_id,
+        root: root.clone(),
+    }) {
+        cancellation.cancel();
+    }
+    let before = if cancellation.is_cancelled() || cache_path.is_none() {
+        None
+    } else {
+        stamp(&root)
+    };
+    if let (Some(path), Some(watermark)) = (&cache_path, &before)
+        && let Some(cache) = crate::space_cache::load(path, &root, depth, watermark)
+    {
+        let total_bytes = cache.nodes[0].bytes;
+        for chunk in cache.nodes.chunks(request.batch_size()) {
+            if cancellation.is_cancelled() {
+                break;
+            }
+            if !send(SpaceScanEvent::Cached {
+                task_id,
+                items: chunk.to_vec(),
+                total_bytes,
+            }) {
+                cancellation.cancel();
+                break;
+            }
+        }
+    }
+    let mut measurements: HashMap<PathBuf, SpaceNode> = HashMap::new();
+    let mut collect = before.is_some();
+    let mut complete = false;
+    run_space_scan_task(task_id, request, cancellation, |event| {
+        match &event {
+            SpaceScanEvent::Started { .. } => return true,
+            SpaceScanEvent::Batch { items, .. } if collect => {
+                for node in items {
+                    measurements.insert(node.path.clone(), node.clone());
+                    if measurements.len() > crate::space_cache::MAX_NODES {
+                        collect = false;
+                        measurements.clear();
+                        break;
+                    }
+                }
+            }
+            SpaceScanEvent::Done {
+                root,
+                skipped_count,
+                ..
+            } => {
+                complete = collect && *skipped_count == 0 && !root.partial;
+                if complete {
+                    measurements.insert(root.path.clone(), root.clone());
+                }
+            }
+            _ => {}
+        }
+        send(event)
+    });
+    if complete
+        && !cancellation.is_cancelled()
+        && let (Some(path), Some(before)) = (cache_path, before)
+        && stamp(&root).as_ref() == Some(&before)
+        && !cancellation.is_cancelled()
+    {
+        let mut nodes: Vec<_> = measurements.into_values().collect();
+        nodes.sort_unstable_by(|a, b| a.depth.cmp(&b.depth).then_with(|| a.path.cmp(&b.path)));
+        if let Err(error) = crate::space_cache::save(&path, root, depth, before, nodes) {
+            log::debug!("Space preview cache skipped: {error}");
+        }
     }
 }
 
@@ -480,6 +590,114 @@ mod tests {
     use super::*;
     use std::{fs, sync::Mutex};
     use tempfile::tempdir;
+
+    #[test]
+    fn cached_preview_is_always_followed_by_fresh_measurements() {
+        let fixture = tempdir().unwrap();
+        let root = fixture.path().join("measured");
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("old.txt"), b"old").unwrap();
+        let cache = fixture.path().join("cache.json");
+        let request = || StartSpaceScanRequest {
+            root: root.clone(),
+            batch_size: Some(2),
+            max_depth: None,
+        };
+        run_scan_with_cache(
+            1,
+            request(),
+            &CancellationToken::default(),
+            Some(cache.clone()),
+            |_| Some("stamp".into()),
+            |_| true,
+        );
+        assert!(cache.exists());
+        fs::remove_file(root.join("old.txt")).unwrap();
+        fs::write(root.join("new.txt"), b"replacement").unwrap();
+        let mut events = Vec::new();
+        run_scan_with_cache(
+            2,
+            request(),
+            &CancellationToken::default(),
+            Some(cache.clone()),
+            |_| Some("stamp".into()),
+            |event| {
+                events.push(event);
+                true
+            },
+        );
+        assert!(events.iter().any(|event| matches!(event, SpaceScanEvent::Cached { items, .. } if items.iter().any(|node| node.name == "old.txt"))));
+        assert!(events.iter().any(|event| matches!(event, SpaceScanEvent::Batch { items, .. } if items.iter().any(|node| node.name == "new.txt"))));
+        assert!(matches!(
+            events.last(),
+            Some(SpaceScanEvent::Done {
+                total_bytes: 11,
+                ..
+            })
+        ));
+        let saved = crate::space_cache::load(&cache, &root, MAX_DEPTH, "stamp").unwrap();
+        assert!(!saved.nodes.iter().any(|node| node.name == "old.txt"));
+        events.clear();
+        run_scan_with_cache(
+            3,
+            request(),
+            &CancellationToken::default(),
+            Some(cache),
+            |_| Some("changed".into()),
+            |event| {
+                events.push(event);
+                true
+            },
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, SpaceScanEvent::Cached { .. }))
+        );
+    }
+
+    #[test]
+    fn cancelled_or_changing_scans_do_not_replace_cache() {
+        let fixture = tempdir().unwrap();
+        let cache = fixture.path().join("cache.json");
+        let request = || StartSpaceScanRequest {
+            root: fixture.path().to_path_buf(),
+            batch_size: None,
+            max_depth: None,
+        };
+        let mut revision = 0;
+        run_scan_with_cache(
+            1,
+            request(),
+            &CancellationToken::default(),
+            Some(cache.clone()),
+            |_| {
+                revision += 1;
+                Some(revision.to_string())
+            },
+            |_| true,
+        );
+        assert!(!cache.exists());
+        let token = CancellationToken::default();
+        token.cancel();
+        let mut events = Vec::new();
+        run_scan_with_cache(
+            2,
+            request(),
+            &token,
+            Some(cache.clone()),
+            |_| panic!("cancelled scan must not query index"),
+            |event| {
+                events.push(event);
+                true
+            },
+        );
+        assert!(!cache.exists());
+        assert!(matches!(
+            events.last(),
+            Some(SpaceScanEvent::Cancelled { .. })
+        ));
+    }
 
     #[test]
     fn streams_nodes_and_done_with_recursive_sizes() {

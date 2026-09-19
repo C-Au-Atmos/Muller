@@ -4,9 +4,10 @@ import type { CSSProperties, MouseEvent as ReactMouseEvent, PointerEvent as Reac
 import { useAppI18n } from "../../i18n/i18n";
 import { formatSpaceBytes, spaceSnifferClient } from "./spaceSnifferClient";
 import type { SpaceContextAction, SpaceNode, SpaceScanProgress, SpaceSnifferProps } from "./types";
-import { buildSpaceMapLayout, buildSpacePreviewLayout, findDirectionalSpaceRect, interpolateSpaceRects, selectLargestSpaceFolders, spaceNodeBytes, type SpaceDirection, type SpaceRect } from "./spaceLayout";
+import { buildSpaceMapLayout, buildSpacePreviewLayout, findDirectionalSpaceRect, interpolateSpaceRects, selectLargestSpaceFolders, spaceNodeBytes, type SpaceDirection, type SpacePreviewRect, type SpaceRect } from "./spaceLayout";
 import { registerTargetCursorSurface } from "../feedback/targetCursorRegistry";
 import { isImeCompositionEvent } from "../../input/imeInput";
+import { resolveAppCommand } from "../../commands/appCommands";
 import { spaceParentPath } from "./spaceNavigation";
 import { PreviewPanel } from "../preview/PreviewPanel";
 import type { DirectoryEntry } from "../explorer/types";
@@ -28,38 +29,49 @@ function ellipsis(context: CanvasRenderingContext2D, value: string, width: numbe
   while (start < end) { const middle = Math.ceil((start + end) / 2); if (context.measureText(`${value.slice(0, middle)}…`).width <= width) start = middle; else end = middle - 1; }
   return `${value.slice(0, start)}…`;
 }
-function drawPreviewThumbnail(context: CanvasRenderingContext2D, rect: SpaceRect, words: SpaceCopy, previewIds: ReadonlySet<string>) {
-  if (!previewIds.has(rect.node.id) || rect.node.kind !== "folder" || !rect.node.children?.length) return;
+interface PreviewLayout { width: number; height: number; rects: readonly SpacePreviewRect[]; }
+function previewStage(rect: SpaceRect) {
   const roomy = rect.width >= 200 && rect.height >= 130;
   const inset = roomy ? 20 : 11;
-  const stageX = rect.x + inset;
-  const stageY = rect.y + (roomy ? 64 : 43);
-  const stageWidth = rect.width - inset * 2;
-  const stageHeight = rect.y + rect.height - inset - stageY;
-  if (stageWidth < 68 || stageHeight < 32) return;
-  const preview = buildSpacePreviewLayout(rect.node, stageWidth, stageHeight, 2);
-  if (!preview.length) return;
+  const y = rect.y + (roomy ? 67 : 47);
+  return { x: rect.x + inset, y, width: rect.width - inset * 2, height: rect.y + rect.height - inset - y };
+}
+function drawPreviewThumbnail(context: CanvasRenderingContext2D, rect: SpaceRect, words: SpaceCopy, layout: PreviewLayout | undefined): boolean {
+  if (!layout?.rects.length) return false;
+  const stage = previewStage(rect);
+  if (stage.width < 68 || stage.height < 44) return false;
+  const stageX = stage.x; const stageY = stage.y + 17;
+  const stageWidth = stage.width; const stageHeight = stage.height - 17;
+  const scaleX = stageWidth / layout.width; const scaleY = stageHeight / layout.height;
+  context.fillStyle = "rgba(255,255,255,.5)"; context.font = "9px Segoe UI, sans-serif";
+  context.fillText(ellipsis(context, words.preview, stageWidth), stageX, stage.y + 9);
   context.save();
   context.beginPath(); context.rect(stageX, stageY, stageWidth, stageHeight); context.clip();
   context.fillStyle = "rgba(0,0,0,.22)"; context.fillRect(stageX, stageY, stageWidth, stageHeight);
   // Paint direct children first, then their second-level blocks. These are
   // visual hints only; the interactive map remains the outer `rects` list.
-  for (const item of preview) {
-    const x = stageX + item.x; const y = stageY + item.y;
+  for (const item of layout.rects) {
+    const x = stageX + item.x * scaleX; const y = stageY + item.y * scaleY;
+    const width = item.width * scaleX; const height = item.height * scaleY;
     const colors = palette[colorIndex(item.node.id)]!;
     context.fillStyle = item.depth === 1 ? `${colors[0]}b8` : `${colors[1]}d9`;
-    context.fillRect(x, y, item.width, item.height);
+    context.fillRect(x, y, width, height);
     context.strokeStyle = item.depth === 1 ? "rgba(255,255,255,.34)" : "rgba(255,255,255,.22)";
     context.lineWidth = item.depth === 1 ? .7 : .55;
-    context.strokeRect(x + .35, y + .35, Math.max(0, item.width - .7), Math.max(0, item.height - .7));
+    context.strokeRect(x + .35, y + .35, Math.max(0, width - .7), Math.max(0, height - .7));
+    if (width >= 54 && height >= 17) {
+      context.fillStyle = item.depth === 1 ? "#bec3c9" : "#929ba4";
+      context.font = `${item.depth === 1 ? 10 : 9}px Segoe UI, sans-serif`;
+      const title = item.node.id.startsWith("\u0000space-preview-other:") ? words.other : item.node.name;
+      context.fillText(ellipsis(context, title, width - 10), x + 5, y + 12);
+    }
   }
   context.strokeStyle = "rgba(255,255,255,.2)"; context.lineWidth = .65;
   context.strokeRect(stageX + .35, stageY + .35, Math.max(0, stageWidth - .7), Math.max(0, stageHeight - .7));
-  context.fillStyle = "rgba(255,255,255,.58)"; context.font = "9px Segoe UI, sans-serif";
-  context.fillText(words.preview, stageX + 7, stageY + 13);
   context.restore();
+  return true;
 }
-function drawMap(context: CanvasRenderingContext2D, rects: readonly SpaceRect[], width: number, height: number, selected: ReadonlySet<string>, hovered: string | null, words: SpaceCopy, total: number, previewIds: ReadonlySet<string>) {
+function drawMap(context: CanvasRenderingContext2D, rects: readonly SpaceRect[], width: number, height: number, selected: ReadonlySet<string>, hovered: string | null, words: SpaceCopy, total: number, previewLayouts: ReadonlyMap<string, PreviewLayout>) {
   const ratio = window.devicePixelRatio || 1;
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
   context.clearRect(0, 0, width, height);
@@ -87,11 +99,9 @@ function drawMap(context: CanvasRenderingContext2D, rects: readonly SpaceRect[],
         context.fillText(ellipsis(context, `${formatSpaceBytes(spaceNodeBytes(rect.node))}${percent}`, rect.width - inset * 2), rect.x + inset, rect.y + inset + (roomy ? 39 : 30));
       }
     }
-    drawPreviewThumbnail(context, rect, words, previewIds);
-    // The approved SVG uses an open, orthogonal accent inside large tiles.
-    // It does not enclose areas or represent children; drill in to operate on
-    // the next folder level instead of drawing non-interactive miniature tiles.
-    if (roomy && rect.height > 175 && rect.node.kind === "folder" && !rect.members) {
+    const hasPreview = drawPreviewThumbnail(context, rect, words, previewLayouts.get(rect.node.id));
+    // Retain the open orthogonal accent when this folder has no thumbnail.
+    if (!hasPreview && roomy && rect.height > 175 && rect.node.kind === "folder" && !rect.members) {
       const left = rect.x + 22; const right = rect.x + rect.width - 26;
       const top = rect.y + 84; const step = Math.min(28, (rect.height - 112) / 3);
       const turn = Math.min(74, (right - left) * .24);
@@ -115,7 +125,7 @@ function drawMap(context: CanvasRenderingContext2D, rects: readonly SpaceRect[],
   }
 }
 
-export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, client = spaceSnifferClient, onOpenFolder, onCancelScan, onSelectionChange, onSoundEvent, onContextAction, onNavigationChange, showBreadcrumbs = true, mediaAutoplay = false, onMediaAutoplayChange, previewCount = 1, className }: SpaceSnifferProps) {
+export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, operationError, canPaste = false, client = spaceSnifferClient, onOpenFolder, onCancelScan, onSelectionChange, onSoundEvent, onContextAction, onNavigationChange, showBreadcrumbs = true, mediaAutoplay = false, onMediaAutoplayChange, previewCount = 1, onPreviewCountChange, className }: SpaceSnifferProps) {
   const { locale, formatNumber, t } = useAppI18n(); const words = copy[locale];
   const canvasRef = useRef<HTMLCanvasElement>(null); const viewportRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
@@ -140,9 +150,25 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, client = 
   const total = spaceNodeBytes(activeRoot);
   const { rects, grouped } = useMemo(() => buildSpaceMapLayout(activeRoot.children ?? [], size.width, size.height, activeRoot.id), [activeRoot.children, activeRoot.id, size]);
   const previewRoots = useMemo(() => selectLargestSpaceFolders(activeRoot.children ?? [], previewCount), [activeRoot.children, previewCount]);
-  const previewIds = useMemo(() => new Set(previewRoots.map((node) => node.id)), [previewRoots]);
+  const previewLayouts = useMemo(() => {
+    const layouts = new Map<string, PreviewLayout>();
+    for (const node of previewRoots) {
+      const rect = rects.find((item) => item.node.id === node.id && !item.members);
+      if (!rect) continue;
+      const stage = previewStage(rect);
+      if (stage.width < 68 || stage.height < 44) continue;
+      const height = stage.height - 17;
+      const thumbnailRects = buildSpacePreviewLayout(node, stage.width, height, 2);
+      if (thumbnailRects.length) layouts.set(node.id, { width: stage.width, height, rects: thumbnailRects });
+    }
+    return layouts;
+  }, [previewRoots, rects]);
   const currentNodes = useMemo(() => new Map((activeRoot.children ?? []).map((node) => [node.id, node])), [activeRoot.children]);
-  const currentSelection = selected.map((node) => currentNodes.get(node.id) ?? node);
+  const hasFinalTree = (activeProgress?.phase ?? "complete") === "complete" && !activeProgress?.cachePreview && !activeRoot.scanning;
+  const currentSelection = useMemo(() => selected.flatMap((node) => {
+    const current = currentNodes.get(node.id);
+    return current ? [current] : hasFinalTree ? [] : [node];
+  }), [currentNodes, hasFinalTree, selected]);
   const selectedIds = useMemo(() => new Set(selected.map((node) => node.id)), [selected]);
   const showingGroupSummary = groupOpen && !groupDetailOpen && grouped.length > 0 && grouped.length === selectedIds.size && grouped.every((node) => selectedIds.has(node.id));
   const selectedRectIds = useMemo(() => {
@@ -150,6 +176,26 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, client = 
     return new Set(rects.filter((rect) => rect.members ? rect.members.some((node) => selectedIds.has(node.id)) : selectedIds.has(rect.node.id)).map((rect) => rect.node.id));
   }, [rects, selectedIds]);
   const historyIndexes = useMemo(() => new Map(rootHistory.map((node, index) => [breadcrumbKey(node.path), index])), [rootHistory]);
+  useLayoutEffect(() => {
+    if (!hasFinalTree) return;
+    const typeChanged = selected.some((node) => {
+      const current = currentNodes.get(node.id);
+      return current && current.kind !== node.kind;
+    });
+    if (currentSelection.length !== selected.length || typeChanged) {
+      setSelected(currentSelection);
+      onSelectionChange?.(currentSelection);
+      setPreviewOpen(false);
+      if (!currentSelection.length) { setGroupOpen(false); setGroupDetailOpen(false); }
+    }
+    if (contextMenu?.node) {
+      const current = currentNodes.get(contextMenu.node.id);
+      if (!current || current.kind !== contextMenu.node.kind) {
+        setContextMenu(null);
+        if (contextMenuRef.current?.contains(document.activeElement)) viewportRef.current?.focus();
+      } else if (current !== contextMenu.node) setContextMenu({ ...contextMenu, node: current });
+    }
+  }, [contextMenu, currentNodes, currentSelection, hasFinalTree, onSelectionChange, selected]);
   useEffect(() => {
     if (externalRootRef.current === root && externalRequestRef.current === rootRequestId) return;
     const changedPath = externalRootRef.current.path !== root.path || externalRequestRef.current !== rootRequestId;
@@ -173,6 +219,7 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, client = 
       if (event instanceof KeyboardEvent && event.key !== "Escape") return;
       if (event instanceof MouseEvent && (event.target as HTMLElement | null)?.closest(".space-sniffer__context-menu")) return;
       setContextMenu(null);
+      if (event instanceof KeyboardEvent) { event.preventDefault(); viewportRef.current?.focus(); }
     };
     window.addEventListener("keydown", close); window.addEventListener("mousedown", close);
     return () => { window.removeEventListener("keydown", close); window.removeEventListener("mousedown", close); };
@@ -192,8 +239,8 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, client = 
       setContextMenu((current) => current ? { ...current, x, y } : current);
     }
     const firstItem = menu.querySelector<HTMLButtonElement>('[role="menuitem"]');
-    if (firstItem && !menu.contains(document.activeElement)) firstItem.focus();
-  }, [contextMenu]);
+    if (firstItem && !menu.contains(document.activeElement)) firstItem.focus({ preventScroll: true });
+  }, [contextMenu, size.height, size.width]);
   useEffect(() => {
     const handleMove = (event: PointerEvent) => {
       const resize = resizeRef.current; const body = bodyRef.current;
@@ -221,9 +268,9 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, client = 
     const ratio = window.devicePixelRatio || 1; const pixelWidth = Math.max(1, Math.round(size.width * ratio)); const pixelHeight = Math.max(1, Math.round(size.height * ratio));
     if (canvas.width !== pixelWidth) canvas.width = pixelWidth; if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
     canvas.style.width = `${size.width}px`; canvas.style.height = `${size.height}px`;
-    paintRef.current = (frame) => drawMap(context, frame, size.width, size.height, selectedRectIds, hovered, words, total, previewIds);
+    paintRef.current = (frame) => drawMap(context, frame, size.width, size.height, selectedRectIds, hovered, words, total, previewLayouts);
     paintRef.current(displayedRectsRef.current);
-  }, [hovered, previewIds, selectedRectIds, size, total, words]);
+  }, [hovered, previewLayouts, selectedRectIds, size, total, words]);
   useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
     const samePath = animationPathRef.current === activeRoot.path; animationPathRef.current = activeRoot.path;
@@ -306,6 +353,7 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, client = 
     setPreviewOpen((open) => !open);
   }, [contextMenu, selected.length, showingGroupSummary]);
   useImperativeHandle(ref, () => ({
+    focus: () => viewportRef.current?.focus({ preventScroll: true }),
     up: () => { if (!contextMenu) up(); },
     back: () => { if (!contextMenu) restoreHistory(rootHistory.length - 1); },
     forward: () => { if (!contextMenu) forward(); },
@@ -328,6 +376,7 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, client = 
   const hitTest = (point: Point) => displayedRectsRef.current.find((rect) => point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height);
   const runContextAction = useCallback((action: SpaceContextAction, node: SpaceNode | null = contextMenu?.node ?? null) => {
     setContextMenu(null);
+    viewportRef.current?.focus();
     onContextAction?.(action, node, selected);
   }, [contextMenu?.node, onContextAction, selected]);
   useEffect(() => {
@@ -357,7 +406,8 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, client = 
   };
   const showContextMenu = (event: ReactMouseEvent, node: SpaceNode) => {
     event.preventDefault(); event.stopPropagation();
-    selectGroupItem(node);
+    setGroupDetailOpen(true);
+    if (!selectedIds.has(node.id)) emitSelection([node]);
     const point = contextPoint(event);
     setContextMenu({ ...point, node });
   };
@@ -381,20 +431,19 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, client = 
   const handleOperationKeyDown = (event: React.KeyboardEvent<HTMLElement>): boolean => {
     if (event.defaultPrevented || isImeCompositionEvent(event.nativeEvent) || contextMenu) return false;
     const target = event.target instanceof HTMLElement ? event.target : null;
-    if (target?.closest('input, textarea, select, [contenteditable=true], [role="menu"], [role="dialog"]')) return false;
-    const modifier = event.ctrlKey || event.metaKey;
-    if (modifier && !event.altKey) {
-      const key = event.key.toLowerCase();
-      if (key === "c") { event.preventDefault(); runContextAction("copy", null); return true; }
-      if (key === "x") { event.preventDefault(); runContextAction("cut", null); return true; }
-      if (key === "v") { event.preventDefault(); runContextAction("paste", currentSelection.length === 1 ? currentSelection[0]! : null); return true; }
-      if (key === "a") { event.preventDefault(); emitSelection(activeRoot.children ?? []); setGroupOpen(false); return true; }
-      return false;
+    if (target?.closest('input, textarea, select, [contenteditable=true], [role="menu"], [role="dialog"], .preview-panel')) return false;
+    const command = resolveAppCommand(event.nativeEvent);
+    const hasSelection = currentSelection.length > 0 && !showingGroupSummary;
+    if (command === "copySelection" || command === "cutSelection") {
+      event.preventDefault();
+      if (hasSelection) runContextAction(command === "copySelection" ? "copy" : "cut", null);
+      return true;
     }
-    if (event.altKey) return false;
-    if (event.key === "Delete" && currentSelection.length) { event.preventDefault(); runContextAction("recycle", currentSelection[0]); return true; }
-    if (event.key === "F2" && currentSelection.length === 1) { event.preventDefault(); runContextAction("rename", currentSelection[0]); return true; }
-    if (event.key === "F5") { event.preventDefault(); runContextAction("refresh", null); return true; }
+    if (command === "paste") { event.preventDefault(); runContextAction("paste", null); return true; }
+    if (command === "selectAll") { event.preventDefault(); emitSelection(activeRoot.children ?? []); setGroupOpen(false); setGroupDetailOpen(false); return true; }
+    if (command === "recycleSelection") { event.preventDefault(); if (hasSelection) runContextAction("recycle", currentSelection[0]); return true; }
+    if (command === "renameSelection") { event.preventDefault(); if (hasSelection && currentSelection.length === 1) runContextAction("rename", currentSelection[0]); return true; }
+    if (command === "refresh") { event.preventDefault(); runContextAction("refresh", null); return true; }
     return false;
   };
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -404,7 +453,7 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, client = 
     if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) { event.preventDefault(); moveKeyboardSelection(event.key); return; }
     if (event.key === "Escape" && previewOpen) { event.preventDefault(); setPreviewOpen(false); }
     else if (event.key === "Escape" && rootHistory.length) { event.preventDefault(); restoreHistory(rootHistory.length - 1); }
-    else if (event.key === "Enter" && !showingGroupSummary && currentSelection.length === 1 && currentSelection[0]?.kind === "folder") { event.preventDefault(); openFolder(currentSelection[0]); }
+    else if (event.key === "Enter" && !showingGroupSummary && currentSelection.length === 1 && currentSelection[0]) { event.preventDefault(); activateNode(currentSelection[0]); }
   };
   const crumbs = pathParts(activeRoot.path); const selectedBytes = currentSelection.reduce((sum, node) => sum + spaceNodeBytes(node), 0); const single = currentSelection.length === 1 && !showingGroupSummary ? currentSelection[0] : undefined;
   const previewEntry: DirectoryEntry | null = single ? {
@@ -412,7 +461,9 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, client = 
     size: spaceNodeBytes(single), extension: single.extension ?? (single.kind === "file" ? single.name.split(".").slice(1).at(-1) ?? null : null),
     modifiedUnixMs: single.modifiedAt ?? null, hidden: false,
   } : null;
-  const statusText = scanning ? words.scanning : activeProgress?.phase === "error" ? words.failed : activeProgress?.phase === "idle" ? words.stopped : words.complete;
+  const statusText = scanning
+    ? activeProgress?.cachePreview ? locale === "zh-CN" ? "缓存预览 · 正在校正" : "Cached preview · verifying" : words.scanning
+    : activeProgress?.phase === "error" ? words.failed : activeProgress?.phase === "idle" ? words.stopped : words.complete;
   return (
     <section className={`space-sniffer${className ? ` ${className}` : ""}`} aria-label="Space Sniffer" data-root-path={activeRoot.path} onKeyDown={(event) => {
       if (!previewOpen || contextMenu || event.key !== "Escape" || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || isImeCompositionEvent(event.nativeEvent)) return;
@@ -421,29 +472,55 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, client = 
     }}>
       <header className="space-sniffer__toolbar">
         <div className="space-sniffer__heading"><span className="space-sniffer__title">{words.title}</span><span className="space-sniffer__status">{formatSpaceBytes(total)} {words.scanned} · {formatNumber(activeRoot.children?.length ?? activeRoot.childCount ?? 0)} {words.items}</span></div>
-        <div className="space-sniffer__scan"><span className={`space-sniffer__scan-state${scanning ? " is-scanning" : ""}${activeProgress?.phase === "error" ? " is-error" : ""}`} role="status"><i />{statusText}</span>{scanning ? <button type="button" className="space-sniffer__button" onClick={stopScan}>{words.stop}</button> : null}</div>
+        <div className="space-sniffer__scan">{onPreviewCountChange ? <label className="space-sniffer__preview-count" title={t("spacePreviewCountDetail")}><span>{t("spacePreviewCount")}</span><select aria-label={t("spacePreviewCount")} value={previewCount} onChange={(event) => onPreviewCountChange(Number(event.target.value) as 1 | 2 | 3)}><option value="1">{t("spacePreviewOne")}</option><option value="2">{t("spacePreviewTwo")}</option><option value="3">{t("spacePreviewThree")}</option></select></label> : null}<span className={`space-sniffer__scan-state${scanning ? " is-scanning" : ""}${activeProgress?.phase === "error" ? " is-error" : ""}`} role="status"><i />{statusText}</span>{scanning ? <button type="button" className="space-sniffer__button" onClick={stopScan}>{words.stop}</button> : null}</div>
         {showBreadcrumbs ? <nav className="space-sniffer__crumbs" aria-label="Folder path">
           {crumbs.map((crumb, index) => { const historyIndex = historyIndexes.get(crumbs.slice(0, index + 1).join("\\").toLowerCase()); const isCurrent = index === crumbs.length - 1;
             return <span key={`${crumb}-${index}`}>{!isCurrent && historyIndex !== undefined ? <button className="space-sniffer__crumb" type="button" onClick={() => restoreHistory(historyIndex)}>{crumb}</button> : <span className={`space-sniffer__crumb${isCurrent ? " is-current" : ""}`} aria-current={isCurrent ? "page" : undefined}>{crumb}</span>}{index < crumbs.length - 1 ? <span className="space-sniffer__crumb-separator">/</span> : null}</span>; })}
         </nav> : null}
       </header>
+      {operationError ? <div className="space-sniffer__notice" role="alert">{operationError}</div> : null}
       {activeProgress?.message ? <div className="space-sniffer__notice" role="alert">{activeProgress.message}</div> : null}
       <div ref={bodyRef} className="space-sniffer__body" style={{ "--space-details-width": `${detailsWidth}px` } as CSSProperties}>
         <div className="space-sniffer__map">
-          <div className="space-sniffer__legend"><span>{words.legend}</span><span>{words.seams}</span>{previewRoots.length ? <span>{words.preview} · {previewRoots.length}</span> : null}{activeRoot.partial ? <span>{words.partial}</span> : null}</div>
-          <div ref={viewportRef} className="space-sniffer__viewport" onContextMenu={(event) => { event.preventDefault(); const rect = hitTest(localPoint(event)); const node = rect?.members?.[0] ?? rect?.node ?? null; setGroupDetailOpen(false); if (node) emitSelection([node]); setContextMenu({ ...localPoint(event), node }); }} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={() => { pointerRef.current = null; setMarquee(null); }} onPointerLeave={() => setHovered(null)} onDoubleClick={handleDoubleClick} onKeyDown={handleKeyDown} role="application" aria-label="Folder space map" tabIndex={0}>
-            <canvas ref={canvasRef} className="space-sniffer__canvas" aria-hidden="true" data-visible-count={rects.length} data-area-bytes={total} data-preview-count={previewRoots.length} data-preview-depth="2" />
+          <div className="space-sniffer__legend"><span>{words.legend}</span><span>{words.seams}</span>{previewLayouts.size ? <span>{words.preview} · {previewLayouts.size}</span> : null}{activeRoot.partial ? <span>{words.partial}</span> : null}</div>
+          <div ref={viewportRef} className="space-sniffer__viewport" onContextMenu={(event) => {
+            event.preventDefault();
+            if ((event.target as HTMLElement).closest('[role="menu"]')) return;
+            const rect = hitTest(localPoint(event));
+            if (rect?.members) { setGroupOpen(true); setGroupDetailOpen(false); emitSelection(rect.members); setContextMenu(null); return; }
+            const node = rect?.node ?? null;
+            setGroupDetailOpen(false);
+            if (node && !selectedIds.has(node.id)) emitSelection([node]);
+            if (!node) emitSelection([]);
+            setContextMenu({ ...localPoint(event), node });
+          }} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={() => { pointerRef.current = null; setMarquee(null); }} onPointerLeave={() => setHovered(null)} onDoubleClick={handleDoubleClick} onKeyDown={handleKeyDown} role="application" aria-label="Folder space map" tabIndex={0}>
+            <canvas ref={canvasRef} className="space-sniffer__canvas" aria-hidden="true" data-visible-count={rects.length} data-area-bytes={total} data-preview-count={previewLayouts.size} data-preview-depth="2" />
             {!rects.length ? <div className="space-sniffer__awaiting">{scanning ? <span className="space-sniffer__discovery" /> : null}<span>{scanning ? words.noBytes : words.zero}</span></div> : null}
             {marquee ? <div className="space-sniffer__marquee" style={{ left: Math.min(marquee.start.x, marquee.current.x), top: Math.min(marquee.start.y, marquee.current.y), width: Math.abs(marquee.current.x - marquee.start.x), height: Math.abs(marquee.current.y - marquee.start.y) }} /> : null}
-            {contextMenu ? <div ref={contextMenuRef} className="space-sniffer__context-menu" role="menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
+            {contextMenu ? <div ref={contextMenuRef} className="space-sniffer__context-menu" role="menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()} onPointerMove={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onKeyDown={(event) => {
+              if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+              event.preventDefault(); event.stopPropagation();
+              const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)'));
+              const index = items.indexOf(document.activeElement as HTMLButtonElement);
+              const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+              const item = items[next];
+              if (item) {
+                item.focus({ preventScroll: true });
+                const menu = event.currentTarget;
+                const top = item.offsetTop;
+                const bottom = top + item.offsetHeight;
+                if (top < menu.scrollTop) menu.scrollTop = top;
+                else if (bottom > menu.scrollTop + menu.clientHeight) menu.scrollTop = bottom - menu.clientHeight;
+              }
+            }}>
               {contextMenu.node ? <>
-                <button type="button" role="menuitem" onClick={() => { if (contextMenu.node?.kind === "folder") { setContextMenu(null); openFolder(contextMenu.node); } else runContextAction("open"); }}>{words.open}</button>
+                <button type="button" role="menuitem" onClick={() => { if (contextMenu.node?.kind === "folder") { setContextMenu(null); openFolder(contextMenu.node); } else runContextAction("open"); }}>{contextMenu.node.kind === "folder" ? words.open : t("open")}</button>
                 {contextMenu.node.kind === "file" ? <button type="button" role="menuitem" onClick={() => runContextAction("open-with")}>{words.openWith}</button> : null}
-                {contextMenu.node.kind === "folder" ? <button type="button" role="menuitem" onClick={() => runContextAction("custom-organize")}>{words.organize}</button> : null}
                 <button type="button" role="menuitem" onClick={() => runContextAction("locate")}>{words.locate}</button>
                 <span className="menu-separator" />
                 <button type="button" role="menuitem" onClick={() => runContextAction("copy")}>{words.copy}</button>
                 <button type="button" role="menuitem" onClick={() => runContextAction("cut")}>{words.cut}</button>
+                <button type="button" role="menuitem" disabled={!canPaste} onClick={() => runContextAction("paste")}>{words.paste}</button>
                 <button type="button" role="menuitem" onClick={() => runContextAction("copy-name")}>{words.copyName}</button>
                 <button type="button" role="menuitem" onClick={() => runContextAction("copy-path")}>{words.copyPath}</button>
                 <span className="menu-separator" />
@@ -463,7 +540,7 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, client = 
                 <button type="button" role="menuitem" onClick={() => runContextAction("new-text-document")}>{words.newText}</button>
                 <button type="button" role="menuitem" onClick={() => runContextAction("new-empty-file")}>{words.newEmpty}</button>
                 <span className="menu-separator" />
-                <button type="button" role="menuitem" onClick={() => runContextAction("paste")}>{words.paste}</button>
+                <button type="button" role="menuitem" disabled={!canPaste} onClick={() => runContextAction("paste")}>{words.paste}</button>
                 <button type="button" role="menuitem" onClick={() => runContextAction("refresh")}>{words.refresh}</button>
               </>}
             </div> : null}
