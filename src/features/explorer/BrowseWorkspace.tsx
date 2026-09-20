@@ -62,6 +62,7 @@ import {
   openNativePath,
   cancelFileOperation,
   recycleEntry,
+  RecycleEntryChangedError,
   renameEntry,
   transferDirectoryEntries,
   transferEntry,
@@ -1399,20 +1400,24 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
       setBusy(true);
       let succeeded = 0;
       const failed: DirectoryEntry[] = [];
+      const failures: string[] = [];
       try {
         for (const entry of recycleTarget) {
           try {
             await recycleEntry(entry);
             succeeded += 1;
-          } catch {
+          } catch (error) {
             failed.push(entry);
+            failures.push(error instanceof RecycleEntryChangedError
+              ? t("recycleEntryChanged", { path: displayPath(error.path) })
+              : errorMessage(error, t("unableRecycleEntry")));
           }
         }
         const summary = t("recycledItems", { count: formatNumber(succeeded) });
         if (succeeded > 0) clearOrganizeUndo();
         setNotice(summary);
         setRecycleTarget(failed);
-        setError(failed.length > 0 ? t("recycleFailures", { count: formatNumber(failed.length) }) : null);
+        setError(failed.length > 0 ? `${t("recycleFailures", { count: formatNumber(failed.length) })}\n${failures.join("\n")}` : null);
         if (succeeded > 0) onSuccess(summary);
         refreshBoth();
       } catch (operationError) {

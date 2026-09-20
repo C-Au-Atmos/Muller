@@ -9,6 +9,8 @@ export interface SpaceNode {
   size?: number;
   kind: "folder" | "file";
   children?: readonly SpaceNode[];
+  /** False at the display-depth boundary; bytes/counts still include deeper entries. */
+  childrenComplete?: boolean;
   parent?: string;
   depth?: number;
   childCount?: number;

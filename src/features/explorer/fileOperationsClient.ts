@@ -130,20 +130,35 @@ export async function renameEntry(
   });
 }
 
+export class RecycleEntryChangedError extends Error {
+  constructor(readonly path: string) {
+    super(`Item changed since it was displayed. Refresh and try again: ${path}`);
+    this.name = "RecycleEntryChangedError";
+  }
+}
+
 export async function recycleEntry(entry: DirectoryEntry): Promise<string> {
   requireDesktop();
   if (entry.kind !== "file" && entry.kind !== "directory") {
     throw new Error("Symbolic links and special entries cannot be recycled here");
   }
-  return invoke("recycle_entry", {
-    expectation: {
-      path: entry.path,
-      kind: entry.kind,
-      size: entry.size,
-      modifiedUnixMs: entry.modifiedUnixMs,
-      expectedBlake3: null,
-    },
-  });
+  try {
+    return await invoke("recycle_entry", {
+      expectation: {
+        path: entry.path,
+        kind: entry.kind,
+        size: entry.kind === "file" ? entry.size : 0,
+        modifiedUnixMs: entry.modifiedUnixMs,
+        expectedBlake3: null,
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.startsWith("entry changed since it was displayed; refresh and try again: ")) {
+      throw new RecycleEntryChangedError(entry.path);
+    }
+    throw error;
+  }
 }
 
 export type OpenPathOutcome = "opened" | "chooser_completed" | "chooser_cancelled";

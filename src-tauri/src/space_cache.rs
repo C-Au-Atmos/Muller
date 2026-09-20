@@ -11,13 +11,14 @@ use std::{
 
 const MAX_BYTES: u64 = 32 * 1024 * 1024;
 pub(crate) const MAX_NODES: usize = 100_000;
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct SpaceCache {
     version: u32,
     root: PathBuf,
     depth: u32,
+    display_depth: u32,
     stamp: String,
     pub nodes: Vec<SpaceNode>,
 }
@@ -29,12 +30,18 @@ pub(crate) fn path_for(root: &Path) -> Option<PathBuf> {
     Some(
         PathBuf::from(base)
             .join("Muller")
-            .join("space-cache-v1")
+            .join("space-cache-v2")
             .join(format!("{:016x}.json", hash.finish())),
     )
 }
 
-pub(crate) fn load(path: &Path, root: &Path, depth: u32, stamp: &str) -> Option<SpaceCache> {
+pub(crate) fn load(
+    path: &Path,
+    root: &Path,
+    depth: u32,
+    display_depth: u32,
+    stamp: &str,
+) -> Option<SpaceCache> {
     let file = fs::File::open(path).ok()?;
     if file.metadata().ok()?.len() > MAX_BYTES {
         return None;
@@ -48,6 +55,7 @@ pub(crate) fn load(path: &Path, root: &Path, depth: u32, stamp: &str) -> Option<
     if cache.version != VERSION
         || cache.root != root
         || cache.depth != depth
+        || cache.display_depth != display_depth
         || cache.stamp != stamp
         || cache.nodes.is_empty()
         || cache.nodes.len() > MAX_NODES
@@ -87,6 +95,7 @@ pub(crate) fn save(
     path: &Path,
     root: PathBuf,
     depth: u32,
+    display_depth: u32,
     stamp: String,
     nodes: Vec<SpaceNode>,
 ) -> Result<(), String> {
@@ -98,6 +107,7 @@ pub(crate) fn save(
         version: VERSION,
         root,
         depth,
+        display_depth,
         stamp,
         nodes,
     })
@@ -181,30 +191,77 @@ mod tests {
             name: "measured".into(),
             kind: SpaceNodeKind::Directory,
             bytes: 12,
+            modified_unix_ms: Some(1_700_000_000_000),
             depth: 0,
             child_count: 0,
             partial: false,
             scanning: false,
         };
-        save(&path, root.clone(), 64, "usn1".into(), vec![node.clone()]).unwrap();
-        assert_eq!(load(&path, &root, 64, "usn1").unwrap().nodes[0].bytes, 12);
-        assert!(load(&path, &root, 64, "usn2").is_none());
-        assert!(load(&path, &root, 32, "usn1").is_none());
-        assert!(load(&path, tmp.path(), 64, "usn1").is_none());
+        save(
+            &path,
+            root.clone(),
+            64,
+            3,
+            "usn1".into(),
+            vec![node.clone()],
+        )
+        .unwrap();
+        assert_eq!(
+            load(&path, &root, 64, 3, "usn1").unwrap().nodes[0].bytes,
+            12
+        );
+        assert_eq!(
+            load(&path, &root, 64, 3, "usn1").unwrap().nodes[0].modified_unix_ms,
+            node.modified_unix_ms
+        );
+        assert!(load(&path, &root, 64, 3, "usn2").is_none());
+        assert!(load(&path, &root, 32, 3, "usn1").is_none());
+        assert!(load(&path, &root, 64, 4, "usn1").is_none());
+        assert!(load(&path, tmp.path(), 64, 3, "usn1").is_none());
         let mut changed = node;
         changed.bytes = 30;
         save(
             &path,
             root.clone(),
             64,
+            3,
             "usn2".into(),
             vec![changed.clone()],
         )
         .unwrap();
-        assert_eq!(load(&path, &root, 64, "usn2").unwrap().nodes[0].bytes, 30);
+        assert_eq!(
+            load(&path, &root, 64, 3, "usn2").unwrap().nodes[0].bytes,
+            30
+        );
         changed.partial = true;
-        assert!(save(&path, root, 64, "usn3".into(), vec![changed]).is_err());
+        assert!(save(&path, root, 64, 3, "usn3".into(), vec![changed]).is_err());
         fs::write(&path, b"broken").unwrap();
-        assert!(load(&path, tmp.path(), 64, "usn2").is_none());
+        assert!(load(&path, tmp.path(), 64, 3, "usn2").is_none());
+    }
+
+    #[test]
+    fn rejects_legacy_measurements_without_a_mutation_timestamp() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("cache.json");
+        let root = tmp.path().join("measured");
+        let legacy = serde_json::json!({
+            "version": 1,
+            "root": root,
+            "depth": 64,
+            "stamp": "usn1",
+            "nodes": [{
+                "path": root,
+                "parent": null,
+                "name": "measured",
+                "kind": "directory",
+                "bytes": 12,
+                "depth": 0,
+                "childCount": 0,
+                "partial": false,
+                "scanning": false
+            }]
+        });
+        fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+        assert!(load(&path, &root, 64, 3, "usn1").is_none());
     }
 }

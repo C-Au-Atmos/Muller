@@ -2,12 +2,13 @@ import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 
 import type { SpaceNode, SpaceScanProgress, SpaceScanProgressCallback, SpaceSnifferClient } from "./types";
 
-interface SpaceScanItem {
+export interface SpaceScanItem {
   path: string;
   parent: string | null;
   name: string;
   kind: "file" | "directory";
   bytes: number;
+  modifiedUnixMs?: number | null;
   depth: number;
   childCount: number;
   partial: boolean;
@@ -66,7 +67,9 @@ function pathKey(path: string): string {
 }
 
 /** Parent indexes make upserts O(1); only dirty branches are copied on publication. */
-class SpaceTree {
+export const SPACE_DISPLAY_DEPTH = 3;
+
+export class SpaceTree {
   private readonly entries = new Map<string, TreeEntry>();
   private readonly root: TreeEntry;
   private readonly rootKey: string;
@@ -115,6 +118,12 @@ class SpaceTree {
     const key = pathKey(item.path);
     // Reject malformed/out-of-root records rather than attaching them to the wrong tree.
     if (key !== this.rootKey && !key.startsWith(`${this.rootKey === "\\" ? "" : this.rootKey}\\`)) return;
+    // The current map needs direct entries and two thumbnail levels. Scanning
+    // still measures deeper files and updates these ancestors' exact totals.
+    // Opening any folder starts its own scan, so retaining deeper trees here
+    // would only duplicate snapshots that navigation never reuses.
+    const relativeDepth = key === this.rootKey ? 0 : key.slice(this.rootKey.length).split("\\").filter(Boolean).length;
+    if (relativeDepth > SPACE_DISPLAY_DEPTH) return;
     const entry = this.ensure(item.path);
     if (key !== this.rootKey && item.parent !== null) {
       const parentKey = pathKey(item.parent);
@@ -139,9 +148,11 @@ class SpaceTree {
       extension: item.kind === "file" && item.name.lastIndexOf(".") > 0 ? item.name.slice(item.name.lastIndexOf(".") + 1).toLowerCase() || undefined : undefined,
       bytes: item.bytes,
       size: item.bytes,
+      modifiedAt: item.modifiedUnixMs ?? undefined,
       parent: item.parent ?? undefined,
       depth: item.depth,
       childCount: item.childCount,
+      childrenComplete: item.childCount === 0 || relativeDepth < SPACE_DISPLAY_DEPTH,
       partial: item.partial,
       scanning: item.scanning ?? false,
     };
@@ -164,6 +175,17 @@ class SpaceTree {
       return entry.snapshot;
     };
     return visit(this.root);
+  }
+
+  get retainedNodeCount(): number { return this.entries.size; }
+
+  clear() {
+    // Native channels may remain registered briefly after Done/cancellation.
+    // Detach the mutable maps immediately; published immutable nodes survive
+    // only while the active view or bounded navigation history needs them.
+    this.entries.clear();
+    this.root.children.clear();
+    this.root.snapshot = null;
   }
 }
 
@@ -197,6 +219,10 @@ function scanNative(path: string, signal?: AbortSignal, onProgress?: SpaceScanPr
       if (settled) return;
       settled = true;
       cleanup();
+      freshTree.clear();
+      cachedTree?.clear();
+      cachedTree = null;
+      if (taskId !== null) channel.onmessage = () => undefined;
       reject(error);
     };
     const abort = () => {
@@ -248,12 +274,15 @@ function scanNative(path: string, signal?: AbortSignal, onProgress?: SpaceScanPr
         updateProgress(event, "scanning");
         if (onProgress && publishTimer === undefined) publishTimer = setTimeout(publish, 100);
       } else if (event.type === "done") {
+        cachedTree?.clear();
         cachedTree = null;
         if (event.root && typeof event.root !== "string") freshTree.upsert(event.root);
         freshTree.updateRoot(event.totalBytes, true);
         updateProgress(event, "complete");
         cleanup();
         const root = freshTree.snapshot();
+        freshTree.clear();
+        channel.onmessage = () => undefined;
         onProgress?.(root, progress);
         settled = true;
         resolve(root);
@@ -271,11 +300,12 @@ function scanNative(path: string, signal?: AbortSignal, onProgress?: SpaceScanPr
     // Do not await the start response before observing cancellation. It can arrive
     // after the user has left this view; then cancel the newly learned task ID.
     void invoke<{ taskId: number }>("start_space_scan", {
-      request: { root: path, batchSize: 256, maxDepth: 64 },
+      request: { root: path, batchSize: 256, maxDepth: 64, displayDepth: SPACE_DISPLAY_DEPTH },
       onEvent: channel,
     }).then((response) => {
       if (taskId === null) taskId = response.taskId;
       if (aborted) cancelTask();
+      if (settled) channel.onmessage = () => undefined;
     }).catch((error: unknown) => fail(error instanceof Error ? error : new Error(String(error))));
   });
 }

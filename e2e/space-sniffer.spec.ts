@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 test("Space Sniffer opens, selects, drills into a folder, and returns", async ({ page }) => {
   const errors: string[] = [];
@@ -274,7 +276,7 @@ async function publishSpaceBatch(page: import("@playwright/test").Page, index: n
     const task = state.tasks[taskIndex];
     const totalBytes = sizes[0] + sizes[1];
     const root = { path: task.root, parent: null, name: task.root.split("\\").filter(Boolean).at(-1), kind: "directory", bytes: totalBytes, depth: 0, childCount: 2, partial: false, scanning: !complete };
-    const items = sizes.map((bytes, i) => ({ path: `${task.root.replace(/[\\/]+$/, "")}\\${i === 0 ? "Projects" : "Media"}`, parent: task.root, name: i === 0 ? "Projects" : "Media", kind: entryKind, bytes, depth: 1, childCount: 4, partial: false, scanning: !complete }));
+    const items = sizes.map((bytes, i) => ({ path: `${task.root.replace(/[\\/]+$/, "")}\\${i === 0 ? "Projects" : "Media"}`, parent: task.root, name: i === 0 ? "Projects" : "Media", kind: entryKind, bytes, modifiedUnixMs: 1_758_345_600_123 + i * 100, depth: 1, childCount: 4, partial: false, scanning: !complete }));
     task.channel.onmessage({ type: "batch", taskId: task.id, items: [...items, root], totalBytes, fileCount: 8, directoryCount: 3, skippedCount: 0 });
     if (complete) task.channel.onmessage({ type: "done", taskId: task.id, root, totalBytes, fileCount: 8, directoryCount: 3, skippedCount: 0 });
   }, { taskIndex: index, sizes: weights, complete: done, entryKind: kind });
@@ -453,12 +455,54 @@ test("space file shortcuts copy, paste into the current directory, rename, recyc
   page.once("dialog", (dialog) => dialog.accept());
   await viewport.press("Delete");
   await expect.poll(operations).toHaveLength(3);
-  expect((await operations())[2]).toMatchObject({ command: "recycle_entry", payload: { expectation: { path: "D:\\Muller\\Projects", kind: "directory" } } });
+  expect((await operations())[2]).toMatchObject({ command: "recycle_entry", payload: { expectation: { path: "D:\\Muller\\Projects", kind: "directory", size: 0, modifiedUnixMs: 1_758_345_600_123 } } });
   await expect.poll(() => spaceTaskCount(page)).toBe(4);
   await publishSpaceBatch(page, 3, [900_000, 100_000], true);
   await viewport.press("F5");
   await expect.poll(() => spaceTaskCount(page)).toBe(5);
   await expect(region).toHaveAttribute("data-root-path", "D:\\Muller");
+});
+
+test("space file recycle retains the scan timestamp and reports a changed item without retrying", async ({ page }) => {
+  await openStreamSpace(page);
+  const region = page.getByRole("region", { name: "Space Sniffer" });
+  const viewport = region.getByRole("application", { name: "Folder space map" });
+  const canvas = region.locator("canvas");
+  await page.evaluate(() => {
+    const runtime = window as unknown as {
+      __recycleExpectations: unknown[];
+      __TAURI_INTERNALS__: { invoke: (command: string, payload: { expectation?: unknown }) => unknown };
+    };
+    runtime.__recycleExpectations = [];
+    const original = runtime.__TAURI_INTERNALS__.invoke;
+    runtime.__TAURI_INTERNALS__.invoke = (command, payload) => {
+      if (command === "recycle_entry") {
+        runtime.__recycleExpectations.push(payload.expectation);
+        return Promise.reject(new Error("entry changed since it was displayed; refresh and try again: \\\\?\\D:\\Muller\\響喜乱舞.zip"));
+      }
+      return original(command, payload);
+    };
+  });
+  await expect.poll(() => spaceTaskCount(page)).toBe(1);
+  await page.evaluate(() => {
+    const task = (globalThis as typeof globalThis & { __spaceStream: SpaceMockRuntime }).__spaceStream.tasks[0];
+    const file = { path: `${task.root}\\響喜乱舞.zip`, parent: task.root, name: "響喜乱舞.zip", kind: "file", bytes: 4096, modifiedUnixMs: 1_758_345_600_456, depth: 1, childCount: 0, partial: false, scanning: false };
+    task.channel.onmessage({ type: "batch", taskId: task.id, items: [file], totalBytes: 4096, fileCount: 1, directoryCount: 0 });
+    task.channel.onmessage({ type: "done", taskId: task.id, totalBytes: 4096, fileCount: 1, directoryCount: 0 });
+  });
+  await expect(canvas).toHaveAttribute("data-animation-state", "settled");
+  await viewport.click({ position: { x: 50, y: 50 } });
+  await expect(region.getByRole("heading", { level: 2 })).toHaveText("響喜乱舞.zip");
+  page.once("dialog", (dialog) => dialog.accept());
+  await viewport.press("Delete");
+  const expectations = () => page.evaluate(() => (window as unknown as { __recycleExpectations: unknown[] }).__recycleExpectations);
+  await expect.poll(expectations).toEqual([{
+    path: "D:\\Muller\\響喜乱舞.zip", kind: "file", size: 4096,
+    modifiedUnixMs: 1_758_345_600_456, expectedBlake3: null,
+  }]);
+  await expect(region.getByRole("alert")).toHaveText("Item changed since it was displayed. Refresh and try again: D:\\Muller\\響喜乱舞.zip");
+  expect(await expectations()).toHaveLength(1);
+  expect(await spaceTaskCount(page)).toBe(1);
 });
 
 test("space menu scrolls within the map and Smaller item operations do not affect preview controls", async ({ page }) => {
@@ -951,6 +995,63 @@ test("space top address editing and navigation buttons share keyboard history", 
   expect(await spaceTaskCount(page)).toBe(3);
   await expect(region.getByRole("navigation", { name: "Folder path" })).toHaveCount(0);
   await expect(page.locator("[data-workspace-mode]")).toHaveAttribute("data-workspace-mode", "space");
+});
+
+test("large space snapshots stay bounded while the address jumps across three folder levels", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await openStreamSpace(page);
+  const region = page.getByRole("region", { name: "Space Sniffer" });
+  const address = page.getByRole("combobox", { name: "Current directory" });
+  const canvas = region.locator("canvas");
+  const cdp = await page.context().newCDPSession(page);
+  const measurements: { path: string; inputToPathMs: number; retainedHistoryNodes: number; heapBytes: number }[] = [];
+  for (let scan = 0; scan < 6; scan += 1) {
+    const path = scan === 0 ? "D:\\Muller" : `D:\\Jump-${scan}\\level-two\\level-three`;
+    let elapsed = 0;
+    if (scan > 0) {
+      await page.keyboard.press("Control+l");
+      await address.fill(path);
+      const start = Date.now();
+      await address.press("Enter");
+      await expect(region).toHaveAttribute("data-root-path", path);
+      elapsed = Date.now() - start;
+      expect(elapsed).toBeLessThan(1000);
+    }
+    await expect.poll(() => spaceTaskCount(page)).toBe(scan + 1);
+    await page.evaluate(({ index, count }) => {
+      const task = (globalThis as typeof globalThis & { __spaceStream: SpaceMockRuntime }).__spaceStream.tasks[index];
+      const items = Array.from({ length: count }, (_, file) => ({
+        path: `${task.root}\\file-${file}.bin`, parent: task.root, name: `file-${file}.bin`,
+        kind: "file", bytes: 1000, modifiedUnixMs: 1_758_345_600_000, depth: 1, childCount: 0, partial: false, scanning: false,
+      }));
+      task.channel.onmessage({ type: "batch", taskId: task.id, items, totalBytes: count * 1000, fileCount: count, directoryCount: 0 });
+      task.channel.onmessage({ type: "done", taskId: task.id, totalBytes: count * 1000, fileCount: count, directoryCount: 0 });
+    }, { index: scan, count: 20_000 });
+    await expect(canvas).toHaveAttribute("data-animation-state", "settled");
+    await expect(canvas).toHaveAttribute("data-area-bytes", "20000000");
+    const retainedHistoryNodes = Number(await region.getAttribute("data-history-retained-nodes"));
+    expect(retainedHistoryNodes).toBeLessThanOrEqual(10_000);
+    await cdp.send("HeapProfiler.collectGarbage");
+    const heap = await cdp.send("Runtime.getHeapUsage") as { usedSize: number };
+    measurements.push({ path, inputToPathMs: elapsed, retainedHistoryNodes, heapBytes: heap.usedSize });
+  }
+  // Six completed 20k-entry scans must not remain alive through history or
+  // completed Channel callbacks. Allow normal React/browser bookkeeping.
+  expect(measurements.at(-1)!.heapBytes).toBeLessThan(measurements[0].heapBytes + 20 * 1024 * 1024);
+  const report = { runtime: "Edge frontend with native scan fixture", entriesPerScan: 20_000, measurements };
+  const artifact = test.info().outputPath("space-navigation-performance.json");
+  await writeFile(artifact, JSON.stringify(report, null, 2));
+  await test.info().attach("space-navigation-performance", { path: artifact, contentType: "application/json" });
+  if (process.env.MULLER_QA_ARTIFACT_DIR) {
+    await mkdir(process.env.MULLER_QA_ARTIFACT_DIR, { recursive: true });
+    await writeFile(join(process.env.MULLER_QA_ARTIFACT_DIR, "space-navigation-performance.json"), JSON.stringify(report, null, 2));
+  }
+  // The old oversized snapshot is only a history location, so returning to it
+  // must measure again instead of showing it as a fully cached directory.
+  await region.getByRole("application", { name: "Folder space map" }).press("Alt+ArrowLeft");
+  await expect.poll(() => spaceTaskCount(page)).toBe(7);
+  await expect(region).toHaveAttribute("data-root-path", "D:\\Jump-4\\level-two\\level-three");
 });
 
 test("space folder preview opens by button and Space and closes without navigating", async ({ page }) => {

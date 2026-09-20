@@ -9,6 +9,7 @@ import { registerTargetCursorSurface } from "../feedback/targetCursorRegistry";
 import { isImeCompositionEvent } from "../../input/imeInput";
 import { resolveAppCommand } from "../../commands/appCommands";
 import { spaceParentPath } from "./spaceNavigation";
+import { retainSpaceHistory, spaceHistoryNodeCost } from "./spaceHistory";
 import { PreviewPanel } from "../preview/PreviewPanel";
 import type { DirectoryEntry } from "../explorer/types";
 import "./SpaceSniffer.css";
@@ -136,6 +137,7 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, operation
   const drillRef = useRef<{ controller: AbortController; generation: number } | null>(null); const generationRef = useRef(0);
   const externalRootRef = useRef(root); const animationPathRef = useRef(root.path);
   const externalRequestRef = useRef(rootRequestId);
+  const internalScanOwnerRef = useRef(false);
   const historyProgressRef = useRef(new Map<string, SpaceScanProgress>());
   const [size, setSize] = useState({ width: 1, height: 1 }); const [selected, setSelected] = useState<readonly SpaceNode[]>([]);
   const [hovered, setHovered] = useState<string | null>(null); const [marquee, setMarquee] = useState<{ start: Point; current: Point } | null>(null);
@@ -170,12 +172,15 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, operation
     return current ? [current] : hasFinalTree ? [] : [node];
   }), [currentNodes, hasFinalTree, selected]);
   const selectedIds = useMemo(() => new Set(selected.map((node) => node.id)), [selected]);
-  const showingGroupSummary = groupOpen && !groupDetailOpen && grouped.length > 0 && grouped.length === selectedIds.size && grouped.every((node) => selectedIds.has(node.id));
+  const showingGroupSummary = useMemo(() => groupOpen && !groupDetailOpen && grouped.length > 0 && grouped.length === selectedIds.size && grouped.every((node) => selectedIds.has(node.id)), [groupOpen, groupDetailOpen, grouped, selectedIds]);
+  const groupedBytes = useMemo(() => grouped.reduce((sum, node) => sum + spaceNodeBytes(node), 0), [grouped]);
+  const selectedBytes = useMemo(() => currentSelection.reduce((sum, node) => sum + spaceNodeBytes(node), 0), [currentSelection]);
   const selectedRectIds = useMemo(() => {
     if (!selectedIds.size) return new Set<string>();
     return new Set(rects.filter((rect) => rect.members ? rect.members.some((node) => selectedIds.has(node.id)) : selectedIds.has(rect.node.id)).map((rect) => rect.node.id));
   }, [rects, selectedIds]);
   const historyIndexes = useMemo(() => new Map(rootHistory.map((node, index) => [breadcrumbKey(node.path), index])), [rootHistory]);
+  const retainedHistoryNodes = useMemo(() => [...rootHistory, ...forwardHistory].reduce((sum, node) => sum + spaceHistoryNodeCost(node), 0), [rootHistory, forwardHistory]);
   useLayoutEffect(() => {
     if (!hasFinalTree) return;
     const typeChanged = selected.some((node) => {
@@ -199,19 +204,30 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, operation
   useEffect(() => {
     if (externalRootRef.current === root && externalRequestRef.current === rootRequestId) return;
     const changedPath = externalRootRef.current.path !== root.path || externalRequestRef.current !== rootRequestId;
+    const newRequest = externalRequestRef.current !== rootRequestId;
     externalRootRef.current = root;
     externalRequestRef.current = rootRequestId;
+    // The host can release its last large snapshot once navigation is owned
+    // here. Only a new request may replace an internally navigated tree.
+    if (internalScanOwnerRef.current && !newRequest) return;
+    internalScanOwnerRef.current = false;
     if (changedPath) {
       generationRef.current += 1; drillRef.current?.controller.abort(); drillRef.current = null;
       historyProgressRef.current.set(activeRoot.path, activeProgress ?? { phase: "complete", scanned: 0, total: null });
-      if (activeRoot.path !== root.path) { setRootHistory((history) => [...history, activeRoot]); setForwardHistory([]); }
+      if (activeRoot.path !== root.path) { setRootHistory((history) => retainSpaceHistory([...history, activeRoot], "back")); setForwardHistory([]); }
       setActiveRoot(root); setSelected([]); setLocalProgress(null); setGroupOpen(false); setGroupDetailOpen(false); setContextMenu(null); setPreviewOpen(false);
     } else {
       setActiveRoot((current) => current.path === root.path ? root : current);
-      setRootHistory((history) => history.map((node) => node.path === root.path ? root : node));
-      setForwardHistory((history) => history.map((node) => node.path === root.path ? root : node));
+      setRootHistory((history) => retainSpaceHistory(history.map((node) => node.path === root.path ? root : node), "back"));
+      setForwardHistory((history) => retainSpaceHistory(history.map((node) => node.path === root.path ? root : node), "forward"));
     }
   }, [activeProgress, activeRoot, root, rootRequestId]);
+  useEffect(() => {
+    const retainedPaths = new Set([activeRoot.path, ...rootHistory.map((node) => node.path), ...forwardHistory.map((node) => node.path)]);
+    for (const path of historyProgressRef.current.keys()) {
+      if (!retainedPaths.has(path)) historyProgressRef.current.delete(path);
+    }
+  }, [activeRoot.path, forwardHistory, rootHistory]);
   useEffect(() => () => { generationRef.current += 1; drillRef.current?.controller.abort(); }, []);
   useEffect(() => {
     if (!contextMenu) return;
@@ -317,6 +333,7 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, operation
     }).finally(() => { if (drillRef.current?.generation === generation) drillRef.current = null; });
   }, [client]);
   const restoreRoot = useCallback((previousRoot: SpaceNode) => {
+    internalScanOwnerRef.current = true;
     historyProgressRef.current.set(activeRoot.path, activeProgress ?? { phase: "complete", scanned: activeRoot.children?.length ?? 0, total: null });
     onCancelScan?.();
     generationRef.current += 1; drillRef.current?.controller.abort(); drillRef.current = null;
@@ -327,27 +344,28 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, operation
   }, [activeProgress, activeRoot, clearInteraction, onCancelScan, onSoundEvent, startFolderScan]);
   const restoreHistory = useCallback((index: number) => {
     const previousRoot = rootHistory[index]; if (!previousRoot) return;
-    setForwardHistory((history) => [...rootHistory.slice(index + 1), activeRoot, ...history]);
+    setForwardHistory((history) => retainSpaceHistory([...rootHistory.slice(index + 1), activeRoot, ...history], "forward"));
     setRootHistory((history) => history.slice(0, index));
     restoreRoot(previousRoot);
   }, [activeRoot, restoreRoot, rootHistory]);
   const forward = useCallback(() => {
     const next = forwardHistory[0]; if (!next) return;
-    setRootHistory((history) => [...history, activeRoot]);
+    setRootHistory((history) => retainSpaceHistory([...history, activeRoot], "back"));
     setForwardHistory((history) => history.slice(1));
     restoreRoot(next);
   }, [activeRoot, forwardHistory, restoreRoot]);
   const openFolder = useCallback((node: SpaceNode) => {
     if (node.kind !== "folder") return;
+    internalScanOwnerRef.current = true;
     historyProgressRef.current.set(activeRoot.path, activeProgress ?? { phase: "complete", scanned: activeRoot.children?.length ?? 0, total: null });
-    onCancelScan?.(); onSoundEvent?.("open"); onOpenFolder?.(node); setRootHistory((history) => [...history, activeRoot]); setForwardHistory([]);
+    onCancelScan?.(); onSoundEvent?.("open"); onOpenFolder?.(node); setRootHistory((history) => retainSpaceHistory([...history, activeRoot], "back")); setForwardHistory([]);
     setActiveRoot(node); clearInteraction(); startFolderScan(node); viewportRef.current?.focus();
   }, [activeProgress, activeRoot, clearInteraction, onCancelScan, onOpenFolder, onSoundEvent, startFolderScan]);
   const up = useCallback(() => {
     const parent = spaceParentPath(activeRoot.path); if (!parent) return;
     const cached = [...rootHistory].reverse().find((node) => breadcrumbKey(node.path) === breadcrumbKey(parent));
     if (cached && !cached.scanning) {
-      setRootHistory((history) => [...history, activeRoot]); setForwardHistory([]); restoreRoot(cached);
+      setRootHistory((history) => retainSpaceHistory([...history, activeRoot], "back")); setForwardHistory([]); restoreRoot(cached);
     } else openFolder(cached ?? { id: parent, path: parent, name: pathParts(parent).at(-1) ?? parent, kind: "folder", scanning: true });
   }, [activeRoot, openFolder, restoreRoot, rootHistory]);
   const navigateActive = useCallback((path: string) => {
@@ -355,7 +373,7 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, operation
     if (!nextPath || breadcrumbKey(nextPath) === breadcrumbKey(activeRoot.path)) return;
     const cached = [...rootHistory].reverse().find((node) => breadcrumbKey(node.path) === breadcrumbKey(nextPath));
     if (cached && !cached.scanning) {
-      setRootHistory((history) => [...history, activeRoot]); setForwardHistory([]); restoreRoot(cached);
+      setRootHistory((history) => retainSpaceHistory([...history, activeRoot], "back")); setForwardHistory([]); restoreRoot(cached);
     } else openFolder(cached ?? { id: nextPath, path: nextPath, name: pathParts(nextPath).at(-1) ?? nextPath, kind: "folder", scanning: true });
   }, [activeRoot, openFolder, restoreRoot, rootHistory]);
   const togglePreview = useCallback(() => {
@@ -465,7 +483,7 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, operation
     else if (event.key === "Escape" && rootHistory.length) { event.preventDefault(); restoreHistory(rootHistory.length - 1); }
     else if (event.key === "Enter" && !showingGroupSummary && currentSelection.length === 1 && currentSelection[0]) { event.preventDefault(); activateNode(currentSelection[0]); }
   };
-  const crumbs = pathParts(activeRoot.path); const selectedBytes = currentSelection.reduce((sum, node) => sum + spaceNodeBytes(node), 0); const single = currentSelection.length === 1 && !showingGroupSummary ? currentSelection[0] : undefined;
+  const crumbs = pathParts(activeRoot.path); const single = currentSelection.length === 1 && !showingGroupSummary ? currentSelection[0] : undefined;
   const previewEntry: DirectoryEntry | null = single ? {
     path: single.path, name: single.name, kind: single.kind === "folder" ? "directory" : "file",
     size: spaceNodeBytes(single), extension: single.extension ?? (single.kind === "file" ? single.name.split(".").slice(1).at(-1) ?? null : null),
@@ -475,7 +493,7 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, operation
     ? activeProgress?.cachePreview ? locale === "zh-CN" ? "缓存预览 · 正在校正" : "Cached preview · verifying" : words.scanning
     : activeProgress?.phase === "error" ? words.failed : activeProgress?.phase === "idle" ? words.stopped : words.complete;
   return (
-    <section className={`space-sniffer${className ? ` ${className}` : ""}`} aria-label="Space Sniffer" data-root-path={activeRoot.path} onKeyDown={(event) => {
+    <section className={`space-sniffer${className ? ` ${className}` : ""}`} aria-label="Space Sniffer" data-root-path={activeRoot.path} data-history-entries={rootHistory.length + forwardHistory.length} data-history-retained-nodes={retainedHistoryNodes} onKeyDown={(event) => {
       if (!previewOpen || contextMenu || event.key !== "Escape" || event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || isImeCompositionEvent(event.nativeEvent)) return;
       if (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable=true], [role=menu], [role=dialog]')) return;
       event.preventDefault(); event.stopPropagation(); setPreviewOpen(false); viewportRef.current?.focus();
@@ -555,7 +573,7 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, operation
               </>}
             </div> : null}
           </div>
-          <footer className="space-sniffer__map-footer">{grouped.length ? <button type="button" className="space-sniffer__group-toggle" data-interface-audio="manual" onClick={() => { setGroupOpen(!groupOpen); setGroupDetailOpen(false); setPreviewOpen(false); if (!groupOpen) emitSelection(grouped); else onSoundEvent?.("select"); }}>{words.other} · {formatNumber(grouped.length)} <span>{formatSpaceBytes(grouped.reduce((sum, node) => sum + spaceNodeBytes(node), 0))}</span></button> : <span>{formatNumber(activeProgress?.scanned ?? activeRoot.children?.length ?? 0)} {words.items}</span>}<span className="space-sniffer__hint">{words.hint}</span></footer>
+          <footer className="space-sniffer__map-footer">{grouped.length ? <button type="button" className="space-sniffer__group-toggle" data-interface-audio="manual" onClick={() => { setGroupOpen(!groupOpen); setGroupDetailOpen(false); setPreviewOpen(false); if (!groupOpen) emitSelection(grouped); else onSoundEvent?.("select"); }}>{words.other} · {formatNumber(grouped.length)} <span>{formatSpaceBytes(groupedBytes)}</span></button> : <span>{formatNumber(activeProgress?.scanned ?? activeRoot.children?.length ?? 0)} {words.items}</span>}<span className="space-sniffer__hint">{words.hint}</span></footer>
         </div>
         <div className="space-sniffer__resize-handle" role="separator" aria-orientation="vertical" aria-label="调整详情栏宽度" tabIndex={0}
           onPointerDown={(event) => { event.preventDefault(); resizeRef.current = { startX: event.clientX, startWidth: detailsWidth }; event.currentTarget.setPointerCapture?.(event.pointerId); }}

@@ -329,16 +329,16 @@ fn recycle_entry_with(
         return Err(MutationError::NotFileOrDirectory(path));
     };
     if actual_kind != expectation.kind
-        || metadata.len() != expectation.size
+        || (actual_kind == EntryKind::File && metadata.len() != expectation.size)
         || modified_unix_ms(&metadata) != expectation.modified_unix_ms
     {
-        return Err(MutationError::ExternalChange(path));
+        return Err(MutationError::EntryChanged(path));
     }
     if let Some(expected) = &expectation.expected_blake3
         && (actual_kind != EntryKind::File
             || fingerprint_file(&path, cancellation)?.blake3 != parse_hash_hex(expected)?)
     {
-        return Err(MutationError::ExternalChange(path));
+        return Err(MutationError::EntryChanged(path));
     }
     if cancellation.is_cancelled() {
         return Err(MutationError::Cancelled);
@@ -868,7 +868,7 @@ mod tests {
     #[test]
     fn recycle_validates_the_entry_snapshot_before_calling_adapter() {
         let fixture = tempdir().expect("fixture");
-        let path = fixture.path().join("recycle.txt");
+        let path = fixture.path().join("響喜乱舞.zip");
         fs::write(&path, "original").expect("source file");
         let metadata = fs::metadata(&path).expect("metadata");
         let recycler = FakeRecycler::default();
@@ -900,6 +900,114 @@ mod tests {
             &recycler,
         )
         .expect("matching entry");
+        assert_eq!(recycler.paths.lock().expect("recycler lock").len(), 1);
+    }
+
+    #[test]
+    fn recycle_missing_expected_timestamp_does_not_bypass_change_protection() {
+        let fixture = tempdir().expect("fixture");
+        let path = fixture.path().join("untouched.txt");
+        fs::write(&path, "original").expect("source file");
+        let metadata = fs::metadata(&path).expect("metadata");
+        assert!(super::modified_unix_ms(&metadata).is_some());
+        let recycler = FakeRecycler::default();
+        let expectation = EntryExpectation {
+            path,
+            kind: EntryKind::File,
+            size: metadata.len(),
+            modified_unix_ms: None,
+            expected_blake3: None,
+        };
+        let error = recycle_entry_with(
+            &expectation,
+            &MutationPolicy::default(),
+            &CancellationToken::default(),
+            &recycler,
+        )
+        .expect_err("unknown timestamp must not accept a different real timestamp");
+        assert!(matches!(error, crate::MutationError::EntryChanged(_)));
+        assert!(recycler.paths.lock().expect("recycler lock").is_empty());
+    }
+
+    #[test]
+    fn recycle_rejects_same_size_content_with_a_new_timestamp() {
+        let fixture = tempdir().expect("fixture");
+        let path = fixture.path().join("changed.txt");
+        fs::write(&path, "before").expect("source file");
+        let metadata = fs::metadata(&path).expect("metadata");
+        let expectation = EntryExpectation {
+            path: path.clone(),
+            kind: EntryKind::File,
+            size: metadata.len(),
+            modified_unix_ms: super::modified_unix_ms(&metadata),
+            expected_blake3: None,
+        };
+        fs::write(&path, "after!").expect("same length external change");
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .and_then(|file| {
+                file.set_times(fs::FileTimes::new().set_modified(
+                    metadata.modified().expect("modified time") + std::time::Duration::from_secs(2),
+                ))
+            })
+            .expect("set distinct timestamp without a timing-sensitive sleep");
+        assert_eq!(fs::metadata(&path).unwrap().len(), expectation.size);
+        let recycler = FakeRecycler::default();
+        let error = recycle_entry_with(
+            &expectation,
+            &MutationPolicy::default(),
+            &CancellationToken::default(),
+            &recycler,
+        )
+        .expect_err("same-size external changes should fail");
+        assert!(matches!(error, crate::MutationError::EntryChanged(_)));
+        assert!(recycler.paths.lock().expect("recycler lock").is_empty());
+    }
+
+    #[test]
+    fn recycle_directory_validates_kind_and_timestamp_without_comparing_tree_bytes() {
+        let fixture = tempdir().expect("fixture");
+        let path = fixture.path().join("目录");
+        fs::create_dir(&path).expect("directory");
+        fs::write(path.join("child.txt"), "content").expect("child file");
+        let metadata = fs::metadata(&path).expect("metadata");
+        let mut expectation = EntryExpectation {
+            path,
+            kind: EntryKind::Directory,
+            size: u64::MAX,
+            modified_unix_ms: super::modified_unix_ms(&metadata),
+            expected_blake3: None,
+        };
+        let recycler = FakeRecycler::default();
+        recycle_entry_with(
+            &expectation,
+            &MutationPolicy::default(),
+            &CancellationToken::default(),
+            &recycler,
+        )
+        .expect("recursive byte totals are not directory metadata length");
+        expectation.kind = EntryKind::File;
+        assert!(matches!(
+            recycle_entry_with(
+                &expectation,
+                &MutationPolicy::default(),
+                &CancellationToken::default(),
+                &recycler,
+            ),
+            Err(crate::MutationError::EntryChanged(_))
+        ));
+        expectation.kind = EntryKind::Directory;
+        expectation.modified_unix_ms = None;
+        assert!(matches!(
+            recycle_entry_with(
+                &expectation,
+                &MutationPolicy::default(),
+                &CancellationToken::default(),
+                &recycler,
+            ),
+            Err(crate::MutationError::EntryChanged(_))
+        ));
         assert_eq!(recycler.paths.lock().expect("recycler lock").len(), 1);
     }
 

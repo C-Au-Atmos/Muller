@@ -54,6 +54,7 @@ import {
   openNativePath,
   openTerminal,
   recycleEntry,
+  RecycleEntryChangedError,
   renameEntry,
   transferEntry,
 } from "../explorer/fileOperationsClient";
@@ -498,7 +499,9 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
         refreshBoth();
         onSuccess(t("recycledItems", { count: 1 }));
       } catch (error) {
-        setOperationError(errorMessage(error, t("unableRecycleEntry")));
+        setOperationError(error instanceof RecycleEntryChangedError
+          ? t("recycleEntryChanged", { path: displayPath(error.path) })
+          : errorMessage(error, t("unableRecycleEntry")));
       } finally {
         setBusy(false);
       }
