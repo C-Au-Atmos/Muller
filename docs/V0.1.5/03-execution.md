@@ -6,7 +6,7 @@
 
 ### `BUG-0.1.5-004` - 回收校验修复
 
-- Accepted / In progress；feat/0.1.5。
+- Accepted / Done / beta.8 delivered（2026-09-21）；feat/0.1.5。
 - T01：Space元数据贯穿Rust/client/App，缓存升版，文件和目录长度语义一致。
 - T02：保留并发修改校验，新增准确错误提示；未修改/真修改/目录/中文文件fixture回归。
 
@@ -14,7 +14,7 @@
 
 ### `REQ-0.1.5-011` - Windows回收站页面
 
-- Accepted / In progress；feat/0.1.5。
+- Accepted / Done / beta.8 delivered（2026-09-21）；feat/0.1.5。
 - T01：Shell枚举、opaque身份、还原/永久删除、逐项错误与取消、普通权限STA线程、真实安全fixture探针。
 - T02：侧栏入口、持久化路由、主题列表、搜索排序分页、多选/右键/键盘、还原与永久删除确认、刷新及空态。
 - T03：完整前端/Rust/Edge门禁，按feat→release生成beta.8便携EXE和NSIS、SHA256和真实回收/恢复/删除报告；不晋级master，beta.7保留。
@@ -26,15 +26,18 @@
 |---|---|
 | 目标版本 | `V0.1.5` |
 | 实现分支 | `feat/0.1.5` |
-| 候选分支 | `release/0.1.5`（`0.1.5-beta.6` 已交付，保留 `0.1.5-beta.5` 与 `0.1.5-beta.4`） |
+| 候选分支 | `release/0.1.5`（`0.1.5-beta.8` 已交付，保留 `0.1.5-beta.7` 及更早版本） |
 | 文档状态 | `In progress` |
 | 技术负责人 | `Codex` |
-| 最后更新 | `2026-09-19` |
+| 最后更新 | `2026-09-21` |
 
 ## 执行索引
 
 | 条目 ID | 评审结论 | 实现负责人 | 状态 | 主要交付物 | 验证状态 |
 |---|---|---|---|---|---|
+| [`BUG-0.1.5-004`](#bug-0-1-5-004) | `Accepted` | `Codex` | `Done / beta.8 delivered` | Space 回收元数据与缓存修复，严格外部修改保护 | `Frontend/Rust/Edge and final EXE recycle probe passed` |
+| [`REQ-0.1.5-011`](#req-0-1-5-011) | `Accepted` | `Codex` | `Done / beta.8 delivered` | Windows 系统回收站页面、还原、永久删除、确认及取消处理 | `7 Recycle Bin Edge cases and final EXE Shell probe passed` |
+| [`BUG-0.1.5-005`](#bug-0-1-5-005) | `Accepted` | `Codex` | `Done / beta.8 delivered` | 有界空间树/历史、索引内存与持久化优化、长期性能门禁 | `Large fixtures, process memory comparison and final MFT/USN probe passed` |
 | [`BUG-0.1.5-002`](#bug-0-1-5-002) | `Accepted` | `Codex` | `Done / beta.5 delivered` | 共享自然排序、目录/搜索/补全接入及回归测试；beta.5 EXE、NSIS 与实机证据 | `130 frontend + 166 Rust (1 ignored) + 109 Edge; quality gates, native sorting/search/completion and artifact hashes verified` |
 | [`BUG-0.1.5-003`](#bug-0-1-5-003) | `Accepted` | `Codex` | `Done / beta.6 delivered` | 较小项目列表布局、单击音效去重、空间返回入口；beta.6 EXE、NSIS、哈希和运行时截图 | `130 frontend + 166 Rust (1 ignored) + 112 Edge; quality gates and targeted smaller-items checks passed` |
 | [`REQ-0.1.5-008`](#req-0-1-5-008) | `Accepted` | `Codex` | `Done / beta.7 delivered` | 空间内框自适应右键菜单、Browse 一致的文件操作快捷键及回归测试 | `Verified` |
@@ -675,7 +678,7 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 
 ## `BUG-0.1.5-005` - 高内存占用与空间跨级跳转卡顿
 
-- 状态：`In progress`；实现分支：`feat/0.1.5`；目标：beta.8。
+- 状态：`Done / beta.8 delivered`（2026-09-21）；实现分支：`feat/0.1.5`；目标：beta.8。
 - T01：采集已运行beta.7的Muller主进程、helper与其WebView子进程的Working Set/Private Bytes，记录数据规模。
 - T02：检查并修复空间树历史保留、快照/布局重复遍历、地址栏跨级导航响应与旧扫描取消。
 - T03：分析原生索引常驻/派生缓存的内存成本，消除有证据的重复持有并验证搜索/USN语义。
@@ -687,3 +690,42 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 - 空间统计仍完整遍历至既有扫描深度，保持逻辑字节数/子项数量/错误与取消语义；展示数据仅保留当前根以下3层（当前方块+两级内容预览）。钻取目标重新扫描，不将展示投影误作完整深树；后端可按displayDepth过滤IPC，减少序列化与前端保留，默认兼容原契约。
 - 历史保留最多64个路径，深树缓存按节点预算淘汰为轻量路径记录；前进/后退到已淘汰路径重新扫描。父组件持有的旧外部树、事件通道闭包也需释放，不能只缩减一处数组。
 - 索引优化优先消除同名大小写字符串的重复分配，以及持久化时全索引克隆+整块JSON缓冲的峰值；快照格式/校验和与USN水位保持兼容。使用相同数据集独立进程对比，保留不匹配的实机长时间使用样本作为来源解释，不冒充直接前后收益。
+
+<a id="beta8-delivery-evidence"></a>
+
+### beta.8 验证与交付证据（BUG-0.1.5-004/005、REQ-0.1.5-011，2026-09-21）
+
+| 项目 | 结果 |
+|---|---|
+| 接受的需求基线 | `2956429bcc026e0ffe7cc9ed1e86c2ac80f31b91`；回收站 `da61035`、性能 `e6ad1b5`、长期性能规则 `fda59bb` |
+| 实现提交 | `feat/0.1.5` / `b75ce44111e282c661b8c9762c9f2ffa955ca083` |
+| release 构建源 | `9c18fedc63a383e3a110e1d0d9c21dea1ca086f3`；构建成功后的文档同步不改变该来源 |
+| 前端门禁 | lint、152 项测试、生产构建通过；既有 Vite chunk 大小提示保留 |
+| Rust 门禁 | fmt、199 项 workspace 测试、全 target/feature clippy `-D warnings` 通过；2 项 opt-in 测试 ignored，另执行大快照内存测试和真实 NTFS 探针 |
+| Edge 门禁 | 所有规格合计 130 项通过，包含 30 项空间和 7 项回收站；完整初轮中的 67 项、侧栏数量断言更新后的 stage710 全部 57 项、stage79 全部 6 项。保留初轮失败与重跑原始日志，未将它表述为单次完整运行全绿 |
+| 构建产物 | `npm run tauri -- build --bundles nsis` 成功；便携 EXE 与 NSIS 的 FileVersion/ProductVersion 均为 `0.1.5-beta.8`；NSIS 未安装 |
+| 最终回收站探针 | `recycle-bin-probe.json` / `passed=true`：独立中日文 ZIP 与文件夹，文件/目录校验、ZIP 类型、回收、列表元数据、原生还原及内容一致、未确认删除拒绝、仅永久删除 fixture；初始与最终回收站均为空 |
+| 最终 MFT/USN 探针 | `native-index-probe.json` / `passed=true`：194525 条、1 卷，首次含 helper 启动/授权 1466ms，查询 16.564ms；磁盘快照恢复 300ms，restored 1 / rebuilt 0；创建/改名/父目录改名/删除及停机变更校正通过 |
+| UI 证据 | `recycle-bin-platinum.png`、`recycle-bin-confirmation.png`；同源码 Edge 前端、明确受控 IPC 数据，核验列表选框/列对齐、Platinum 配色及删除确认；不是原生 EXE 窗口截图 |
+| 交付目录 | `D:\Muller\release\0.1.5-beta.8`：EXE、NSIS、README、manifest、SHA256SUMS、原生报告、性能 JSON、原始测试日志与截图 |
+
+| 产物 | 字节数 | SHA256 |
+|---|---:|---|
+| `Muller-0.1.5-beta.8-x64.exe` | 11,555,328 | `27453e5b82faf79f8ca70489fac970541b1da7065f0f4783046bf4eb6191d69d` |
+| `Muller-0.1.5-beta.8-x64-setup.exe` | 4,997,307 | `1d5f23e2970b17773081e2c71c03f05ea0c9edd91ed36eab2de451f350534754` |
+
+#### 内存归因与性能边界
+
+- 原版实机采样（`memory-before.json`）：主进程约 43 MiB Private Bytes、原生索引 helper 约 578 MiB、WebView renderer 约 481 MiB、GPU 约 259 MiB；按父子进程确认归属。不是全部由一个“服务”占用，也不把共享 Working Set 简单相加当作唯一物理内存。
+- 独立 debug 索引进程读取五卷快照，前后记录 2,135,157 / 2,135,194，相差 37 条（运行中的旧 helper 原子更新快照）。保存后 Private Bytes 599,076,864→390,770,688 字节，约 571→373 MiB，下降 34.8%；峰值 Working Set 950,112,256→471,703,552 字节，约 906→450 MiB，下降 50.4%。测量与限制见 `native-memory-comparison.json`。
+- 加载 9769→9691ms；保存 9829→10594ms。报告保留保存阶段约 7.8% 的耗时增长；debug 数据不能推导 release 全应用性能，不宣称所有阶段都更快。节点结构 80→56 字节；原始名使用紧凑存储，仅大小写不同才保留折叠名；64KiB 流式写快照避免整树与 JSON 的多份复制。
+- 空间前后投影微基准（`space-projection-before/after.json`）：10 万个深层文件，保留树节点 100004→4，约 251→64ms。该脚本只验证显示投影成本，根字节由 fixture 直接设置；不独立证明磁盘容量统计。after 的微小负堆差是 GC 基线噪声，不作为内存收益。
+- Edge 跨级导航（`space-navigation-performance.json`）：6 个各 2 万条的完成目录、5 次跨三级路径跳转，输入到路径响应为 41/42/18/40/47ms；历史保留节点 0→5，强制 GC 后后续 JS 堆约 22 MiB。不是扫描完成时间、WebView 总内存或全应用私有内存承诺。
+- 空间完整扫描继续统计深层大小与子项数，但 IPC/显示树只保留当前根下三层；历史最多 64 路径、每个方向 5000 缓存节点，超限退化为路径并重扫。离开扫描即取消，旧通道与树释放，过期响应不能覆盖新路径；根目录校验在后台执行。相应深层统计、取消、历史预算与大目录回归已覆盖。
+- 回收站原生同名冲突/缺失父目录弹窗未自动交互覆盖；本次探针开始时为空，非空回收站旁观条目保留由身份/快照单测覆盖。未触碰用户原始 ZIP、未清空用户回收站；探针便携索引移到独立验证目录，不作为发行数据。
+
+#### 发布与回滚
+
+- 本轮 `req → feat → release`，release 元数据回合 feat；仅以 beta.8 测试包交付，不提升 `master`。长期分支非强制推送，源提交和哈希可追溯。
+- beta.7 便携 EXE/NSIS 哈希复核与原记录一致，保留作为回滚版本。portable 的 `Muller-data` 保持 v1 索引兼容；沿用索引需将新 EXE 放到原数据目录旁。
+- 性能与回收站实现共存于 `b75ce44`；单独回退性能须选择对应文件变更，不能整提交反向而误删回收站功能。发布阻断修复按 release 修复并回流 feat，使用非强制提交。
