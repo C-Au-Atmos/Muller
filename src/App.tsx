@@ -77,6 +77,7 @@ import type { DuplicateGroup, ScanPhase } from "./features/dedup/types";
 import { createInitialScanState } from "./features/dedup/scanState";
 import { useDedupScan } from "./features/dedup/useDedupScan";
 import { recycleDuplicates } from "./features/dedup/recycleClient";
+import { RecycleBinWorkspace } from "./features/recycle-bin/RecycleBinWorkspace";
 import { ALBUM_IMAGE_EXTENSIONS } from "./features/album/imageFormats";
 import {
   BrowseWorkspace,
@@ -96,6 +97,7 @@ import {
   openNativePath,
   openTerminal,
   recycleEntry,
+  RecycleEntryChangedError,
   renameEntry,
   transferEntry,
 } from "./features/explorer/fileOperationsClient";
@@ -598,6 +600,11 @@ export function App({ initialPath }: AppProps) {
 
   const handleSpaceNavigation = useCallback((next: SpaceNavigationState) => {
     spaceNavigationOwner.current = { tabId: activeTab.id, path: next.path };
+    // Internal navigation owns the current tree. Release the previous external
+    // scan result without changing its request identity or resetting map history.
+    setSpaceRoot((current) => current && current.path !== next.path && current.children
+      ? { id: current.id, path: current.path, name: current.name, kind: "folder", scanning: true }
+      : current);
     setSpaceNavigation(next);
     setSpaceAddress(next.path);
     dispatchWorkspace({ type: "update-active", patch: { path: next.path, title: next.path, virtualLocation: null } });
@@ -610,8 +617,13 @@ export function App({ initialPath }: AppProps) {
       : activeTab.presentation === "album"
         ? "list"
         : activeTab.presentation;
-    dispatchWorkspace({ type: "update-active", patch: { mode: tool, presentation } });
-  }, [activeTab.presentation, dispatchWorkspace]);
+    dispatchWorkspace({ type: "update-active", patch: {
+      mode: tool, presentation,
+      virtualLocation: tool === "recycle-bin" ? "recycle-bin"
+        : activeTab.virtualLocation === "recycle-bin" ? (activeTab.path.trim() ? null : "this-pc")
+        : activeTab.virtualLocation,
+    } });
+  }, [activeTab.path, activeTab.presentation, activeTab.virtualLocation, dispatchWorkspace]);
 
   const launchBrowseComparison = useCallback((request: BrowseComparisonRequest) => {
     setCompareLaunchRequest({ ...request, token: Date.now() });
@@ -999,6 +1011,13 @@ export function App({ initialPath }: AppProps) {
         // The map and details controls own ordinary selection keys.
         if (["moveNext", "movePrevious", "moveLeft", "moveRight", "openSelection"].includes(command)) return;
       }
+      // The Recycle Bin owns selection, search and file commands, including dialogs.
+      if (activeTool === "recycle-bin" && systemRoute === "workspace" && [
+        "moveNext", "movePrevious", "moveLeft", "moveRight", "movePageNext", "movePagePrevious",
+        "openSelection", "recycleSelection", "refresh", "selectAll", "findInDirectory",
+        "cancelScan", "togglePreview", "copySelection", "cutSelection", "paste",
+        "renameSelection", "goUp", "goBack", "goForward", "undo",
+      ].includes(command)) return;
       if (command === "cancelScan" && !scanActive) return;
       const fileCommand = new Set([
         "copySelection",
@@ -1355,6 +1374,7 @@ export function App({ initialPath }: AppProps) {
   }, [globalSearchRoots]);
   const quickLocations: readonly QuickLocation[] = useMemo(() => [
     { id: "this-pc", label: t("thisPc"), icon: "this-pc" as const, target: { kind: "this-pc" as const } },
+    { id: "recycle-bin", label: t("recycleBinTitle"), icon: "recycle-bin" as const, target: { kind: "recycle-bin" as const } },
     ...logicalDrives.map((drive) => ({
       id: `drive-${drive.path.toLowerCase()}`,
       label: `${drive.label || t("localDisk")} (${displayPath(drive.path).replace("\\", "")})`,
@@ -1400,6 +1420,10 @@ export function App({ initialPath }: AppProps) {
       if (location.target.kind === "this-pc") {
         tab.title = t("thisPc");
         tab.virtualLocation = "this-pc";
+      } else if (location.target.kind === "recycle-bin") {
+        tab.title = t("recycleBinTitle");
+        tab.mode = "recycle-bin";
+        tab.virtualLocation = "recycle-bin";
       } else {
         tab.path = location.target.path;
         tab.title = location.target.path;
@@ -1411,6 +1435,13 @@ export function App({ initialPath }: AppProps) {
       return;
     }
     setSystemRoute("workspace");
+    if (location.target.kind === "recycle-bin") {
+      setFilterOpen(false);
+      dispatchWorkspace({ type: "update-active", patch: {
+        mode: "recycle-bin", title: t("recycleBinTitle"), virtualLocation: "recycle-bin",
+      } });
+      return;
+    }
     if (location.target.kind === "this-pc") {
       dispatchWorkspace({
         type: "update-active",
@@ -1437,7 +1468,7 @@ export function App({ initialPath }: AppProps) {
       name: entry.name,
       kind: entry.kind === "folder" ? "directory" : "file",
       extension: entry.extension ?? null,
-      size: entry.bytes ?? entry.size ?? 0,
+      size: entry.kind === "folder" ? 0 : entry.bytes ?? entry.size ?? 0,
       modifiedUnixMs: entry.modifiedAt ?? null,
       hidden: false,
     }));
@@ -1502,7 +1533,9 @@ export function App({ initialPath }: AppProps) {
       if (spaceOperationBusy.current || items.length === 0 || !window.confirm(`${t("recycleSelected")} (${items.length})`)) return;
       mutate(async () => {
         const results = await Promise.allSettled(items.map((entry) => recycleEntry(entry)));
-        const errors = results.flatMap((result) => result.status === "rejected" ? [result.reason instanceof Error ? result.reason.message : String(result.reason)] : []);
+        const errors = results.flatMap((result) => result.status === "rejected" ? [result.reason instanceof RecycleEntryChangedError
+          ? t("recycleEntryChanged", { path: displayPath(result.reason.path) })
+          : result.reason instanceof Error ? result.reason.message : String(result.reason)] : []);
         if (errors.length && errors.length < items.length) setSpaceRefreshToken((value) => value + 1);
         if (errors.length) throw new Error(errors.join("\n"));
       });
@@ -1884,6 +1917,8 @@ export function App({ initialPath }: AppProps) {
             <div className="stage7-context-path"><strong>Muller</strong></div>
           ) : systemRoute === "workspace" && isThisPc ? (
             <div className="stage7-context-path"><span>{t("browse").toUpperCase()}</span><strong>{t("thisPc")}</strong></div>
+          ) : systemRoute === "workspace" && activeTool === "recycle-bin" ? (
+            <div className="stage7-context-path"><Trash2 size={15} /><strong>{t("recycleBinTitle")}</strong></div>
           ) : (
             <div className="stage7-context-path"><span>{activePage.toUpperCase()}</span><strong>{activePage === "settings" ? t("preferences") : displayPath(activeTab.path)}</strong></div>
           )}
@@ -1998,7 +2033,9 @@ export function App({ initialPath }: AppProps) {
           <SettingsPage preferences={preferences} onChange={updatePreferences} onReset={resetPreferences} />
         ) : null}
 
-        {activeTool === "space" && !isThisPc ? (
+        {activeTool === "recycle-bin" ? (
+          systemRoute === "workspace" ? <RecycleBinWorkspace key={activeTab.id} onSoundEvent={(event) => play(event === "select" ? "action" : event === "error" ? "warning" : "success")} /> : null
+        ) : activeTool === "space" && systemRoute !== "workspace" ? null : activeTool === "space" && !isThisPc ? (
           spaceRoot && spaceRootTabId === activeTab.id ? (
             <SpaceSniffer
               key={activeTab.id}
@@ -2375,6 +2412,8 @@ export function App({ initialPath }: AppProps) {
         <span>
           {activePage === "duplicates"
             ? effectiveScanRoots.map(displayPath).join("; ")
+            : activePage === "recycle-bin"
+              ? t("recycleBinTitle")
             : activePage === "compare"
               ? displayPath(compareNavigation.path)
               : activePage === "space"
@@ -2388,6 +2427,8 @@ export function App({ initialPath }: AppProps) {
         <span className="key-buffer">
           {activePage === "duplicates"
             ? t(scanStatusKey(scanState.status))
+            : activePage === "recycle-bin"
+              ? t("recycleBinTitle")
             : activePage === "compare"
               ? t("pane", { name: compareNavigation.activePane.toUpperCase() })
               : activePage === "space"
@@ -2401,6 +2442,8 @@ export function App({ initialPath }: AppProps) {
         <span className="status-selection">
           {activePage === "duplicates"
             ? `${selectedDuplicateOrdinal < 0 ? 0 : selectedDuplicateOrdinal + 1} / ${duplicateFilePositions.length}`
+            : activePage === "recycle-bin"
+              ? ""
             : activePage === "compare"
               ? compareNavigation.editing
                 ? t("editableMerge")

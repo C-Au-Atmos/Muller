@@ -1,4 +1,4 @@
-import { Folder, HardDrive, Plus, X } from "lucide-react";
+import { Folder, HardDrive, Plus, Trash2, X } from "lucide-react";
 import { useState, type DragEvent, type KeyboardEvent } from "react";
 
 import { useAppI18n } from "../../i18n/i18n";
@@ -25,6 +25,7 @@ function isDriveRoot(path: string): boolean {
 
 export function WorkspaceTabs({ tabs, activeId, onActivate, onAdd, onClose, onMove }: WorkspaceTabsProps) {
   const { t } = useAppI18n();
+  const label = (tab: WorkspaceTab) => tab.mode === "recycle-bin" ? t("recycleBinTitle") : tabLabel(tab);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const handleDrop = (event: DragEvent<HTMLDivElement>, targetId: string) => {
     event.preventDefault();
@@ -59,15 +60,15 @@ export function WorkspaceTabs({ tabs, activeId, onActivate, onAdd, onClose, onMo
               className={activeId === tab.id ? "workspace-tab is-active" : "workspace-tab"}
               role="tab"
               aria-selected={activeId === tab.id}
-              title={tab.path}
+              title={tab.mode === "recycle-bin" ? t("recycleBinTitle") : tab.path}
               onClick={() => onActivate(tab.id)}
               onKeyDown={(event) => handleKeyDown(event, tab.id)}
             >
-              {isDriveRoot(tab.path) ? <HardDrive size={17} /> : <Folder size={14} />}
-              <span>{tabLabel(tab)}</span>
+              {tab.mode === "recycle-bin" ? <Trash2 size={14} /> : isDriveRoot(tab.path) ? <HardDrive size={17} /> : <Folder size={14} />}
+              <span>{label(tab)}</span>
             </SpecularButton>
             {tabs.length > 1 ? (
-              <button className="workspace-tab__close" type="button" aria-label={t("closeWorkspace", { name: tabLabel(tab) })} onClick={() => onClose(tab.id)}>
+              <button className="workspace-tab__close" type="button" aria-label={t("closeWorkspace", { name: label(tab) })} onClick={() => onClose(tab.id)}>
                 <X size={11} />
               </button>
             ) : null}

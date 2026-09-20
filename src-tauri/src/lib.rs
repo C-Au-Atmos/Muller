@@ -11,6 +11,8 @@ mod native_probe;
 mod natural_sort;
 mod ntfs;
 mod preview;
+mod recycle_bin;
+mod recycle_bin_probe;
 mod scan;
 mod space_cache;
 mod space_sniffer;
@@ -56,6 +58,9 @@ use mutation::{
 };
 use native_index::{enable_native_indexer, get_native_indexer_status, stop_native_indexer};
 use preview::{PreviewManager, cancel_file_preview, start_file_preview};
+use recycle_bin::{
+    RecycleBinManager, delete_recycle_bin_items, list_recycle_bin, restore_recycle_bin_items,
+};
 use scan::{ScanManager, cancel_scan, start_scan};
 use space_sniffer::{SpaceSnifferManager, cancel_space_scan, start_space_scan};
 use startup_gate::StartupGate;
@@ -108,6 +113,9 @@ pub fn run() {
         return;
     }
     if native_probe::entry() {
+        return;
+    }
+    if recycle_bin_probe::entry() {
         return;
     }
     let launch_args = std::env::args().collect::<Vec<_>>();
@@ -262,6 +270,7 @@ pub fn run() {
         .manage(DiffManager::default())
         .manage(MutationManager::default())
         .manage(FileOperationManager::default())
+        .manage(RecycleBinManager::default())
         .manage(PreviewManager::default())
         .manage(ShellVisualManager::default())
         .invoke_handler(tauri::generate_handler![
@@ -294,6 +303,9 @@ pub fn run() {
             cancel_file_operation,
             rename_entry,
             recycle_entry,
+            list_recycle_bin,
+            restore_recycle_bin_items,
+            delete_recycle_bin_items,
             open_native_path,
             create_entry,
             directory_statistics,

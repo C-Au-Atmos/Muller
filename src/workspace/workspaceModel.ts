@@ -1,10 +1,10 @@
 export const WORKSPACE_SCHEMA_VERSION = 3;
 export const MAX_WORKSPACE_TABS = 12;
 
-export type WorkspaceMode = "browse" | "duplicates" | "compare" | "album" | "space";
+export type WorkspaceMode = "browse" | "duplicates" | "compare" | "album" | "space" | "recycle-bin";
 export type DirectoryPresentation = "list" | "cubes-grid" | "album";
 export type DateFilterMode = "before" | "after";
-export type VirtualLocation = "this-pc" | null;
+export type VirtualLocation = "this-pc" | "recycle-bin" | null;
 
 export type SystemRoute =
   | { kind: "workspace"; tabId: string }
@@ -64,6 +64,7 @@ const MODES = new Set<WorkspaceMode>([
   "compare",
   "album",
   "space",
+  "recycle-bin",
 ]);
 const PRESENTATIONS = new Set<DirectoryPresentation>([
   "list",
@@ -85,7 +86,7 @@ export function createWorkspaceTab(
     title: path,
     mode,
     path,
-    virtualLocation: null,
+    virtualLocation: mode === "recycle-bin" ? "recycle-bin" : null,
     presentation: mode === "album" ? "album" : "list",
     filter: emptyWorkspaceFilter(),
     split: true,
@@ -169,7 +170,7 @@ function sanitizeTab(value: unknown, fallbackPath: string): WorkspaceTab | null 
        : path,
     mode,
     path,
-    virtualLocation: candidate.virtualLocation === "this-pc" ? "this-pc" : null,
+    virtualLocation: mode === "recycle-bin" ? "recycle-bin" : candidate.virtualLocation === "this-pc" ? "this-pc" : null,
     presentation,
     filter: {
       extensions,

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { formatSpaceBytes, spaceSnifferClient, type SpaceScanEvent } from "./spaceSnifferClient";
+import { formatSpaceBytes, spaceSnifferClient, SpaceTree, type SpaceScanEvent } from "./spaceSnifferClient";
 import type { SpaceScanProgressCallback } from "./types";
 
 const tauri = vi.hoisted(() => ({
@@ -47,6 +47,27 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); });
 
 describe("space sniffer client helpers", () => {
+  it("retains only the visible three levels while deep files still contribute measured ancestor totals", () => {
+    const tree = new SpaceTree("D:\\Deep\\Address\\Target");
+    const root = "D:\\Deep\\Address\\Target";
+    tree.upsert({ ...item(`${root}\\one`, 100_000, "directory"), childCount: 1 });
+    tree.upsert({ ...item(`${root}\\one\\two`, 100_000, "directory"), childCount: 1 });
+    tree.upsert({ ...item(`${root}\\one\\two\\three`, 100_000, "directory"), childCount: 100_000 });
+    for (let index = 0; index < 100_000; index += 1) {
+      tree.upsert(item(`${root}\\one\\two\\three\\file-${index}.bin`, 1));
+    }
+    tree.updateRoot(100_000, true);
+    const snapshot = tree.snapshot();
+    expect(tree.retainedNodeCount).toBe(4);
+    expect(snapshot.bytes).toBe(100_000);
+    const boundary = snapshot.children?.[0]?.children?.[0]?.children?.[0];
+    expect(boundary).toMatchObject({ bytes: 100_000, childCount: 100_000, children: [], childrenComplete: false });
+    tree.clear();
+    expect(tree.retainedNodeCount).toBe(0);
+    expect(boundary?.bytes).toBe(100_000);
+    expect(snapshot.children).toHaveLength(1);
+  });
+
   it("formats scanner byte counts for the details panel", () => {
     expect(formatSpaceBytes(0)).toBe("0 B");
     expect(formatSpaceBytes(1024)).toBe("1.0 KB");
@@ -64,6 +85,20 @@ describe("native space scan stream", () => {
   beforeEach(() => {
     tauri.isTauri.mockReturnValue(true);
     vi.useFakeTimers();
+  });
+
+  it("preserves native file and directory timestamps for guarded recycle operations", async () => {
+    const promise = spaceSnifferClient.scan("D:\\", undefined);
+    send({ type: "batch", taskId: 7, items: [
+      { ...item("D:\\Old", 1024, "directory"), modifiedUnixMs: 1_758_345_600_123 },
+      { ...item("D:\\Old\\響喜乱舞.zip", 1024), modifiedUnixMs: 1_758_345_600_456 },
+      { ...item("D:\\unknown.txt", 1), modifiedUnixMs: null },
+    ], totalBytes: 1025 });
+    send({ type: "done", taskId: 7, totalBytes: 1025 });
+    const root = await promise;
+    expect(root.children?.[0]).toMatchObject({ kind: "folder", bytes: 1024, modifiedAt: 1_758_345_600_123 });
+    expect(root.children?.[0]?.children?.[0]).toMatchObject({ name: "響喜乱舞.zip", modifiedAt: 1_758_345_600_456 });
+    expect(root.children?.[1]?.modifiedAt).toBeUndefined();
   });
 
   it("publishes growing directory snapshots before done and keeps previous snapshots immutable", async () => {

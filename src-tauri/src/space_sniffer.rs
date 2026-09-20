@@ -6,7 +6,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
-    time::{Duration, Instant},
+    time::{Duration, Instant, UNIX_EPOCH},
 };
 
 use muller_core::CancellationToken;
@@ -26,9 +26,16 @@ pub struct StartSpaceScanRequest {
     pub batch_size: Option<usize>,
     #[serde(default)]
     pub max_depth: Option<u32>,
+    /// Limit emitted tree levels without limiting the recursive measurement.
+    #[serde(default)]
+    pub display_depth: Option<u32>,
 }
 
 impl StartSpaceScanRequest {
+    fn display_depth(&self) -> u32 {
+        self.display_depth.unwrap_or(MAX_DEPTH).clamp(1, MAX_DEPTH)
+    }
+
     fn batch_size(&self) -> usize {
         self.batch_size
             .unwrap_or(DEFAULT_BATCH_SIZE)
@@ -60,6 +67,8 @@ pub struct SpaceNode {
     pub name: String,
     pub kind: SpaceNodeKind,
     pub bytes: u64,
+    /// The entry's timestamp at enumeration, retained for guarded file operations.
+    pub modified_unix_ms: Option<u64>,
     pub depth: u32,
     pub child_count: u32,
     pub partial: bool,
@@ -162,11 +171,6 @@ pub fn start_space_scan(
     request: StartSpaceScanRequest,
     on_event: Channel<SpaceScanEvent>,
 ) -> Result<StartSpaceScanResponse, String> {
-    let metadata = fs::symlink_metadata(&request.root)
-        .map_err(|error| format!("cannot inspect {}: {error}", request.root.display()))?;
-    if is_link_or_reparse(&metadata) || !metadata.is_dir() {
-        return Err(format!("{} is not a directory", request.root.display()));
-    }
     let manager = manager.inner().clone();
     let (task_id, cancellation) = manager.begin();
     tauri::async_runtime::spawn_blocking(move || {
@@ -208,11 +212,15 @@ struct ScanProgress {
     directory_count: u64,
     skipped_count: u64,
     batch_size: usize,
+    display_depth: u32,
     last_flush: Instant,
 }
 
 impl ScanProgress {
     fn mark_dirty(&mut self, index: usize) {
+        if self.states[index].node.depth > self.display_depth {
+            return;
+        }
         if !self.states[index].dirty {
             self.states[index].dirty = true;
             self.dirty.push(index);
@@ -281,10 +289,33 @@ fn run_cached_space_scan<F>(
     task_id: u64,
     request: StartSpaceScanRequest,
     cancellation: &CancellationToken,
-    send: F,
+    mut send: F,
 ) where
     F: FnMut(SpaceScanEvent) -> bool,
 {
+    // This function runs on a blocking worker. Even the first metadata read
+    // may wait on a slow/unavailable drive and must not block the IPC thread.
+    if cancellation.is_cancelled() {
+        let _ = send(SpaceScanEvent::Cancelled { task_id });
+        return;
+    }
+    let validation = fs::symlink_metadata(&request.root)
+        .map_err(|error| format!("cannot inspect {}: {error}", request.root.display()))
+        .and_then(|metadata| {
+            if is_link_or_reparse(&metadata) || !metadata.is_dir() {
+                Err(format!("{} is not a directory", request.root.display()))
+            } else {
+                Ok(())
+            }
+        });
+    if cancellation.is_cancelled() {
+        let _ = send(SpaceScanEvent::Cancelled { task_id });
+        return;
+    }
+    if let Err(message) = validation {
+        let _ = send(SpaceScanEvent::Error { task_id, message });
+        return;
+    }
     let cache_path = crate::space_cache::path_for(&request.root);
     run_scan_with_cache(
         task_id,
@@ -309,6 +340,7 @@ fn run_scan_with_cache<F, S>(
 {
     let root = request.root.clone();
     let depth = request.max_depth();
+    let display_depth = request.display_depth();
     if !send(SpaceScanEvent::Started {
         task_id,
         root: root.clone(),
@@ -321,7 +353,7 @@ fn run_scan_with_cache<F, S>(
         stamp(&root)
     };
     if let (Some(path), Some(watermark)) = (&cache_path, &before)
-        && let Some(cache) = crate::space_cache::load(path, &root, depth, watermark)
+        && let Some(cache) = crate::space_cache::load(path, &root, depth, display_depth, watermark)
     {
         let total_bytes = cache.nodes[0].bytes;
         for chunk in cache.nodes.chunks(request.batch_size()) {
@@ -376,7 +408,9 @@ fn run_scan_with_cache<F, S>(
     {
         let mut nodes: Vec<_> = measurements.into_values().collect();
         nodes.sort_unstable_by(|a, b| a.depth.cmp(&b.depth).then_with(|| a.path.cmp(&b.path)));
-        if let Err(error) = crate::space_cache::save(&path, root, depth, before, nodes) {
+        if let Err(error) =
+            crate::space_cache::save(&path, root, depth, display_depth, before, nodes)
+        {
             log::debug!("Space preview cache skipped: {error}");
         }
     }
@@ -408,6 +442,10 @@ fn run_space_scan_task<F>(
         name: root_name.to_owned(),
         kind: SpaceNodeKind::Directory,
         bytes: 0,
+        modified_unix_ms: fs::symlink_metadata(&root)
+            .ok()
+            .as_ref()
+            .and_then(modified_unix_ms),
         depth: 0,
         child_count: 0,
         partial: false,
@@ -424,6 +462,7 @@ fn run_space_scan_task<F>(
         directory_count: 0,
         skipped_count: 0,
         batch_size: request.batch_size(),
+        display_depth: request.display_depth(),
         last_flush: Instant::now(),
     };
     let mut work = vec![Work::Enter(0)];
@@ -476,7 +515,6 @@ fn run_space_scan_task<F>(
                                 continue;
                             }
                         };
-                        let child_path = entry.path();
                         // On Windows DirEntry metadata reuses enumeration data;
                         // unlike fs::metadata it never follows a symbolic link.
                         let metadata = match entry.metadata() {
@@ -499,6 +537,20 @@ fn run_space_scan_task<F>(
                             continue;
                         };
                         let child_index = progress.states.len();
+                        // Deep file records only contribute bytes/counts. They
+                        // have no descendants and are outside the requested
+                        // display, so retaining one state per file wastes RAM.
+                        if kind == SpaceNodeKind::File
+                            && depth.saturating_add(1) > progress.display_depth
+                        {
+                            progress.states[index].node.child_count =
+                                progress.states[index].node.child_count.saturating_add(1);
+                            progress.file_count = progress.file_count.saturating_add(1);
+                            progress.update_ancestors(Some(index), metadata.len(), false);
+                            progress.flush(task_id, cancellation, false, &mut send);
+                            continue;
+                        }
+                        let child_path = entry.path();
                         let name = entry.file_name().to_string_lossy().into_owned();
                         let bytes = if kind == SpaceNodeKind::File {
                             metadata.len()
@@ -512,6 +564,7 @@ fn run_space_scan_task<F>(
                                 name,
                                 kind,
                                 bytes,
+                                modified_unix_ms: modified_unix_ms(&metadata),
                                 depth: depth.saturating_add(1),
                                 child_count: 0,
                                 partial: false,
@@ -567,6 +620,15 @@ fn run_space_scan_task<F>(
     });
 }
 
+fn modified_unix_ms(metadata: &fs::Metadata) -> Option<u64> {
+    metadata
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| u64::try_from(duration.as_millis()).ok())
+}
+
 fn is_link_or_reparse(metadata: &fs::Metadata) -> bool {
     #[cfg(windows)]
     {
@@ -602,6 +664,7 @@ mod tests {
             root: root.clone(),
             batch_size: Some(2),
             max_depth: None,
+            display_depth: None,
         };
         run_scan_with_cache(
             1,
@@ -635,7 +698,7 @@ mod tests {
                 ..
             })
         ));
-        let saved = crate::space_cache::load(&cache, &root, MAX_DEPTH, "stamp").unwrap();
+        let saved = crate::space_cache::load(&cache, &root, MAX_DEPTH, MAX_DEPTH, "stamp").unwrap();
         assert!(!saved.nodes.iter().any(|node| node.name == "old.txt"));
         events.clear();
         run_scan_with_cache(
@@ -664,6 +727,7 @@ mod tests {
             root: fixture.path().to_path_buf(),
             batch_size: None,
             max_depth: None,
+            display_depth: None,
         };
         let mut revision = 0;
         run_scan_with_cache(
@@ -712,6 +776,7 @@ mod tests {
                 root: directory.path().to_path_buf(),
                 batch_size: Some(1),
                 max_depth: None,
+                display_depth: None,
             },
             &CancellationToken::default(),
             |event| {
@@ -762,6 +827,15 @@ mod tests {
             let node = nodes.get(&expected_path).expect("node upsert");
             assert_eq!(node.kind, kind);
             assert_eq!(node.bytes, bytes);
+            let metadata = fs::symlink_metadata(&expected_path).expect("entry metadata");
+            assert!(node.modified_unix_ms.is_some());
+            if node.kind == SpaceNodeKind::File {
+                assert_eq!(
+                    node.modified_unix_ms,
+                    modified_unix_ms(&metadata),
+                    "timestamp for {relative_path}"
+                );
+            }
             assert_eq!(
                 node.parent.as_ref(),
                 Some(&directory.path().join(relative_parent))
@@ -782,6 +856,7 @@ mod tests {
                 root: directory.path().to_path_buf(),
                 batch_size: Some(128),
                 max_depth: None,
+                display_depth: None,
             },
             &CancellationToken::default(),
             |event| {
@@ -804,6 +879,7 @@ mod tests {
             .expect("file tile before done");
         assert_eq!(file.kind, SpaceNodeKind::File);
         assert_eq!(file.bytes, 12);
+        assert!(file.modified_unix_ms.is_some());
         let SpaceScanEvent::Done {
             root,
             file_count,
@@ -814,6 +890,7 @@ mod tests {
             unreachable!()
         };
         assert_eq!(root.bytes, 12);
+        assert!(root.modified_unix_ms.is_some());
         assert_eq!((*file_count, *directory_count), (1, 0));
     }
 
@@ -832,6 +909,7 @@ mod tests {
                 root: directory.path().to_path_buf(),
                 batch_size: Some(1),
                 max_depth: None,
+                display_depth: None,
             },
             &CancellationToken::default(),
             |event| {
@@ -892,6 +970,7 @@ mod tests {
                 root: directory.path().to_path_buf(),
                 batch_size: Some(32),
                 max_depth: None,
+                display_depth: None,
             },
             &CancellationToken::default(),
             |event| {
@@ -928,6 +1007,7 @@ mod tests {
                 root: directory.path().to_path_buf(),
                 batch_size: None,
                 max_depth: Some(1),
+                display_depth: None,
             },
             &CancellationToken::default(),
             |event| {
@@ -974,6 +1054,7 @@ mod tests {
                 root: directory.path().to_path_buf(),
                 batch_size: Some(1),
                 max_depth: None,
+                display_depth: None,
             },
             &cancellation,
             |event| {
@@ -1007,6 +1088,7 @@ mod tests {
                 root: directory.path().to_path_buf(),
                 batch_size: None,
                 max_depth: None,
+                display_depth: None,
             },
             &cancellation,
             |event| {
@@ -1039,6 +1121,7 @@ mod tests {
                 root: directory.path().to_path_buf(),
                 batch_size: None,
                 max_depth: None,
+                display_depth: None,
             },
             &cancellation,
             |event| {
@@ -1066,5 +1149,95 @@ mod tests {
         let (second, _) = manager.begin();
         assert_ne!(first, second);
         assert!(token.is_cancelled());
+    }
+
+    #[test]
+    fn worker_reports_invalid_roots_and_cancels_superseded_validation() {
+        let fixture = tempdir().expect("fixture");
+        let missing = fixture.path().join("missing");
+        let request = || StartSpaceScanRequest {
+            root: missing.clone(),
+            batch_size: None,
+            max_depth: None,
+            display_depth: Some(3),
+        };
+        let mut events = Vec::new();
+        run_cached_space_scan(1, request(), &CancellationToken::default(), |event| {
+            events.push(event);
+            true
+        });
+        assert!(matches!(
+            &events[..],
+            [SpaceScanEvent::Error { task_id: 1, .. }]
+        ));
+        let manager = SpaceSnifferManager::default();
+        let (old_id, cancelled) = manager.begin();
+        let (new_id, current) = manager.begin();
+        events.clear();
+        run_cached_space_scan(old_id, request(), &cancelled, |event| {
+            events.push(event);
+            true
+        });
+        assert!(
+            matches!(&events[..], [SpaceScanEvent::Cancelled { task_id }] if *task_id == old_id)
+        );
+        manager.finish(old_id);
+        assert!(!current.is_cancelled());
+        assert!(manager.cancel(new_id));
+    }
+
+    #[test]
+    fn display_projection_reduces_payloads_without_truncating_recursive_measurements() {
+        let fixture = tempdir().expect("fixture");
+        let nested = fixture.path().join("one/two/three");
+        fs::create_dir_all(&nested).expect("three levels");
+        for index in 0..1000 {
+            fs::write(nested.join(format!("file-{index}.bin")), b"full bytes").unwrap();
+        }
+        let mut projected = Vec::new();
+        run_space_scan_task(
+            21,
+            StartSpaceScanRequest {
+                root: fixture.path().to_path_buf(),
+                batch_size: Some(256),
+                max_depth: Some(64),
+                display_depth: Some(3),
+            },
+            &CancellationToken::default(),
+            |event| {
+                projected.push(event);
+                true
+            },
+        );
+        let mut nodes = HashMap::new();
+        let mut emitted = 0;
+        for event in &projected {
+            if let SpaceScanEvent::Batch { items, .. } = event {
+                emitted += items.len();
+                for node in items {
+                    assert!(node.depth <= 3);
+                    nodes.insert(&node.path, node);
+                }
+            }
+        }
+        assert_eq!(nodes.len(), 4);
+        assert!(
+            emitted < 100,
+            "deep files must not cross IPC: {emitted} emitted nodes"
+        );
+        let deep = nodes.get(&nested).expect("last preview level");
+        assert_eq!(deep.bytes, 10_000);
+        assert_eq!(deep.child_count, 1000);
+        assert!(!deep.partial && !deep.scanning);
+        assert!(matches!(
+            projected.last(),
+            Some(SpaceScanEvent::Done {
+                total_bytes: 10_000,
+                file_count: 1000,
+                directory_count: 3,
+                skipped_count: 0,
+                ..
+            })
+        ));
     }
 }

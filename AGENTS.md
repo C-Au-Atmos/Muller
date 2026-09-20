@@ -44,3 +44,19 @@ For a version `X.Y.Z`, development must move in this order:
 Use non-force pushes. Do not bypass a stage because two branch tips currently
 point to the same commit. See `docs/development-workflow.md` for commands and
 promotion gates.
+
+## Performance requirements
+
+- Treat memory use and interaction latency as acceptance criteria, alongside
+  correctness. A functional pass does not excuse a navigation freeze or an
+  unbounded cache/history. Record regressions under the target version's item ID.
+- For scans, searches and large visualizations, bound retained data and derived
+  caches; cancel superseded work and reject late results. Avoid repeated full-tree
+  copies or traversals on the UI thread during selection and navigation.
+- Validate performance changes with representative large fixtures and repeat
+  navigation. Record dataset size, timings and retained-data limits; for native
+  memory samples, report the main process, helper and WebView roles separately
+  with the memory metric named. Do not add shared working sets and call the sum
+  unique physical RAM, or claim improvements from incomparable workloads.
+- Preserve exact results, USN correctness and file-operation safety when optimizing.
+  Add a regression check for the measured cause before shipping its fix.

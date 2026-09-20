@@ -6,7 +6,7 @@
 use std::time::Duration;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     fs,
     path::{Path, PathBuf},
     time::Instant,
@@ -35,10 +35,29 @@ pub struct NativeHit {
 #[derive(Debug)]
 struct Node {
     parent: u64,
-    name: OsString,
-    folded_name: String,
+    name: Box<OsStr>,
+    // Most names are already lowercase. Retain a second allocation only when
+    // Unicode case folding changes the searchable text.
+    folded_name: Option<Box<str>>,
     attributes: u32,
     usn: i64,
+}
+
+impl Node {
+    fn search_name(&self) -> &str {
+        self.folded_name.as_deref().unwrap_or_else(|| {
+            self.name
+                .to_str()
+                .expect("non-Unicode names have a folded replacement")
+        })
+    }
+}
+
+fn stored_name(name: &[u16]) -> (Box<OsStr>, Option<Box<str>>) {
+    let name = os_name(name).into_boxed_os_str();
+    let folded = name.to_string_lossy().to_lowercase();
+    let folded = (name.to_str() != Some(folded.as_str())).then(|| folded.into_boxed_str());
+    (name, folded)
 }
 
 #[derive(Debug)]
@@ -78,6 +97,56 @@ struct PersistedNode {
     name: Vec<u16>,
     attributes: u32,
     usn: i64,
+}
+
+#[derive(Serialize)]
+struct PersistedVolumeRef<'a> {
+    version: u32,
+    root: &'a Path,
+    root_id: u64,
+    serial: u32,
+    journal_id: u64,
+    next_usn: i64,
+    checksum: u64,
+    nodes: PersistedNodes<'a>,
+}
+
+struct PersistedNodes<'a>(&'a BTreeMap<u64, Node>);
+
+#[derive(Serialize)]
+struct PersistedNodeRef<'a> {
+    id: u64,
+    parent: u64,
+    name: PersistedName<'a>,
+    attributes: u32,
+    usn: i64,
+}
+
+struct PersistedName<'a>(&'a OsStr);
+
+impl Serialize for PersistedName<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(name_units(self.0))
+    }
+}
+
+impl Serialize for PersistedNodes<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeSeq;
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        // One short filename conversion at a time, never a second copy of the
+        // complete index or a full serialized JSON allocation.
+        for (&id, node) in self.0 {
+            sequence.serialize_element(&PersistedNodeRef {
+                id,
+                parent: node.parent,
+                name: PersistedName(&node.name),
+                attributes: node.attributes,
+                usn: node.usn,
+            })?;
+        }
+        sequence.end()
+    }
 }
 
 /// No OS handles are retained, so an index can move between worker threads.
@@ -141,16 +210,20 @@ impl NativeVolume {
             return Err("NTFS snapshot exceeds the safety size limit".into());
         }
         use std::io::Read;
-        let mut bytes = Vec::new();
+        // Reserve the known length instead of repeated doubling, then release
+        // JSON before building the live graph. Parsing a buffered slice is much
+        // faster than serde_json's byte-at-a-time reader on million-node indexes.
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
         file.take(MAX_SNAPSHOT_BYTES + 1)
             .read_to_end(&mut bytes)
             .map_err(|error| error.to_string())?;
         if bytes.len() as u64 > MAX_SNAPSHOT_BYTES {
             return Err("NTFS snapshot exceeds the safety size limit".into());
         }
-        check_cancel(cancel)?;
         let persisted: PersistedVolume = serde_json::from_slice(&bytes)
             .map_err(|error| format!("invalid NTFS snapshot: {error}"))?;
+        drop(bytes);
+        check_cancel(cancel)?;
         if persisted.version != SNAPSHOT_VERSION {
             return Err("unsupported NTFS snapshot version".into());
         }
@@ -177,8 +250,7 @@ impl NativeVolume {
             {
                 return Err("invalid NTFS snapshot node graph".into());
             }
-            let name = os_name(&node.name);
-            let folded_name = name.to_string_lossy().to_lowercase();
+            let (name, folded_name) = stored_name(&node.name);
             nodes.insert(
                 node.id,
                 Node {
@@ -211,32 +283,46 @@ impl NativeVolume {
         if self.nodes.len() > MAX_SNAPSHOT_NODES {
             return Err("NTFS snapshot contains too many records".into());
         }
-        let mut persisted = PersistedVolume {
+        let mut persisted = PersistedVolumeRef {
             version: SNAPSHOT_VERSION,
-            root: self.root.clone(),
+            root: &self.root,
             root_id: self.root_id,
             serial: self.serial,
             journal_id: self.journal_id,
             next_usn: self.next_usn,
             checksum: 0,
-            nodes: self
-                .nodes
-                .iter()
-                .map(|(id, node)| PersistedNode {
-                    id: *id,
-                    parent: node.parent,
-                    name: os_name_units(&node.name),
-                    attributes: node.attributes,
-                    usn: node.usn,
-                })
-                .collect(),
+            nodes: PersistedNodes(&self.nodes),
         };
-        persisted.checksum = snapshot_checksum(&persisted);
-        let bytes = serde_json::to_vec(&persisted).map_err(|error| error.to_string())?;
-        if bytes.len() as u64 > MAX_SNAPSHOT_BYTES {
-            return Err("NTFS snapshot exceeds the safety size limit".into());
+        persisted.checksum = checksum_header(
+            SNAPSHOT_VERSION,
+            &self.root,
+            self.root_id,
+            self.serial,
+            self.journal_id,
+            self.next_usn,
+        );
+        for (&id, node) in &self.nodes {
+            checksum_node_prefix(
+                &mut persisted.checksum,
+                id,
+                node.parent,
+                node.attributes,
+                node.usn,
+                name_units(&node.name).count(),
+            );
+            for unit in name_units(&node.name) {
+                checksum_update(&mut persisted.checksum, &unit.to_le_bytes());
+            }
         }
-        atomic_snapshot_write(path, &bytes)
+        atomic_snapshot_write_with(path, |file| {
+            use std::io::{BufWriter, Write};
+            let mut writer = BoundedWriter {
+                inner: BufWriter::with_capacity(64 * 1024, file),
+                written: 0,
+            };
+            serde_json::to_writer(&mut writer, &persisted).map_err(|error| error.to_string())?;
+            writer.flush().map_err(|error| error.to_string())
+        })
     }
 
     pub fn root(&self) -> &Path {
@@ -315,7 +401,7 @@ impl NativeVolume {
         if let Some(last) = components.last() {
             for (&id, node) in &self.nodes {
                 check()?;
-                if node.folded_name != *last || node.attributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
+                if node.search_name() != *last || node.attributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
                     continue;
                 }
                 let mut current = id;
@@ -325,7 +411,7 @@ impl NativeVolume {
                     let Some(part) = self.nodes.get(&current) else {
                         break;
                     };
-                    if part.folded_name != *name
+                    if part.search_name() != *name
                         || part.attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
                         || part.attributes & FILE_ATTRIBUTE_DIRECTORY == 0
                     {
@@ -397,7 +483,7 @@ impl NativeVolume {
         let mut hits = Vec::with_capacity(limit.min(2_000));
         let mut skipped = 0;
         for (&id, node) in &self.nodes {
-            if id == self.root_id || !node.folded_name.contains(&query) {
+            if id == self.root_id || !node.search_name().contains(&query) {
                 continue;
             }
             let Some(path) = self.resolve_path(id) else {
@@ -441,7 +527,7 @@ impl NativeVolume {
         }
         let mut path = self.root.clone();
         for name in names.into_iter().rev() {
-            path.push(name);
+            path.push(name.as_ref());
         }
         Some(path)
     }
@@ -469,8 +555,7 @@ impl NativeVolume {
         {
             return false;
         }
-        let name = os_name(&record.name);
-        let folded_name = name.to_string_lossy().to_lowercase();
+        let (name, folded_name) = stored_name(&record.name);
         let changed = self.nodes.get(&record.id).is_none_or(|node| {
             node.parent != record.parent
                 || node.name != name
@@ -495,29 +580,107 @@ impl NativeVolume {
 /// checksum is not authentication; cache paths are constrained by the broker
 /// and restored state must still pass the live NTFS identity/journal checks.
 fn snapshot_checksum(snapshot: &PersistedVolume) -> u64 {
-    let mut checksum = 0xcbf29ce484222325_u64;
-    let mut update = |bytes: &[u8]| {
-        for byte in bytes {
-            checksum = (checksum ^ u64::from(*byte)).wrapping_mul(0x100000001b3);
-        }
-    };
-    update(&snapshot.version.to_le_bytes());
-    update(snapshot.root.to_string_lossy().as_bytes());
-    update(&snapshot.root_id.to_le_bytes());
-    update(&snapshot.serial.to_le_bytes());
-    update(&snapshot.journal_id.to_le_bytes());
-    update(&snapshot.next_usn.to_le_bytes());
+    let mut checksum = checksum_header(
+        snapshot.version,
+        &snapshot.root,
+        snapshot.root_id,
+        snapshot.serial,
+        snapshot.journal_id,
+        snapshot.next_usn,
+    );
     for node in &snapshot.nodes {
-        update(&node.id.to_le_bytes());
-        update(&node.parent.to_le_bytes());
-        update(&node.attributes.to_le_bytes());
-        update(&node.usn.to_le_bytes());
-        update(&(node.name.len() as u64).to_le_bytes());
-        for unit in &node.name {
-            update(&unit.to_le_bytes());
-        }
+        checksum_node(
+            &mut checksum,
+            node.id,
+            node.parent,
+            node.attributes,
+            node.usn,
+            &node.name,
+        );
     }
     checksum
+}
+
+fn checksum_update(checksum: &mut u64, bytes: &[u8]) {
+    for byte in bytes {
+        *checksum = (*checksum ^ u64::from(*byte)).wrapping_mul(0x100000001b3);
+    }
+}
+
+fn checksum_header(
+    version: u32,
+    root: &Path,
+    root_id: u64,
+    serial: u32,
+    journal_id: u64,
+    next_usn: i64,
+) -> u64 {
+    let mut checksum = 0xcbf29ce484222325_u64;
+    for bytes in [
+        version.to_le_bytes().as_slice(),
+        root.to_string_lossy().as_bytes(),
+        &root_id.to_le_bytes(),
+        &serial.to_le_bytes(),
+        &journal_id.to_le_bytes(),
+        &next_usn.to_le_bytes(),
+    ] {
+        checksum_update(&mut checksum, bytes);
+    }
+    checksum
+}
+
+fn checksum_node(
+    checksum: &mut u64,
+    id: u64,
+    parent: u64,
+    attributes: u32,
+    usn: i64,
+    name: &[u16],
+) {
+    checksum_node_prefix(checksum, id, parent, attributes, usn, name.len());
+    for unit in name {
+        checksum_update(checksum, &unit.to_le_bytes());
+    }
+}
+
+fn checksum_node_prefix(
+    checksum: &mut u64,
+    id: u64,
+    parent: u64,
+    attributes: u32,
+    usn: i64,
+    name_len: usize,
+) {
+    for bytes in [
+        id.to_le_bytes().as_slice(),
+        &parent.to_le_bytes(),
+        &attributes.to_le_bytes(),
+        &usn.to_le_bytes(),
+        &(name_len as u64).to_le_bytes(),
+    ] {
+        checksum_update(checksum, bytes);
+    }
+}
+
+struct BoundedWriter<W> {
+    inner: W,
+    written: u64,
+}
+
+impl<W: std::io::Write> std::io::Write for BoundedWriter<W> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if self.written.saturating_add(bytes.len() as u64) > MAX_SNAPSHOT_BYTES {
+            return Err(std::io::Error::other(
+                "NTFS snapshot exceeds the safety size limit",
+            ));
+        }
+        let count = self.inner.write(bytes)?;
+        self.written += count as u64;
+        Ok(count)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
 }
 
 pub(crate) fn reject_reparse_path(path: &Path) -> Result<(), String> {
@@ -561,10 +724,17 @@ pub(crate) fn reject_reparse_path(path: &Path) -> Result<(), String> {
 }
 
 pub(crate) fn atomic_snapshot_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    use std::{
-        io::Write,
-        sync::atomic::{AtomicU64, Ordering},
-    };
+    use std::io::Write;
+    atomic_snapshot_write_with(path, |file| {
+        file.write_all(bytes).map_err(|error| error.to_string())
+    })
+}
+
+fn atomic_snapshot_write_with(
+    path: &Path,
+    write: impl FnOnce(&mut fs::File) -> Result<(), String>,
+) -> Result<(), String> {
+    use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
     reject_reparse_path(path)?;
     if let Some(parent) = path.parent() {
@@ -586,7 +756,7 @@ pub(crate) fn atomic_snapshot_write(path: &Path, bytes: &[u8]) -> Result<(), Str
             .open(&temporary)
             .map_err(|error| error.to_string())?;
         created = true;
-        file.write_all(bytes).map_err(|error| error.to_string())?;
+        write(&mut file)?;
         file.sync_all().map_err(|error| error.to_string())?;
         drop(file);
         reject_reparse_path(path)?;
@@ -631,15 +801,23 @@ fn os_name(name: &[u16]) -> OsString {
     }
 }
 
-fn os_name_units(name: &OsString) -> Vec<u16> {
+#[cfg(test)]
+fn os_name_units(name: &OsStr) -> Vec<u16> {
+    name_units(name).collect()
+}
+
+fn name_units(name: &OsStr) -> impl Iterator<Item = u16> + '_ {
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt;
-        name.encode_wide().collect()
+        name.encode_wide()
     }
     #[cfg(not(windows))]
     {
-        name.to_string_lossy().encode_utf16().collect()
+        name.to_string_lossy()
+            .encode_utf16()
+            .collect::<Vec<_>>()
+            .into_iter()
     }
 }
 
@@ -1045,6 +1223,73 @@ mod platform {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "Read-only native snapshot memory diagnostic; requires MULLER_MEMORY_SNAPSHOT_DIR"]
+    fn native_snapshot_memory_profile() {
+        use windows_sys::Win32::System::{
+            ProcessStatus::{
+                K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX,
+            },
+            Threading::GetCurrentProcess,
+        };
+        fn memory() -> serde_json::Value {
+            let mut counters = PROCESS_MEMORY_COUNTERS_EX {
+                cb: std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32,
+                ..Default::default()
+            };
+            let ok = unsafe {
+                K32GetProcessMemoryInfo(
+                    GetCurrentProcess(),
+                    (&mut counters as *mut PROCESS_MEMORY_COUNTERS_EX)
+                        .cast::<PROCESS_MEMORY_COUNTERS>(),
+                    counters.cb,
+                )
+            };
+            assert_ne!(ok, 0);
+            serde_json::json!({"workingSet":counters.WorkingSetSize,"peakWorkingSet":counters.PeakWorkingSetSize,"privateBytes":counters.PrivateUsage})
+        }
+        let root = std::path::PathBuf::from(
+            std::env::var_os("MULLER_MEMORY_SNAPSHOT_DIR").expect("snapshot directory"),
+        );
+        let mut paths: Vec<_> = std::fs::read_dir(root)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.file_stem().is_some_and(|name| name.len() == 1)
+                    && path.extension().is_some_and(|ext| ext == "json")
+            })
+            .collect();
+        paths.sort();
+        let initial = memory();
+        let started = std::time::Instant::now();
+        let volumes: Vec<_> = paths
+            .iter()
+            .map(|path| {
+                super::NativeVolume::load_persisted(
+                    path,
+                    &muller_core::CancellationToken::default(),
+                )
+                .unwrap()
+            })
+            .collect();
+        let loaded_ms = started.elapsed().as_millis();
+        let loaded = memory();
+        let records = volumes.iter().map(super::NativeVolume::len).sum::<usize>();
+        let temporary = tempfile::tempdir().unwrap();
+        let started = std::time::Instant::now();
+        for (index, volume) in volumes.iter().enumerate() {
+            volume
+                .persist(&temporary.path().join(format!("{index}.json")))
+                .unwrap();
+        }
+        let persisted_ms = started.elapsed().as_millis();
+        let persisted = memory();
+        println!(
+            "{}",
+            serde_json::json!({"records":records,"volumes":volumes.len(),"nodeStructBytes":std::mem::size_of::<super::Node>(),"initial":initial,"loaded":loaded,"loadedMs":loaded_ms,"persisted":persisted,"persistedMs":persisted_ms})
+        );
+    }
     use super::*;
 
     fn record(id: u64, parent: u64, name: &str, usn: i64, reason: u32) -> Record {
@@ -1118,6 +1363,48 @@ mod tests {
     }
 
     #[test]
+    fn compact_names_preserve_unicode_search_rename_and_original_case() {
+        let mut v = volume();
+        v.apply(record(10, 5, "lowercase.txt", 1, 0), false);
+        v.apply(record(11, 5, "Über-響喜乱舞.TXT", 2, 0), false);
+        assert!(v.nodes[&10].folded_name.is_none());
+        assert!(v.nodes[&11].folded_name.is_some());
+        let roots = [PathBuf::from("C:\\")];
+        let (hits, _) = v.search_page("ÜBER-響喜乱舞", &roots, 0, 10);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].name, "Über-響喜乱舞.TXT");
+        v.apply(record(11, 5, "renamed.txt", 3, REASON_RENAME_NEW), true);
+        assert!(v.nodes[&11].folded_name.is_none());
+        assert!(v.search_page("über", &roots, 0, 10).0.is_empty());
+        assert_eq!(
+            v.search_page("RENAMED", &roots, 0, 10).0[0].name,
+            "renamed.txt"
+        );
+    }
+
+    #[test]
+    fn bounded_snapshot_stream_failure_preserves_previous_file() {
+        use std::io::Write;
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("cache.json");
+        fs::write(&path, b"previous complete snapshot").unwrap();
+        assert!(
+            atomic_snapshot_write_with(&path, |file| {
+                let mut writer = BoundedWriter {
+                    inner: file,
+                    written: MAX_SNAPSHOT_BYTES - 2,
+                };
+                writer
+                    .write_all(b"too large")
+                    .map_err(|error| error.to_string())
+            })
+            .is_err()
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"previous complete snapshot");
+        assert_eq!(fs::read_dir(temporary.path()).unwrap().count(), 1);
+    }
+
+    #[test]
     fn parses_unaligned_unicode_v2_and_rejects_bad_frames() {
         let bytes = encoded_record("测试🦀.txt");
         let parsed = parse_records(&bytes).unwrap();
@@ -1165,7 +1452,7 @@ mod tests {
         v.apply(record(10, 5, "new.txt", 40, 0), false);
         v.apply(record(10, 5, "old.txt", 20, REASON_RENAME_NEW), true);
         v.apply(record(10, 5, "old.txt", 21, REASON_DELETE), true);
-        assert_eq!(v.nodes[&10].name, "new.txt");
+        assert_eq!(v.nodes[&10].name.as_ref(), "new.txt");
         v.apply(record(10, 5, "new.txt", 41, REASON_DELETE), true);
         assert!(!v.nodes.contains_key(&10));
         v.apply(record(20, 5, "created.txt", 42, 0x100), true);
@@ -1342,7 +1629,7 @@ mod tests {
         original.next_usn = 101;
         original.persist(&path).unwrap();
         let restored = NativeVolume::load_persisted(&path, &CancellationToken::default()).unwrap();
-        assert_eq!(restored.nodes[&10].name, "after.txt");
+        assert_eq!(restored.nodes[&10].name.as_ref(), "after.txt");
         assert_eq!(restored.watermark(), 101);
         assert_eq!(fs::read_dir(output.path()).unwrap().count(), 1);
 
