@@ -1,6 +1,6 @@
 [package]
 name = "muller"
-version = "0.1.5-beta.7"
+version = "0.1.5-beta.8"
 description = "Windows file intelligence for duplicate discovery and comparison"
 authors = ["Muller contributors"]
 edition.workspace = true
