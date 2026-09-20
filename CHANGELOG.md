@@ -2,6 +2,28 @@
 
 All notable changes to Muller are documented in this file.
 
+## [0.1.5-beta.8] - 2026-09-21
+
+BUG-0.1.5-004/005 and REQ-0.1.5-011 fix recycling from Space, add a system
+Recycle Bin workspace, and reduce native index and navigation memory.
+
+- Carry measured modification times into recycle guards; compare directory
+  kind/time without mistaking recursive bytes for directory metadata length.
+  Real external changes still block the operation with a refresh/retry message.
+- Browse the current user's Windows Recycle Bin, search/sort/page/select items,
+  restore selected/all items and confirm permanent deletion or emptying. Shell
+  identities are revalidated and partial failures/cancellation remain visible.
+- Stream index snapshots without cloning the whole graph and store folded
+  filenames only when needed. A five-volume, 2.14-million-record comparison
+  reduced post-save private memory from 571 to 373 MiB and peak working set from
+  906 to 450 MiB; version 1 snapshots and USN correctness remain compatible.
+- Keep the current layer and two preview layers in Space display data while
+  fully measuring deeper files. Bound navigation history, release old scan
+  callbacks and trees, and validate new roots on the background worker.
+- Verified 152 frontend tests, 199 Rust tests and 130 Edge cases, lint, production
+  build, Rust formatting and clippy. Six 20,000-entry navigations responded to
+  three-level address jumps in 18-47 ms in the controlled Edge fixture.
+
 ## [0.1.5-beta.7] - 2026-09-19
 
 REQ-0.1.5-008/009/010 improve the Space cleanup workflow and save the native
