@@ -1,5 +1,25 @@
 # Muller V0.1.5 执行计划
 
+## beta.8 执行条目（2026-09-20）
+
+<a id="bug-0-1-5-004"></a>
+
+### `BUG-0.1.5-004` - 回收校验修复
+
+- Accepted / In progress；feat/0.1.5。
+- T01：Space元数据贯穿Rust/client/App，缓存升版，文件和目录长度语义一致。
+- T02：保留并发修改校验，新增准确错误提示；未修改/真修改/目录/中文文件fixture回归。
+
+<a id="req-0-1-5-011"></a>
+
+### `REQ-0.1.5-011` - Windows回收站页面
+
+- Accepted / In progress；feat/0.1.5。
+- T01：Shell枚举、opaque身份、还原/永久删除、逐项错误与取消、普通权限STA线程、真实安全fixture探针。
+- T02：侧栏入口、持久化路由、主题列表、搜索排序分页、多选/右键/键盘、还原与永久删除确认、刷新及空态。
+- T03：完整前端/Rust/Edge门禁，按feat→release生成beta.8便携EXE和NSIS、SHA256和真实回收/恢复/删除报告；不晋级master，beta.7保留。
+- 回滚：普通反向提交页面/命令，不改变Windows已有回收站内容。
+
 ## 文档信息
 
 | 字段 | 值 |
