@@ -109,49 +109,53 @@ async function startComparison(page: Page) {
 }
 
 test("immediate compare search keeps focus across owner registration and repeated slow tool switches", async ({ page, context }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(180_000);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await installComparisonMock(page, "browse");
   const cdp = await context.newCDPSession(page);
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: 6 });
-  await page.goto("/");
-  await expect(page.locator(".browse-workspace:visible")).toBeVisible();
-  const search = page.getByRole("textbox", { name: "Search current directory", exact: true });
-  const settleLayout = () => page.evaluate(() => new Promise<void>((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-  }));
+  try {
+    await page.goto("/");
+    await expect(page.locator(".browse-workspace:visible")).toBeVisible();
+    const search = page.getByRole("textbox", { name: "Search current directory", exact: true });
+    const settleLayout = () => page.evaluate(() => new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    }));
 
-  for (let owner = 0; owner < 2; owner += 1) {
-    if (owner > 0) await page.locator(".workspace-tabs [role=tab]").nth(owner).click();
-    for (let repeat = 0; repeat < 2; repeat += 1) {
-      await page.keyboard.press("Control+3");
-      await page.keyboard.press("Control+f");
-      await expect(search).toBeFocused();
-      await settleLayout();
-      await expect(search).toBeFocused();
-      await page.keyboard.type("s");
-      await expect(search).toHaveValue("s");
-      await page.keyboard.press("Escape");
-      await settleLayout();
-      await expect(search).toHaveValue("");
-      await expect(search).not.toBeFocused();
+    for (let owner = 0; owner < 2; owner += 1) {
+      if (owner > 0) await page.locator(".workspace-tabs [role=tab]").nth(owner).click();
+      for (let repeat = 0; repeat < 2; repeat += 1) {
+        await page.keyboard.press("Control+3");
+        await page.keyboard.press("Control+f");
+        await expect(search).toBeFocused();
+        await settleLayout();
+        await expect(search).toBeFocused();
+        await page.keyboard.type("s");
+        await expect(search).toHaveValue("s");
+        await page.keyboard.press("Escape");
+        await settleLayout();
+        await expect(search).toHaveValue("");
+        await expect(search).not.toBeFocused();
 
-      await page.keyboard.press("Control+1");
-      await page.keyboard.press("Control+f");
-      await expect(search).toBeFocused();
-      await settleLayout();
-      await expect(search).toBeFocused();
-      await page.keyboard.type("b");
-      await expect(search).toHaveValue("b");
-      await page.keyboard.press("Escape");
-      await settleLayout();
-      await expect(search).toHaveValue("");
-      await expect(search).not.toBeFocused();
+        await page.keyboard.press("Control+1");
+        await page.keyboard.press("Control+f");
+        await expect(search).toBeFocused();
+        await settleLayout();
+        await expect(search).toBeFocused();
+        await page.keyboard.type("b");
+        await expect(search).toHaveValue("b");
+        await page.keyboard.press("Escape");
+        await settleLayout();
+        await expect(search).toHaveValue("");
+        await expect(search).not.toBeFocused();
+      }
     }
+    await expect(page.locator(".compare-workspace")).toHaveCount(2);
+    expect(errors).toEqual([]);
+  } finally {
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
   }
-  await expect(page.locator(".compare-workspace")).toHaveCount(2);
-  expect(errors).toEqual([]);
 });
 
 test("comparison continues across tools, settings and tabs, retaining paths/results/filter/selection and releasing closed owner", async ({ page }) => {

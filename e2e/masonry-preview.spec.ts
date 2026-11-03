@@ -2,6 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { installAlbumDirectoryMock, trackPageErrors } from "./helpers/albumDirectoryMock";
 
+type DragRegressionWindow = typeof window & { __previewDrag: { stats: number; pointerId: number | null } };
+
 async function assertCompleteColumns(page: Page, pinned: boolean) {
   const viewport = page.locator(".directory-grid-viewport.is-album").first();
   await expect.poll(async () => viewport.evaluate((element) => {
@@ -28,6 +30,24 @@ test("pinned album preview keeps complete columns through resizing", async ({ pa
     localStorage.removeItem("muller.workspace.v2");
     localStorage.setItem("muller:tool-modes-expanded", "true");
     localStorage.setItem("muller:preview-pinned", "false");
+    const runtime = window as DragRegressionWindow;
+    runtime.__previewDrag = { stats: 0, pointerId: null };
+    const NativeWorker = window.Worker;
+    window.Worker = class extends NativeWorker {
+      constructor(scriptURL: string | URL, options?: WorkerOptions) {
+        super(scriptURL, options);
+        if (options?.name === "muller-flow-border") {
+          this.addEventListener("message", (event: MessageEvent<{ type?: string }>) => {
+            if (event.data.type === "stats") runtime.__previewDrag.stats += 1;
+          });
+        }
+      }
+    };
+    window.addEventListener("pointerdown", (event) => {
+      if (event.target instanceof Element && event.target.closest(".preview-resizer")) {
+        runtime.__previewDrag.pointerId = event.pointerId;
+      }
+    }, true);
   });
   await installAlbumDirectoryMock(page, 1_000);
   await page.goto("/");
@@ -50,6 +70,13 @@ test("pinned album preview keeps complete columns through resizing", async ({ pa
   if (!handle) throw new Error("Preview divider is unavailable");
   await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
   await page.mouse.down();
+  await page.mouse.move(handle.x - 20, handle.y + handle.height / 2);
+  const statsBeforeHold = await page.evaluate(() => (window as DragRegressionWindow).__previewDrag.stats);
+  // Keep the real pointer held across the worker's one-second parent update.
+  await page.waitForTimeout(1_200);
+  await expect.poll(() => page.evaluate(() => (window as DragRegressionWindow).__previewDrag.stats)).toBeGreaterThan(statsBeforeHold);
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  expect(await resizer.evaluate((element) => element.hasPointerCapture((window as DragRegressionWindow).__previewDrag.pointerId ?? -1))).toBe(true);
   await page.mouse.move(handle.x - 175, handle.y + handle.height / 2, { steps: 12 });
   await page.mouse.up();
   await expect.poll(() => resizer.getAttribute("aria-valuenow").then(Number)).toBeGreaterThan(480);

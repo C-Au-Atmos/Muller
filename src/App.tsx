@@ -235,6 +235,9 @@ interface AppProps {
 export function App({ initialPath }: AppProps) {
   const { state: workspaceState, activeTab, dispatch: dispatchWorkspace } =
     useWorkspaceState(initialPath);
+  const updatePreviewWidth = useCallback((value: number) => {
+    dispatchWorkspace({ type: "set-preview-width", value });
+  }, [dispatchWorkspace]);
   const { preferences, updatePreferences, resetPreferences } = usePreferences();
   const { t, formatNumber, formatDate } = useI18n(preferences.locale);
   const [systemRoute, setSystemRoute] = useState<"workspace" | "home" | "settings">("workspace");
@@ -2114,7 +2117,7 @@ export function App({ initialPath }: AppProps) {
             singlePane={activeTool === "album"}
             globalSearchRoots={globalSearchRoots}
             onPaneRatioChange={(value) => dispatchWorkspace({ type: "set-pane-ratio", value })}
-            onPreviewWidthChange={(value) => dispatchWorkspace({ type: "set-preview-width", value })}
+            onPreviewWidthChange={updatePreviewWidth}
             onNavigationChange={handleBrowseNavigation}
             onScrollVelocity={sendScrollVelocity}
             onSuccess={handleSuccess}
@@ -2343,7 +2346,7 @@ export function App({ initialPath }: AppProps) {
             globalSearchRoots={globalSearchRoots}
             hoverDelayMs={preferences.hoverDelayMs}
             onPaneRatioChange={(value) => dispatchWorkspace({ type: "set-pane-ratio", value })}
-            onPreviewWidthChange={(value) => dispatchWorkspace({ type: "set-preview-width", value })}
+            onPreviewWidthChange={updatePreviewWidth}
             launchRequest={tab.id === activeTab.id && activePage === "compare" ? compareLaunchRequest : null}
             onLaunchConsumed={(token) => setCompareLaunchRequest((current) => current?.token === token ? null : current)}
           />
