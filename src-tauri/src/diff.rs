@@ -336,9 +336,9 @@ impl DiffManager {
         // Serialize publication against cancellation. Otherwise a task cancelled
         // just after comparison could resurrect its already-closed session.
         let mut active = lock_unpoisoned(&self.inner.active);
-        if !active
+        if active
             .get(&task_id)
-            .is_some_and(|cancellation| !cancellation.is_cancelled())
+            .is_none_or(|cancellation| cancellation.is_cancelled())
         {
             return false;
         }
