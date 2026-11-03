@@ -6,7 +6,7 @@
 |---|---|
 | 目标版本 | `V0.1.5` |
 | 所属分支 | `req/0.1.5` |
-| 文档状态 | `In progress` |
+| 文档状态 | `Complete` |
 | 负责人 | `Codex` |
 | 最后更新 | `2026-11-04`（UTC+08:00） |
 
@@ -432,3 +432,9 @@
 - 最终 EXE 原生 UI 已补齐：`native-ui-final2.json` 绑定 `80c418` / portable SHA256 `69d5f24bda2c40303c3f104d559b2c4e4170bf9c6ad9abe1a4b090d8e92790a3`，真实 Tauri WebView2 比较 5 个 union 条目、时间筛选仅 `time.txt`（1/5）、Browse→Compare 保留筛选/结果/目录均通过，三张 `native-final2-compare-{all,time,restored}.png` 已核对，GUI 已关闭。只记录这些原生场景，原生长按预览拖动与全部筛选按钮未逐项验证；长按拖动由真实 Edge pointer-capture 回归覆盖。当前仅最终 CI、正式发布与下一版本入口待补。
 - feat 最终 CI [41679151449](https://github.com/C-Au-Atmos/Muller/actions/runs/41679151449) 已完成并成功，源码 `e5128c350d668874e6dd1110340bcfab9eac55b0`；lint、155 前端、生产 build、Rust fmt/tests/clippy 及完整 Edge 13 份 spec/140 项全绿，含即时 Ctrl+F、跨父 render 预览拖拽及 Stage 7 像素检查。release `41680031582` 的 Edge 尚待完成，不能以 feat 结果替代 release 绿灯；正式发布与 T04 继续等待实际结果。
 - 最终验证收口：release CI [41680031582](https://github.com/C-Au-Atmos/Muller/actions/runs/41680031582) 现已 completed/success，head `3180bf7f7f37c905d7337c83f1685668c0131424`，全部质量门禁全绿、完整 Edge 13 份 spec/140 passed。`BUG-0.1.5-008` 与 `REQ-0.1.5-013` 的 T01/T02/T05/T06 验证均 Done；本地最终构建/原生证据及双分支 CI 通过，T03 稳定发布与 T04 下一版本入口仍 In progress，未先记公开发布成功。以上逐轮状态按时序保留，当前状态以本段及[最终验证证据](03-execution.md#stable015-final2-evidence)为准。
+
+### 正式发布与下一版本入口进展（2026-11-04，UTC+08:00）
+
+- `REQ-0.1.5-013-T03`：Done。验证后 release 已晋级并推送 master，稳定源码和 `v0.1.5` 标签均为 `c4f24ab4147ae2ff7d8484ef91278e24ecc8ceae`。GitHub [v0.1.5](https://github.com/C-Au-Atmos/Muller/releases/tag/v0.1.5) 已公开为非草稿、非预发布且 latest；Release build `41684175924` 为 completed/success，独立下载两包版本 0.1.5 及 SHA256 核验通过。
+- `REQ-0.1.5-013-T04`：Done。从同一验证后 master/tag `c4f24ab` 建立并推送 0.1.6 req/feat/release，req 文档提交 `8b5c0704a7d192479c4c4c7a30c438888501e080`，显式同步 feat 为 `8f8b9e778bd7757ca36d6fc52b9c12581dcce964`，release 保留 `c4f24ab4147ae2ff7d8484ef91278e24ecc8ceae`。三份文档保持 Draft，`REQ-0.1.6-001` 入口 Done，`ISSUE-0.1.6-001` Needs information，产品代码/版本未改；检查及分支证据见执行记录。
+- `REQ-0.1.5-013`：Done。T01–T06 均按实际证据完成；公开时间 `2026-11-03T17:33:54Z`（UTC+08:00 为 2026-11-04 01:33:54），独立下载核验 `2026-11-03T17:34:41.6050928Z`。GitHub Actions 两包哈希与本机构建分别记录，详见[正式交付证据](03-execution.md#stable015-public-delivery)。旧迭代状态及验证边界保留，未扩大原生或安装验收范围。

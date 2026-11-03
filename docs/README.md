@@ -16,7 +16,7 @@ Stage 资料已经归档，不再与活动版本混放。
   - [原始输入](V0.1.5/01-original-input.md)
   - [评审记录](V0.1.5/02-review.md)
   - [执行计划](V0.1.5/03-execution.md)
-  - [beta.9 与正式版门禁证据](V0.1.5/03-execution.md#stable015-final2-evidence)：2026-11-04 最终本地门禁、新 EXE/NSIS、原生比较/切换保留与安全探针通过，feat/release 最终 CI 均全绿、各含完整 Edge 140/140；稳定发布与 0.1.6 入口进行中。
+  - [0.1.5 正式交付证据](V0.1.5/03-execution.md#stable015-public-delivery)：[v0.1.5](https://github.com/C-Au-Atmos/Muller/releases/tag/v0.1.5) 已公开为稳定/latest，安装包、便携包和 SHA256 下载核验通过；0.1.6 三阶段分支与 Draft 入口已建立。
 
 ## 历史版本
 
