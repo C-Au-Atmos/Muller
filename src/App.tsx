@@ -108,6 +108,7 @@ import { WorkspaceFilterMenu } from "./features/filter/WorkspaceFilterMenu";
 import { HomeDashboard } from "./features/home/HomeDashboard";
 import { SpaceSniffer } from "./features/space/SpaceSniffer";
 import { spaceParentPath } from "./features/space/spaceNavigation";
+import { spacePathAffected } from "./features/space/spaceHistory";
 import { spaceSnifferClient } from "./features/space/spaceSnifferClient";
 import type { SpaceContextAction, SpaceNode, SpaceScanProgress, SpaceSnifferHandle, SpaceNavigationState } from "./features/space/types";
 import {
@@ -272,6 +273,15 @@ export function App({ initialPath }: AppProps) {
   const duplicateListRef = useRef<VirtualDuplicateListHandle>(null);
   const duplicateSearchRef = useRef<HTMLInputElement>(null);
   const compareRef = useRef<CompareWorkspaceHandle>(null);
+  const [compareOwners, setCompareOwners] = useState<Record<string, string>>({});
+  useEffect(() => {
+    setCompareOwners((current) => {
+      const next = Object.fromEntries(Object.entries(current).filter(([id]) => workspaceState.tabs.some((tab) => tab.id === id)));
+      if (activeTool === "compare" && !(activeTab.id in next)) next[activeTab.id] = activeTab.path;
+      return Object.keys(next).length === Object.keys(current).length
+        && Object.keys(next).every((id) => next[id] === current[id]) ? current : next;
+    });
+  }, [activeTab.id, activeTab.path, activeTool, workspaceState.tabs]);
   const recycleCancelRef = useRef<HTMLButtonElement>(null);
   const pendingVelocity = useRef<number | null>(null);
   const velocityFrame = useRef<number | null>(null);
@@ -1480,13 +1490,20 @@ export function App({ initialPath }: AppProps) {
       setSpaceOperationError(null);
       void Promise.resolve().then(operation).catch(failed);
     };
-    const mutate = (operation: () => Promise<unknown>) => {
+    const refreshChangedPaths = (paths: readonly string[]) => {
+      const map = spaceRef.current;
+      if (!map || paths.length === 0) return;
+      const currentPath = spaceNavigationOwner.current?.path ?? activeTab.path;
+      map.invalidatePaths(paths);
+      if (spacePathAffected(currentPath, paths)) setSpaceRefreshToken((value) => value + 1);
+    };
+    const mutate = (operation: () => Promise<readonly string[]>) => {
       if (spaceOperationBusy.current) return;
       spaceOperationBusy.current = true;
       setSpaceOperationError(null);
-      void operation().then(() => setSpaceRefreshToken((value) => value + 1)).catch(failed).finally(() => { spaceOperationBusy.current = false; });
+      void operation().then(refreshChangedPaths).catch(failed).finally(() => { spaceOperationBusy.current = false; });
     };
-    if (action === "refresh") { setSpaceOperationError(null); setSpaceRefreshToken((value) => value + 1); return; }
+    if (action === "refresh") { setSpaceOperationError(null); refreshChangedPaths([activeTab.path]); return; }
     if (action === "copy-path" || action === "copy-name") {
       if (node) perform(async () => {
         if (!navigator.clipboard) throw new Error(t("unableClipboard"));
@@ -1512,13 +1529,23 @@ export function App({ initialPath }: AppProps) {
       mutate(async () => {
         const failures: DirectoryEntry[] = [];
         const errors: string[] = [];
+        const changedPaths: string[] = [];
         for (const entry of clipboard.entries) {
-          try { await transferEntry(entry.path, destination, clipboard.mode, "fail"); }
+          try {
+            const report = await transferEntry(entry.path, destination, clipboard.mode, "fail");
+            if (report.outcome !== "skipped") {
+              changedPaths.push(report.destination);
+              if (clipboard.mode === "move") changedPaths.push(entry.path);
+            }
+          }
           catch (error) { failures.push(entry); errors.push(error instanceof Error ? error.message : String(error)); }
         }
         if (clipboard.mode === "move") setFileClipboard((current) => current === clipboard ? failures.length ? { ...clipboard, entries: failures } : null : current);
-        if (errors.length && failures.length < clipboard.entries.length) setSpaceRefreshToken((value) => value + 1);
-        if (errors.length) throw new Error(errors.join("\n"));
+        if (errors.length) {
+          refreshChangedPaths(changedPaths);
+          throw new Error(errors.join("\n"));
+        }
+        return changedPaths;
       });
       return;
     }
@@ -1526,7 +1553,10 @@ export function App({ initialPath }: AppProps) {
     if (action === "rename") {
       if (!node || spaceOperationBusy.current) return;
       const nextName = window.prompt(t("newName"), node.name)?.trim();
-      if (nextName && nextName !== node.name) mutate(() => renameEntry(node.path, nextName, "fail"));
+      if (nextName && nextName !== node.name) mutate(async () => {
+        const report = await renameEntry(node.path, nextName, "fail");
+        return report.outcome === "skipped" ? [] : [node.path, report.destination];
+      });
       return;
     }
     if (action === "recycle") {
@@ -1536,28 +1566,32 @@ export function App({ initialPath }: AppProps) {
         const errors = results.flatMap((result) => result.status === "rejected" ? [result.reason instanceof RecycleEntryChangedError
           ? t("recycleEntryChanged", { path: displayPath(result.reason.path) })
           : result.reason instanceof Error ? result.reason.message : String(result.reason)] : []);
-        if (errors.length && errors.length < items.length) setSpaceRefreshToken((value) => value + 1);
-        if (errors.length) throw new Error(errors.join("\n"));
+        const changedPaths = items.flatMap((entry, index) => results[index]?.status === "fulfilled" ? [entry.path] : []);
+        if (errors.length) {
+          refreshChangedPaths(changedPaths);
+          throw new Error(errors.join("\n"));
+        }
+        return changedPaths;
       });
       return;
     }
     if (action === "new-folder" || action === "new-text-document" || action === "new-empty-file") {
       const kind = action === "new-folder" ? "directory" : action === "new-text-document" ? "text_file" : "empty_file";
-      mutate(() => createEntry(destination, kind));
+      mutate(async () => [await createEntry(destination, kind)]);
       return;
     }
     if (action === "compress-zip") {
-      if (items.length > 0) mutate(() => createZip(items.map((entry) => entry.path), activeTab.path));
+      if (items.length > 0) mutate(async () => [await createZip(items.map((entry) => entry.path), activeTab.path)]);
       return;
     }
     if (action === "extract-current" || action === "extract-named") {
-      if (node?.kind === "file") mutate(() => extractZip(node.path, destination, action === "extract-current" ? "current" : "named"));
+      if (node?.kind === "file") mutate(async () => [await extractZip(node.path, destination, action === "extract-current" ? "current" : "named")]);
       return;
     }
     if (action === "extract-choose") {
       if (node?.kind === "file" && !spaceOperationBusy.current) perform(async () => {
         const chosenDestination = await open({ directory: true, multiple: false, defaultPath: activeTab.path, title: t("chooseExtractionDestination") });
-        if (typeof chosenDestination === "string") mutate(() => extractZip(node.path, chosenDestination, "current"));
+        if (typeof chosenDestination === "string") mutate(async () => [await extractZip(node.path, chosenDestination, "current")]);
       });
       return;
     }
@@ -2284,11 +2318,14 @@ export function App({ initialPath }: AppProps) {
             </>
             )}
           </section>
-        ) : activeTool === "compare" ? (
+        ) : null}
+
+        {workspaceState.tabs.filter((tab) => tab.id in compareOwners).map((tab) => (
           <CompareWorkspace
-            key={activeTab.id}
-            ref={compareRef}
-            initialRoot={activeTab.path}
+            key={tab.id}
+            ref={tab.id === activeTab.id && activePage === "compare" ? compareRef : undefined}
+            initialRoot={compareOwners[tab.id]!}
+            routeVisible={tab.id === activeTab.id && activePage === "compare"}
             onNavigationChange={handleCompareNavigation}
             onScrollVelocity={sendScrollVelocity}
             onSuccess={handleSuccess}
@@ -2302,10 +2339,10 @@ export function App({ initialPath }: AppProps) {
             hoverDelayMs={preferences.hoverDelayMs}
             onPaneRatioChange={(value) => dispatchWorkspace({ type: "set-pane-ratio", value })}
             onPreviewWidthChange={(value) => dispatchWorkspace({ type: "set-preview-width", value })}
-            launchRequest={compareLaunchRequest}
+            launchRequest={tab.id === activeTab.id && activePage === "compare" ? compareLaunchRequest : null}
             onLaunchConsumed={(token) => setCompareLaunchRequest((current) => current?.token === token ? null : current)}
           />
-        ) : null}
+        ))}
 
         {systemRoute === "workspace" && activeTool === "duplicates" ? (
         <>

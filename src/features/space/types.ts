@@ -75,6 +75,8 @@ export interface SpaceSnifferHandle {
   back: () => void;
   forward: () => void;
   navigateActive: (path: string) => void;
+  /** Drop related navigation snapshots before the host requests a fresh scan. */
+  invalidatePaths: (paths: readonly string[]) => void;
   togglePreview: () => void;
 }
 

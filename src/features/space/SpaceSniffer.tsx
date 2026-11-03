@@ -9,7 +9,7 @@ import { registerTargetCursorSurface } from "../feedback/targetCursorRegistry";
 import { isImeCompositionEvent } from "../../input/imeInput";
 import { resolveAppCommand } from "../../commands/appCommands";
 import { spaceParentPath } from "./spaceNavigation";
-import { retainSpaceHistory, spaceHistoryNodeCost } from "./spaceHistory";
+import { invalidateSpaceHistory, retainSpaceHistory, spaceHistoryNodeCost, spacePathAffected } from "./spaceHistory";
 import { PreviewPanel } from "../preview/PreviewPanel";
 import type { DirectoryEntry } from "../explorer/types";
 import "./SpaceSniffer.css";
@@ -380,14 +380,34 @@ export function SpaceSniffer({ ref, root, rootRequestId = 0, progress, operation
     if (contextMenu || selected.length !== 1 || showingGroupSummary) return;
     setPreviewOpen((open) => !open);
   }, [contextMenu, selected.length, showingGroupSummary]);
+  const invalidatePaths = useCallback((paths: readonly string[]) => {
+    if (!paths.length) return;
+    // Histories contain at most 64 roots per direction. Inspect paths only;
+    // snapshots may still contain thousands of nodes and must be released intact.
+    setRootHistory((history) => invalidateSpaceHistory(history, paths));
+    setForwardHistory((history) => invalidateSpaceHistory(history, paths));
+    for (const path of historyProgressRef.current.keys()) {
+      if (spacePathAffected(path, paths)) historyProgressRef.current.delete(path);
+    }
+    if (!spacePathAffected(activeRoot.path, paths)) return;
+    // Cancel immediately, before the host's refresh effect runs, so a departed
+    // task cannot republish deleted entries in the intervening render.
+    generationRef.current += 1;
+    drillRef.current?.controller.abort(); drillRef.current = null;
+    onCancelScan?.();
+    setActiveRoot(invalidateSpaceHistory([activeRoot], paths)[0]!);
+    setLocalProgress({ phase: "idle", scanned: 0, total: null });
+    clearInteraction();
+  }, [activeRoot, clearInteraction, onCancelScan]);
   useImperativeHandle(ref, () => ({
     focus: () => viewportRef.current?.focus({ preventScroll: true }),
     up: () => { if (!contextMenu) up(); },
     back: () => { if (!contextMenu) restoreHistory(rootHistory.length - 1); },
     forward: () => { if (!contextMenu) forward(); },
     navigateActive,
+    invalidatePaths,
     togglePreview,
-  }), [contextMenu, forward, navigateActive, restoreHistory, rootHistory.length, togglePreview, up]);
+  }), [contextMenu, forward, invalidatePaths, navigateActive, restoreHistory, rootHistory.length, togglePreview, up]);
   const canUp = spaceParentPath(activeRoot.path) !== null;
   useLayoutEffect(() => {
     onNavigationChange?.({ path: activeRoot.path, canBack: rootHistory.length > 0, canForward: forwardHistory.length > 0, canUp });

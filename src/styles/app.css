@@ -658,6 +658,10 @@
   container-type: inline-size;
 }
 
+.compare-workspace[hidden] {
+  display: none !important;
+}
+
 .browse-workspace {
   position: relative;
   display: grid;
@@ -1466,9 +1470,32 @@
 
 .folder-diff-pane {
   display: grid;
-  grid-template-rows: 32px 27px minmax(0, 1fr);
+  grid-template-rows: 32px 42px 27px minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
+}
+
+.folder-diff-filters {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 4px 10px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-toolbar);
+}
+
+.folder-diff-filters .command-button {
+  flex: 0 0 auto;
+  min-height: 32px;
+  white-space: nowrap;
+}
+
+.folder-diff-filters .command-button.is-active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--surface-row-hover);
 }
 
 .folder-diff-summary,

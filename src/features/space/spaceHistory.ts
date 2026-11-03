@@ -1,8 +1,30 @@
 import type { SpaceNode } from "./types";
+import { displayPath } from "../explorer/pathDisplay";
 
 export const SPACE_HISTORY_LIMIT = 64;
 export const SPACE_HISTORY_NODE_BUDGET = 5_000;
 const nodeCosts = new WeakMap<SpaceNode, number>();
+
+function mutationPathKey(path: string): string {
+  return displayPath(path).replaceAll("/", "\\").replace(/\\+$/, "").toLocaleLowerCase("en-US");
+}
+
+/** Conservatively invalidate Windows aliases, with directory separator boundaries. */
+export function spacePathAffected(path: string, changedPaths: readonly string[]): boolean {
+  const key = mutationPathKey(path);
+  if (!key) return false;
+  return changedPaths.some((changedPath) => {
+    const changed = mutationPathKey(changedPath);
+    return changed !== "" && (key === changed || key.startsWith(`${changed}\\`) || changed.startsWith(`${key}\\`));
+  });
+}
+
+/** A file operation invalidates totals as well as the child list; never walk old trees. */
+export function invalidateSpaceHistory(history: readonly SpaceNode[], changedPaths: readonly string[]): readonly SpaceNode[] {
+  return history.map((node) => spacePathAffected(node.path, changedPaths)
+    ? { id: node.id, path: node.path, name: node.name, kind: node.kind, scanning: true }
+    : node);
+}
 
 /** Count only as far as the retention budget, without copying a wide child list. */
 export function spaceHistoryNodeCost(root: SpaceNode): number {

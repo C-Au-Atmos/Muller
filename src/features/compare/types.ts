@@ -7,6 +7,7 @@ export type FolderDiffStatus =
   | "metadata_only"
   | "error";
 export type FolderEntryKind = "file" | "directory" | "other";
+export type FolderDiffFilter = "all" | "differences" | "different" | "added" | "deleted" | "time" | "same" | "error";
 
 export interface FolderSide {
   path: string;
