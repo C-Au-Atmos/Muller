@@ -6,7 +6,7 @@ All notable changes to Muller are documented in this file.
 
 The stable 0.1.5 release includes the beta.1–beta.8 Space, native NTFS indexing,
 Recycle Bin and performance work, plus these final beta.9 corrections
-(BUG-0.1.5-006/007, REQ-0.1.5-012/013):
+(BUG-0.1.5-006/007/008, REQ-0.1.5-012/013):
 
 - Preserve each open tab's comparison paths, running task, results, selection
   and filter when switching tools, settings or tabs. Closing a tab releases its
@@ -20,6 +20,8 @@ Recycle Bin and performance work, plus these final beta.9 corrections
   Explicit refresh also invalidates related history after external changes.
 - Bound comparison page caches to eight pages per result type and retain Space
   history's existing path/node budgets and stale-task rejection.
+- Keep pinned preview resizing active across periodic status updates, including
+  a held pointer drag through a parent render.
 - Publish Windows installer, portable executable and SHA-256 checksums as a
   stable GitHub release; preserve earlier beta downloads and data compatibility.
 
