@@ -480,4 +480,3 @@
 - 完整门禁：lint、前端测试、生产构建、Rust fmt/workspace tests/clippy、Edge E2E。补充原生 EXE 安全 fixture 与空间扫描运行截图；安装器安装/系统会话等未覆盖边界必须如实记录。
 - release 更新版本与 changelog、稳定发布工作流；构建并校验 EXE/NSIS/SHA256，经验证后从 release 合入 master，发布 v0.1.5 非预发布版本，所有长生命周期分支非强制推送。
 - 0.1.6 三阶段分支从同一个验证后 master 基线建立，需求文档保持 Draft，只承接候选和后续评审入口，不擅自承诺新功能。
-
