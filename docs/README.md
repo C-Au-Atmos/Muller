@@ -24,7 +24,7 @@ Stage 资料已经归档，不再与活动版本混放。
   - [原始输入](V0.1.5/01-original-input.md)
   - [评审记录](V0.1.5/02-review.md)
   - [执行计划](V0.1.5/03-execution.md)
-  - [正式版验证证据](V0.1.5/03-execution.md#stable015-final2-evidence)：验证后的 release 已晋级 master `c4f24ab` 并标记 `v0.1.5`；GitHub Release 构建/公开交付结果按 0.1.5 实际记录接续。
+  - [0.1.5 正式交付证据](V0.1.5/03-execution.md#stable015-public-delivery)：[v0.1.5](https://github.com/C-Au-Atmos/Muller/releases/tag/v0.1.5) 已公开为稳定/latest，安装包、便携包和 SHA256 下载核验通过；0.1.6 三阶段分支与 Draft 入口已建立。
 - [V0.1.4](V0.1.4/01-original-input.md)
   - [原始输入](V0.1.4/01-original-input.md)
   - [评审记录](V0.1.4/02-review.md)
