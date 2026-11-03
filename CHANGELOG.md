@@ -23,7 +23,7 @@ Recycle Bin and performance work, plus these final beta.9 corrections
 - Publish Windows installer, portable executable and SHA-256 checksums as a
   stable GitHub release; preserve earlier beta downloads and data compatibility.
 
-Verified 155 frontend tests, 206 Rust tests (2 opt-in tests ignored), all 139
+Verified 155 frontend tests, 206 Rust tests (2 opt-in tests ignored), all 140
 Edge scenarios, lint, production build, Rust formatting and clippy.
 
 Known verification boundaries: real hardware IME and installed-build Windows
@@ -335,3 +335,4 @@ First public Windows preview.
   extended real-media testing remains open.
 - Stage 8's optional privileged MFT/USN index service is not included; global
   search uses the existing traversal index with fallback behavior.
+
