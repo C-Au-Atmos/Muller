@@ -4,17 +4,17 @@
   <p><strong>面向 Windows 11 的文件智能工作台</strong></p>
   <p>浏览、检索、查重、差异比对与安全文件操作，统一在一个安静而高效的桌面界面中。</p>
   <p>
-    <a href="https://github.com/AuAtmos/Muller/releases/tag/v0.1.4"><strong>下载 0.1.4</strong></a>
+    <a href="https://github.com/C-Au-Atmos/Muller/releases/tag/v0.1.5"><strong>下载 0.1.5</strong></a>
     ·
     <a href="CHANGELOG.md">更新记录</a>
     ·
     <a href="docs/README.md">项目文档</a>
   </p>
   <p>
-    <a href="https://github.com/AuAtmos/Muller/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/AuAtmos/Muller/ci.yml?branch=master&style=flat-square&label=CI" alt="CI status"></a>
-    <a href="https://github.com/AuAtmos/Muller/releases"><img src="https://img.shields.io/github/v/release/AuAtmos/Muller?include_prereleases&sort=semver&style=flat-square" alt="GitHub release"></a>
+    <a href="https://github.com/C-Au-Atmos/Muller/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/C-Au-Atmos/Muller/ci.yml?branch=master&style=flat-square&label=CI" alt="CI status"></a>
+    <a href="https://github.com/C-Au-Atmos/Muller/releases"><img src="https://img.shields.io/github/v/release/C-Au-Atmos/Muller?include_prereleases&sort=semver&style=flat-square" alt="GitHub release"></a>
     <img src="https://img.shields.io/badge/Windows-11-0078D4?style=flat-square&logo=windows11&logoColor=white" alt="Windows 11">
-    <a href="LICENSE"><img src="https://img.shields.io/github/license/AuAtmos/Muller?style=flat-square" alt="GPL-3.0 license"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/C-Au-Atmos/Muller?style=flat-square" alt="GPL-3.0 license"></a>
   </p>
 </div>
 
@@ -47,7 +47,9 @@ Muller 为开发者、摄影工作流和重度文件管理用户保留熟悉的 
 |---|---|
 | **Browse** | 双栏目录、标签页、面包屑、全局与目录搜索、列表/网格/相册视图 |
 | **Duplicates** | 分级哈希扫描、KEEP/DUP 审阅、可回收删除、取消与进度隔离 |
-| **Compare** | 目录差异、Myers 文本差异、十六进制范围、双向合并与原子保存 |
+| **Compare** | 保留目录与后台任务、目录差异筛选、Myers 文本差异、十六进制范围、双向合并与原子保存 |
+| **Space** | 渐进空间方块、分层导航、最大目录预览、操作后容量刷新 |
+| **Recycle Bin** | Windows 系统回收站、还原、永久删除确认与搜索排序 |
 | **Preview** | 图片、RAW、GIF、音视频、PPTX 封面、代码、配置与文本型 BLOB |
 | **Workspace** | 深色、浅色、Monochrome Platinum、JSON 主题、可选毛玻璃与流光外框 |
 
@@ -100,13 +102,13 @@ Rust 命令。最终的 Rust 后端编译为 Windows PE 机器码，而不是 `w
 
 ## 下载与运行
 
-前往 [Muller 0.1.4 Release](https://github.com/AuAtmos/Muller/releases/tag/v0.1.4)
+前往 [Muller 0.1.5 Release](https://github.com/C-Au-Atmos/Muller/releases/tag/v0.1.5)
 下载 Windows x64 版本：
 
 | 文件 | 用途 |
 |---|---|
-| `Muller_0.1.4_x64-setup.exe` | 推荐。安装到 Windows，并创建正常的应用入口 |
-| `Muller_0.1.4_x64-portable.exe` | 免安装，适合移动磁盘或临时使用 |
+| `Muller_0.1.5_x64-setup.exe` | 推荐。安装到 Windows，并创建正常的应用入口 |
+| `Muller_0.1.5_x64-portable.exe` | 免安装，适合移动磁盘或临时使用 |
 | `SHA256SUMS.txt` | 两个可执行文件的 SHA-256 校验值 |
 
 目标电脑不需要 Node.js、Rust、Visual Studio 或源码。Windows 11 通常已经包含
@@ -115,7 +117,7 @@ WebView2 Runtime。全新安装会从当前 Windows 用户目录打开，并默�
 Monochrome Platinum；已有用户保存的工作区和主题不会被覆盖。
 
 > [!WARNING]
-> 0.1.4 是未签名的公开预览版，Windows SmartScreen 可能显示“未知发布者”。
+> 0.1.5 正式版尚未进行代码签名，Windows SmartScreen 可能显示“未知发布者”。
 > 请只从本仓库 Releases 下载，并使用 `SHA256SUMS.txt` 核对文件。
 
 ## 快速上手
@@ -172,16 +174,15 @@ npm run test:e2e
 | `themes/` | 可导入主题示例 |
 | `docs/` | 产品设计、阶段报告、发布检查与路线图 |
 
-详细设计与实现证据见 [文档索引](docs/README.md)。当前 0.1.4 已通过
-76 个前端单元测试、125 个 Rust 测试和 87 个 Edge 端到端场景；真实微软拼音/
+详细设计、质量门禁与版本交付证据见 [文档索引](docs/README.md)。真实微软拼音/
 微信输入法、Windows 登录与升级、物理多屏、高 DPI、144Hz、慢盘、OneDrive
-与复杂 UNC 环境仍属于候选安装版人工验证范围。
+与复杂 UNC 环境仍属于人工验证范围。
 
 ## 路线图
 
-当前版本覆盖非特权桌面工作流。下一阶段计划将 MFT/USN 全盘索引拆成
-独立、只读、可选安装的 Windows 服务；没有该服务时仍保留普通遍历搜索。
-完整阶段状态见[起始开发归档](docs/archive/initial-development/implementation-roadmap.md)。
+0.1.5 已提供可选的 MFT/USN 索引 helper 与便携快照，普通文件操作继续使用
+当前用户权限。0.1.6 的具体范围将在需求分支评审，计划入口见[文档索引](docs/README.md)。
+历史阶段状态见[起始开发归档](docs/archive/initial-development/implementation-roadmap.md)。
 
 ## License
 

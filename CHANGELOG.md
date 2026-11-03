@@ -2,6 +2,34 @@
 
 All notable changes to Muller are documented in this file.
 
+## [0.1.5] - 2026-11-03
+
+The stable 0.1.5 release includes the beta.1–beta.8 Space, native NTFS indexing,
+Recycle Bin and performance work, plus these final beta.9 corrections
+(BUG-0.1.5-006/007, REQ-0.1.5-012/013):
+
+- Preserve each open tab's comparison paths, running task, results, selection
+  and filter when switching tools, settings or tabs. Closing a tab releases its
+  task and session; hidden comparisons cannot handle another workspace's input.
+- Filter complete folder reports by all differences, content/type differences,
+  added (right only), deleted (left only), modification-time mismatch, same or
+  errors. Counts, paging and difference navigation share the filtered order;
+  changing filters does not rescan the directories.
+- Invalidate related Space history after successful file operations, including
+  partial success, so returning to a parent measures updated totals and contents.
+  Explicit refresh also invalidates related history after external changes.
+- Bound comparison page caches to eight pages per result type and retain Space
+  history's existing path/node budgets and stale-task rejection.
+- Publish Windows installer, portable executable and SHA-256 checksums as a
+  stable GitHub release; preserve earlier beta downloads and data compatibility.
+
+Verified 155 frontend tests, 206 Rust tests (2 opt-in tests ignored), all 139
+Edge scenarios, lint, production build, Rust formatting and clippy.
+
+Known verification boundaries: real hardware IME and installed-build Windows
+login/upgrade/uninstall/logoff flows remain manual checks. Native Recycle Bin
+conflict dialogs are not automated; these limits do not change file guards.
+
 ## [0.1.5-beta.8] - 2026-09-21
 
 BUG-0.1.5-004/005 and REQ-0.1.5-011 fix recycling from Space, add a system
