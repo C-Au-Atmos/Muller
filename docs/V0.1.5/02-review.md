@@ -16,7 +16,7 @@
 - [REQ-0.1.5-012](#req-0-1-5-012)：Accepted / P1 / 实现与自动化验收 Done。
 - [BUG-0.1.5-007](#bug-0-1-5-007)：Accepted / P1 / 实现与自动化验收 Done。
 - [BUG-0.1.5-008](#bug-0-1-5-008)：Accepted / P1 / Done，稳定 callback 与跨 Worker stats 更新拖拽回归通过。
-- [REQ-0.1.5-013](#req-0-1-5-013)：Accepted / P1 / 正式交付收尾中。
+- [REQ-0.1.5-013](#req-0-1-5-013)：Accepted / P1 / Done，稳定/latest 已公开并完成下载核验，0.1.6 Draft 入口完成。
 
 - [BUG-0.1.5-004](#bug-0-1-5-004)：Accepted / P1 / beta.8。
 - [REQ-0.1.5-011](#req-0-1-5-011)：Accepted / P1 / beta.8。
@@ -548,3 +548,15 @@
 - release [41680031582](https://github.com/C-Au-Atmos/Muller/actions/runs/41680031582) 已 completed/success，head `3180bf7f7f37c905d7337c83f1685668c0131424`；`release-ci-final2-full.log`、`release-ci-final2-evidence.json` 记录 lint、155 前端、生产 build、Rust fmt/206 passed+2 ignored/clippy 全绿，完整 Edge 13 份 spec/140 passed，含 Ctrl+F、masonry 拖拽与 Stage 7。feat `41679151449` 同样全绿，两次 CI 的通过结论各自对应其源码，不互相替代。
 - `BUG-0.1.5-008` 验证 Done；`REQ-0.1.5-013-T01/T02/T05/T06` Done：产品/测试最小修复、完整本地及双分支远端门禁、最终本机 EXE/NSIS 元数据与哈希、列出的原生安全及 UI 场景均已核对。所有旧候选构建、真实失败、中断和取消记录保留，当前结果不改写历史。
 - `REQ-0.1.5-013` 整体仍 In progress，T03 稳定晋级/标签/公开 Release/下载核验与 T04 的 0.1.6 三阶段分支和 Draft 入口须按实际结果接续记录。既有未覆盖边界继续保留，不因 CI 通过扩大原生场景或安装/系统会话验证结论。
+
+### 正式发布阶段与计划入口复核（2026-11-04，UTC+08:00）
+
+- T03 Done：验证后 release 已晋级并推送 master，稳定源码与 `v0.1.5` 为 `c4f24ab4147ae2ff7d8484ef91278e24ecc8ceae`；[正式 Release](https://github.com/C-Au-Atmos/Muller/releases/tag/v0.1.5) 已公开为非草稿、非预发布且 latest。发布运行 `41684175924` 为 completed/success，独立下载两包版本/校验和通过。
+- T04 Done：创建前核对本机和 origin 不存在 0.1.6 三阶段分支，均从同一 `c4f24ab` 验证基线创建并非强制原子推送。req 文档提交 `8b5c0704a7d192479c4c4c7a30c438888501e080`，feat 显式合并 req 为 `8f8b9e778bd7757ca36d6fc52b9c12581dcce964`，release 仍 `c4f24ab4147ae2ff7d8484ef91278e24ecc8ceae`，远端 SHA 已核对。仅文档变更，28 个本地链接/锚点、ID/Draft/Needs information 与 Git 空白检查通过。
+- `REQ-0.1.6-001` 管理性计划入口已完成，三文档保留 Draft；`ISSUE-0.1.6-001` 继续 Needs information，没有新的已接受产品功能或版本升级。0.1.6 的活动索引保留在其 req/feat 文档，0.1.5 本轮仅收录交付进度，不提前改变稳定发布结论。
+
+### 正式公开交付验收（2026-11-04，UTC+08:00）
+
+- `REQ-0.1.5-013` / T01–T06 均 Done。Release 于 `2026-11-03T17:33:54Z` 公开（UTC+08:00 为 11-04 01:33:54），`isDraft=false`、`isPrerelease=false`、`latest=v0.1.5`，中文说明已同步；公开内容包含安装包、便携包与 `SHA256SUMS.txt`。
+- `github-v0.1.5/verification.json` 于 `2026-11-03T17:34:41.6050928Z` 记录独立下载核验 passed，安装包/便携包 FileVersion 与 ProductVersion 均为 0.1.5。发布构建源 `c4f24ab` 与已全绿 release `3180bf7` 的产品/版本/工作流输入无差异；远端产物大小/哈希见[正式交付证据](03-execution.md#stable015-public-delivery)，与本机 `80c418` 产物分开记录。
+- 0.1.6 仅完成管理性 Draft 入口，未接受新产品范围。原生 UI 仅限已列比较/切换保留场景，NSIS 未安装及历史人工验证边界继续保留；公开交付不扩大既有验证结论。
