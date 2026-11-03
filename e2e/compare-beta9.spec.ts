@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
-async function installComparisonMock(page: Page) {
-  await page.addInitScript(() => {
+async function installComparisonMock(page: Page, initialMode: "browse" | "compare" = "compare") {
+  await page.addInitScript((initialMode) => {
     const callbacks = new Map<number, (message: unknown) => void>();
     let callbackId = 0;
     let nextId = 0;
@@ -10,7 +10,7 @@ async function installComparisonMock(page: Page) {
     const state = { starts: 0, cancelled: [] as number[], closed: [] as number[], pages: [] as { filter: string; offset: number }[], hold: true, slowAdded: false, empty: false };
     const root = "D:\\CompareLeft";
     const tab = (id: string, mode: string, path: string) => ({ id, mode, path, title: path, virtualLocation: null, presentation: "list", filter: { extensions: [], date: null }, split: true, activePane: "left", scrollAnchors: { left: 0, right: 0 } });
-    window.localStorage.setItem("muller.workspace.v3", JSON.stringify({ version: 3, tabs: [tab("compare-owner", "compare", root), tab("other", "browse", "D:\\Other")], activeTabId: "compare-owner", paneRatio: 50, previewWidth: 320, inspectorWidth: 256, favorites: [] }));
+    window.localStorage.setItem("muller.workspace.v3", JSON.stringify({ version: 3, tabs: [tab("compare-owner", initialMode, root), tab("other", "browse", "D:\\Other")], activeTabId: "compare-owner", paneRatio: 50, previewWidth: 320, inspectorWidth: 256, favorites: [] }));
     window.localStorage.setItem("muller.preferences.v1", JSON.stringify({ version: 1, locale: "en-US", motion: "reduced", audioEnabled: false }));
     const entries = Array.from({ length: 300 }, (_, index) => {
       const status = ["different", "right_only", "left_only", "metadata_only", "equal", "error"][index % 6];
@@ -37,7 +37,7 @@ async function installComparisonMock(page: Page) {
         metadata: { currentWindow: { label: "main" } },
         transformCallback(callback?: (message: unknown) => void) { const id = ++callbackId; if (callback) callbacks.set(id, callback); return id; },
         unregisterCallback(id: number) { callbacks.delete(id); },
-        invoke(command: string, payload: { request?: { path?: string }; onEvent?: { onmessage: (message: unknown) => void }; sessionId?: number; taskId?: number; offset?: number; limit?: number; filter?: string; from?: number; direction?: number }) {
+        invoke(command: string, payload: { request?: { path?: string }; onEvent?: { onmessage: (message: unknown) => void }; sessionId?: number; taskId?: number; offset?: number; limit?: number; filter?: string; from?: number; direction?: number; query?: string }) {
           if (command === "plugin:window|is_maximized") return false;
           if (command === "get_shell_locations") return [{ id: "profile", label: "Profile", path: root }];
           if (command === "list_logical_drives" || command === "list_directory_extensions") return [];
@@ -51,12 +51,13 @@ async function installComparisonMock(page: Page) {
             });
             return { taskId: id };
           }
-          if (command === "read_directory_page") {
+          if (command === "read_directory_page" || command === "search_directory_page") {
             const path = queries.get(payload.sessionId ?? 0) ?? root;
-            return { sessionId: payload.sessionId, offset: 0, totalEntries: 2, entries: [
+            const entries = [
               { path: `${path}\\sample.txt`, name: "sample.txt", kind: "file", extension: "txt", size: 10, modifiedUnixMs: 1000, hidden: false },
               { path: "D:\\CompareRight", name: "CompareRight", kind: "directory", extension: null, size: 0, modifiedUnixMs: 1000, hidden: false },
-            ] };
+            ].filter((entry) => command !== "search_directory_page" || entry.name.toLowerCase().includes((payload.query ?? "").toLowerCase()));
+            return { sessionId: payload.sessionId, offset: 0, totalEntries: entries.length, entries };
           }
           if (command === "start_folder_diff") {
             const id = ++nextId;
@@ -93,7 +94,7 @@ async function installComparisonMock(page: Page) {
         },
       },
     });
-  });
+  }, initialMode);
 }
 
 type TestWindow = typeof window & { __compareTest: { state: { starts: number; cancelled: number[]; closed: number[]; pages: { filter: string; offset: number }[]; hold: boolean; slowAdded: boolean; empty: boolean }; complete: () => void } };
@@ -106,6 +107,52 @@ async function startComparison(page: Page) {
   await workspace.locator(".compare-actions .is-primary").click();
   return workspace;
 }
+
+test("immediate compare search keeps focus across owner registration and repeated slow tool switches", async ({ page, context }) => {
+  test.setTimeout(90_000);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await installComparisonMock(page, "browse");
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 6 });
+  await page.goto("/");
+  await expect(page.locator(".browse-workspace:visible")).toBeVisible();
+  const search = page.getByRole("textbox", { name: "Search current directory", exact: true });
+  const settleLayout = () => page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+
+  for (let owner = 0; owner < 2; owner += 1) {
+    if (owner > 0) await page.locator(".workspace-tabs [role=tab]").nth(owner).click();
+    for (let repeat = 0; repeat < 2; repeat += 1) {
+      await page.keyboard.press("Control+3");
+      await page.keyboard.press("Control+f");
+      await expect(search).toBeFocused();
+      await settleLayout();
+      await expect(search).toBeFocused();
+      await page.keyboard.type("s");
+      await expect(search).toHaveValue("s");
+      await page.keyboard.press("Escape");
+      await settleLayout();
+      await expect(search).toHaveValue("");
+      await expect(search).not.toBeFocused();
+
+      await page.keyboard.press("Control+1");
+      await page.keyboard.press("Control+f");
+      await expect(search).toBeFocused();
+      await settleLayout();
+      await expect(search).toBeFocused();
+      await page.keyboard.type("b");
+      await expect(search).toHaveValue("b");
+      await page.keyboard.press("Escape");
+      await settleLayout();
+      await expect(search).toHaveValue("");
+      await expect(search).not.toBeFocused();
+    }
+  }
+  await expect(page.locator(".compare-workspace")).toHaveCount(2);
+  expect(errors).toEqual([]);
+});
 
 test("comparison continues across tools, settings and tabs, retaining paths/results/filter/selection and releasing closed owner", async ({ page }) => {
   const errors: string[] = [];
