@@ -15,6 +15,7 @@
 - [BUG-0.1.5-006](#bug-0-1-5-006)：Accepted / P1 / Done，本地完整 Edge 与远端比较/焦点回归通过。
 - [REQ-0.1.5-012](#req-0-1-5-012)：Accepted / P1 / 实现与自动化验收 Done。
 - [BUG-0.1.5-007](#bug-0-1-5-007)：Accepted / P1 / 实现与自动化验收 Done。
+- [BUG-0.1.5-008](#bug-0-1-5-008)：Accepted / P1 / 预览拖拽提前结束发布阻断，待实施。
 - [REQ-0.1.5-013](#req-0-1-5-013)：Accepted / P1 / 正式交付收尾中。
 
 - [BUG-0.1.5-004](#bug-0-1-5-004)：Accepted / P1 / beta.8。
@@ -509,3 +510,26 @@
 - 证据：trace 中首个 `.color-bends` 截图从 12947ms 到 18193ms，耗时 5246ms；默认 5000ms poll 已于 18024ms 超时，回调返回后 18978ms 的 `painted > 20` 断言实际通过。整页失败图仍有渐变，console 无 WebGL 错误。根因为截图/PNG 处理超出 poll 预算，不能将此超时改写为像素未绘制。
 - 接受范围：仅为该像素 `expect.poll` 增加显式 30000ms 超时，容纳 CI 截图及 PNG 处理；保持真实 `.color-bends` 截图、采样方式、alpha 阈值、`painted > 20` 和现有图像断言，不修改产品代码、GPU/浏览器渲染配置、全局超时或跳过用例。
 - 验收：检查最小 diff，运行 Stage 7 相关门禁，重新取得远端完整质量门禁通过证据。未涉及产品/构建输入的测试修复不改变 `c040518` 本机 EXE 的来源和哈希；远端源码与结果单独记录，当前不把 CI 标为通过。
+
+### 测试修复与原生 UI 补证复核（2026-11-04，UTC+08:00）
+
+- `REQ-0.1.5-013-T05` 实施提交 `58a391ad77eaa9d5d2507ec778741dfd1ae30468` 仅为该 poll 增加 `timeout: 30_000` 和说明注释，既有截图、PNG 采样与 `painted > 20` 保持。`stage7-poll-budget-targeted.log` 记录 10/10 passed；release `cabb024e5b0acc6d785146f96d26c83c4eb45e1c` 与回流 feat `a79cef06d60bb1472538fecb94ead178a400eefb` 已非强制推送，最终双分支 CI 尚待完成。
+- 验证 `c040518..cabb024`：`src/`、`src-tauri/`、`crates/`、package 版本文件及 `.github/workflows/` diff 为空；仅测试/文档变更。继续如实使用 `c040518` 本机构建源与现有 SHA256/原生探针，不因测试提交虚构重构建。
+- `BUG-0.1.5-006` / `REQ-0.1.5-012` 原生 UI 复核通过：`native-ui-shipping.json` 绑定 SHA256 `17f99037380f03cf4580ed14458d56f9d92ab06804a4d4c7d3cece38147663ab` 的实际 Tauri WebView2 EXE，使用 computer-use sky 操作独立 fixture。全部结果为 5 个 union 条目，新增/删除/内容不同/一致/仅时间不同各 1；时间筛选显示 `time.txt`（1/5），Browse → Compare 保留时间筛选、结果及目录。三张截图已目视核对，验证 GUI 关闭；不以受控 IPC 截图代替该原生证据，也不扩大为所有筛选按钮均完成原生交互或扫描中连续图像已补齐。
+- 后续双分支 CI：release [41675117317](https://github.com/C-Au-Atmos/Muller/actions/runs/41675117317) 失败于预览拖拽宽度，feat [41675167370](https://github.com/C-Au-Atmos/Muller/actions/runs/41675167370) 失败于慢 CPU 用例总预算，分别纳入以下已接受条目；旧提交对应的被替代运行主动取消以节省资源，取消不计通过。稳定发布与下一版本入口仍须后续实际记录。
+
+<a id="bug-0-1-5-008"></a>
+
+### `BUG-0.1.5-008` - 预览拖拽跨父组件渲染提前结束
+
+- 日期：`2026-11-04`（UTC+08:00）；结论：`Accepted`；P1；正式版发布阻断。release CI `41675117317` 要求预览拖拽宽度 `>480`、实际 335；只读探针 3/3 在按住 1.2 秒跨父 render 后停止于 343，确认产品拖拽生命周期缺陷，不能通过放宽宽度断言处理。
+- 根因证据：`masonry-drag-probe.json` 的 `releasePointerCapture` 栈来自 `BrowseWorkspace` effect cleanup；MutationObserver 3/3 观察到 live-metrics stats 更新后仅 0.1–0.2ms 即 cleanup/release，`buttons` 仍为 1、宽度 343。App 两处 inline `onPreviewWidthChange` 每次父 render 都产生新身份；FlowBorder 每秒 `setStats` 触发父 render，依赖 callback 的 `finishPreviewResize` 变化继而触发 cleanup，仍按住时提前结束拖拽。
+- 接受最小修复：在 App 用稳定 `useCallback` 封装 `dispatchWorkspace({ type: "set-preview-width", value })`，两处复用同一 callback；保持现有宽度上下限、持久化与真正指针释放/取消/卸载时清理语义，不扩展重构范围。
+- 验收：保留 `masonry-preview.spec.ts` 的 `>480` 断言，加入按住至少 1.2 秒跨父 render 后继续拖动的回归，确认指针释放前不提前清除拖拽，现有缩略图完整列及窗口尺寸序列回归继续通过。相关 lint/前端/build、完整 Edge 与远端门禁通过后重新构建 EXE/NSIS、记录新来源/哈希和必要原生复验，原候选证据保留为历史。
+
+### `REQ-0.1.5-013-T06` - 慢 CPU 快捷键测试总预算
+
+- 日期：`2026-11-04`（UTC+08:00）；结论：`Accepted`；P1；正式版门禁测试修复。feat CI `41675167370` 的 `compare-beta9.spec.ts:111` 超过 90000ms，总预算失败仍记失败。
+- 证据：`ci41675167370/timing-analysis.json` 统计 43 个 expect 全部完成且 `errors=0`，导航 11426ms、owner0 循环 31143ms、owner 切换 3763ms、owner1 循环 42245ms；最终 count 与 pageerror 空数组断言在 trace 93632/93634ms 完成（含启动），测试主体约 91 秒。没有卡住动作或功能断言失败，不据此直接豁免门禁。
+- 接受范围：仅将该慢 CPU 用例 `test.setTimeout(90_000)` 调整为 `180_000`，并以 `try/finally` 将 CPU throttling rate 恢复为 1；保留 6 倍降速、两个 owner、每个两轮、全部 43 项功能断言和即时焦点/Escape 语义，不修改产品或全局超时。
+- 验收：核对最小 diff，运行慢 CPU 专项和完整 Edge，取得修复后远端完整门禁结论；与 BUG-0.1.5-008 的产品修复分开记录，不将新产品构建沿用为旧候选来源。

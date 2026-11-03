@@ -16,7 +16,7 @@ Stage 资料已经归档，不再与活动版本混放。
   - [原始输入](V0.1.5/01-original-input.md)
   - [评审记录](V0.1.5/02-review.md)
   - [执行计划](V0.1.5/03-execution.md)
-  - [beta.9 与正式版门禁证据](V0.1.5/03-execution.md#stable015-shipping-evidence)：2026-11-04 本地完整 Edge 140/140、新 EXE/NSIS 及原生安全探针通过；远端 CI 的截图 poll 预算修复已接受，复验和稳定发布待补，0.1.6 Draft 入口在稳定 master 基线建立后接续。
+  - [beta.9 与正式版门禁证据](V0.1.5/03-execution.md#stable015-shipping-evidence)：2026-11-04 本地完整 Edge 140/140、原生比较/状态保留/安全探针及 Stage 7 10/10 已记录；后续双分支 CI 失败，新增预览拖拽发布阻断与慢 CPU 测试预算修复已接受，修复/复验/稳定发布待补。
 
 ## 历史版本
 
