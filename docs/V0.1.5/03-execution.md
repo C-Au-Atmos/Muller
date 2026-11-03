@@ -26,8 +26,8 @@
 |---|---|
 | 目标版本 | `V0.1.5` |
 | 实现分支 | `feat/0.1.5` |
-| 候选分支 | `release/0.1.5`（`0.1.5` 正式交付收尾中；保留 beta.8 及更早版本） |
-| 文档状态 | `In progress` |
+| 候选分支 | `release/0.1.5`（`0.1.5` 正式版已交付；保留 beta.8 及更早版本） |
+| 文档状态 | `Complete` |
 | 技术负责人 | `Codex` |
 | 最后更新 | `2026-11-04`（UTC+08:00） |
 
@@ -39,7 +39,7 @@
 | [`REQ-0.1.5-012`](#req-0-1-5-012) | `Accepted` | `Codex` | `Done` | 完整目录报告筛选、计数、分页及导航，有界缓存 | `Filter/strict/time/paging/stale response regressions passed` |
 | [`BUG-0.1.5-007`](#bug-0-1-5-007) | `Accepted` | `Codex` | `Done` | 操作成功路径失效空间历史、父级重扫及晚响应隔离 | `Child recycle/partial failure/cancel/refresh and large navigation passed` |
 | [`BUG-0.1.5-008`](#bug-0-1-5-008) | `Accepted` | `Codex` | `Done` | 稳定预览宽度 callback，保留跨父 render 指针拖拽 | `e5128c3; real worker-stats hold/capture and >480 regression passed; local full Edge 140/140` |
-| [`REQ-0.1.5-013`](#req-0-1-5-013) | `Accepted` | `Codex` | `In progress` | 正式 EXE/NSIS/稳定发布及 0.1.6 计划入口 | `T01/T02/T05/T06 Done; local + feat/release final CI 140 Edge each and 80c418 build/native evidence passed; T03/T04 in progress` |
+| [`REQ-0.1.5-013`](#req-0-1-5-013) | `Accepted` | `Codex` | `Done` | 正式 EXE/NSIS/稳定 latest 发布及 0.1.6 Draft 计划入口 | `T01–T06 Done; v0.1.5 public stable/latest; GitHub EXE/NSIS versions/SHA256 verified; 0.1.6 branches/docs pushed` |
 | [`BUG-0.1.5-004`](#bug-0-1-5-004) | `Accepted` | `Codex` | `Done / beta.8 delivered` | Space 回收元数据与缓存修复，严格外部修改保护 | `Frontend/Rust/Edge and final EXE recycle probe passed` |
 | [`REQ-0.1.5-011`](#req-0-1-5-011) | `Accepted` | `Codex` | `Done / beta.8 delivered` | Windows 系统回收站页面、还原、永久删除、确认及取消处理 | `7 Recycle Bin Edge cases and final EXE Shell probe passed` |
 | [`BUG-0.1.5-005`](#bug-0-1-5-005) | `Accepted` | `Codex` | `Done / beta.8 delivered` | 有界空间树/历史、索引内存与持久化优化、长期性能门禁 | `Large fixtures, process memory comparison and final MFT/USN probe passed` |
@@ -769,11 +769,11 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 
 ### `REQ-0.1.5-013` - 正式交付
 
-- `Accepted / In progress`；产品修复、完整本地及 feat/release 最终门禁、新本机 EXE/NSIS/哈希与列出的原生验证完成；稳定发布及下一版本入口尚待实际完成，历史迭代证据保留。
+- `Accepted / Done`；产品修复、完整本地及 feat/release 最终门禁、新本机 EXE/NSIS/哈希与列出的原生验证完成，master/tag 已推，稳定/latest Release 已公开并完成独立下载核验，0.1.6 Draft 入口 Done；历史迭代证据与验证边界保留。
 - T01（Done）：三项用户收尾与后续 BUG006/BUG008 发布阻断修复、审查和完整门禁完成；最终 feat `41679151449` 与 release `41680031582` 均 completed/success，各含完整 Edge 140/140。
 - T02（Done）：五处版本元数据 0.1.5、changelog/README/稳定工作流已对齐；最终本机构建源 `80c418`，EXE/NSIS 实测版本、大小与 SHA256 已核对。`80c418..3180bf7` 仅 CHANGELOG 变化；旧 `624c67d`/`c040518` 候选产物保留为迭代历史，详见最终证据。
-- T03（In progress）：最终 `80c418` EXE 的原生回收站/MFT-USN 探针及列出的比较/切换保留 UI 场景通过；历史非零扫描中图像缺口保留。req 证据须经 feat → release 同步，只从验证后的 release 合入 master，非强制推送；v0.1.5 标签、公开稳定 Release 与下载核验结果待实际完成补录。
-- T04（In progress）：0.1.6 Draft 三文档已准备，待在验证后 master 上建立 req/feat/release 0.1.6、同步文档索引及推送；准确基线与远端结果待实际完成补录。
+- T03（Done）：最终 `80c418` EXE 的安全探针及列出的比较/切换保留 UI 场景通过，历史图像缺口保留。验证后的 release 已合入并推送 master，稳定源码/`v0.1.5` 标签为 `c4f24ab4147ae2ff7d8484ef91278e24ecc8ceae`；Release build `41684175924` completed/success，稳定/latest 已公开，独立下载两包版本/SHA256 核验通过。详见正式交付证据。
+- T04（Done）：0.1.6 三阶段分支从同一验证后 master/tag `c4f24ab` 建立并推送，req 文档 `8b5c070` 经显式合并同步至 feat `8f8b9e7`，release 保留基线。Draft 三文档与活动/历史索引已建立，REQ016001 Done、ISSUE001 Needs information，具体基线/远端 SHA 与检查见下节。
 - T05（Done）：`58a391a` 仅该像素 poll 显式 30000ms，真实截图/采样/`painted > 20` 保留；本地 Stage 7 10/10 与最终双分支完整 CI 通过。
 - T06（Done）：`e5128c3` 仅该慢 CPU 用例 180 秒总预算与 finally 复位 CPU=1，6 倍降速/循环数/全部功能断言保留；本地及最终双分支完整 CI 通过。
 - 回滚：保留 beta.8 产物与历史标签，使用正常修复提交；不强推、不改用户文件或已有回收站。
@@ -893,13 +893,13 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 
 - `Accepted / Done`；`e5128c3` 仅调整 `compare-beta9.spec.ts:111` 该用例 90000→180000ms，并用 `try/finally` 将 CPU rate 复位 1，保留 6 倍降速、两个 owner/各两轮、全部功能断言与焦点/Escape 语义，不修改全局超时或产品；最终本地及双分支完整 CI 均通过。
 - 诊断已完成：`ci41675167370/timing-analysis.json` 为 43 个 expect、0 错误；导航 11426ms、owner0 循环 31143ms、owner 切换 3763ms、owner1 循环 42245ms，最终 count/pageerror 断言 trace 93632/93634ms（含启动），测试主体约 91 秒，耗尽 90 秒总预算。CI 保持失败事实，不将已完成断言替代完整门禁通过。
-- 实施提交及最小 diff 已核对，最终本地、feat 与 release 完整 Edge 均含 compare 5/5、全套 140/140 通过。发布与 `REQ-0.1.5-013-T04` 下一版本计划入口保持 In progress，等待实际完成。
+- 实施提交及最小 diff 已核对，最终本地、feat 与 release 完整 Edge 均含 compare 5/5、全套 140/140 通过。公开发布 T03 与下一版本计划入口 T04 均 Done，见后续正式交付及基线记录。
 
 <a id="stable015-final2-evidence"></a>
 
 ### 拖拽阻断修复后的最终验证门禁（2026-11-04，UTC+08:00）
 
-本节为当前验证状态：本地、feat 与 release 的最终完整门禁通过。此前 `624c67d`、`c040518` 的构建/探针与所有 CI 失败、中断、取消记录保留为各轮迭代历史；正式发布及 T04 尚未完成，不将验证全绿写成公开交付已完成。
+本节为最终产品验证状态：本地、feat 与 release 的完整门禁通过。此前 `624c67d`、`c040518` 的构建/探针与所有 CI 失败、中断、取消记录保留为各轮迭代历史；公开发布 T03 与下一版本入口 T04 已完成，交付状态详见后续独立下载记录。
 
 | 项目 | 已核对结果与证据 |
 |---|---|
@@ -917,7 +917,8 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 | 最终 EXE 回收站探针 | `native-recycle-final2.json` / `passed=true`：Windows Shell 文件/目录回收与还原、还原内容、Unicode、mtime 缺失拒绝及未确认永久删除拒绝通过；仅永久删除 fixture。初始 323→最终 323，`preExistingEntriesPreserved=true`，未清空已有回收站 |
 | 最终 EXE MFT/USN 探针 | `native-index-final2.json` / `passed=true`：210403 条/1 卷，初建含授权 666ms、查询 16.262ms、变更验证 4496ms、快照恢复 313ms，restored 1/rebuilt 0；覆盖 MFT、USN 创建/文件及父目录改名/删除、磁盘重载与停机变更校正。与旧样本规模不同，不据此声称性能改善 |
 | 最终 EXE UI | `native-ui-final2.json` / `result=passed`，绑定 `80c418` / 下表 portable SHA256。真实 Tauri WebView2 + computer-use sky 操作独立 fixture/profile：5 个 union 条目（新增/删除/内容不同/一致/仅时间不同各 1），时间筛选只显示 `time.txt`（1/5），Browse→Compare 保留时间筛选、结果及目录。`native-final2-compare-all.png`、`native-final2-compare-time.png`、`native-final2-compare-restored.png` 已目视核对；GUI 已关闭 |
-| 正式发布 / T04 | `In progress`；验证后 release → master、稳定标签/公开 Release/下载核验、0.1.6 三阶段分支与 Draft 入口待实际完成 |
+| 正式发布 T03 | `Done`；验证后 release 已晋级并推送 master/tag `v0.1.5`，源为 `c4f24ab4147ae2ff7d8484ef91278e24ecc8ceae`；[Release](https://github.com/C-Au-Atmos/Muller/releases/tag/v0.1.5) 已公开为稳定/latest，独立下载核验 passed，远端两包来源/版本/大小/SHA256 详见后续记录 |
+| 下一版本 T04 | `Done`；req/feat/release 0.1.6 初始同基线 `c4f24ab` 已推送，Draft 计划入口与文档索引已建立，准确 SHA/检查见下节 |
 
 | 最终本地产物（源 `80c418`） | 字节数 | SHA256 |
 |---|---:|---|
@@ -926,4 +927,39 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 
 上述为本机 Windows 构建，产物位于 `D:\Muller\release\0.1.5`；后续 GitHub Actions 发布二进制的来源、版本、大小与 SHA256 须独立核对记录。此前 `iteration-624c67d/`、`iteration-c040518/` 候选归档继续保留。
 
-最终原生 UI 结论仅覆盖报告列出的真实比较、时间筛选与切换保留场景；没有逐项验证全部筛选按钮，也未进行原生 EXE 的长按预览拖动。长按拖动由真实 Edge Worker stats/pointer-capture 回归覆盖；历史非零扫描中连续原生图像缺口及既有安装/系统会话等边界继续保留。本节列出的本地、feat/release 最终门禁和原生场景均已通过，REQ013-T01/T02/T05/T06 与 BUG008 验证 Done；稳定发布 T03 和下一版本 T04 仍 In progress。
+最终原生 UI 结论仅覆盖报告列出的真实比较、时间筛选与切换保留场景；没有逐项验证全部筛选按钮，也未进行原生 EXE 的长按预览拖动。长按拖动由真实 Edge Worker stats/pointer-capture 回归覆盖；历史非零扫描中连续原生图像缺口及既有安装/系统会话等边界继续保留。本节列出的本地、feat/release 最终门禁和原生场景均已通过，REQ013-T01–T06 与 BUG008 验证 Done；公开产物核验独立记录如下。
+
+#### `REQ-0.1.5-013-T04` - 0.1.6 Draft 入口完成证据（2026-11-04，UTC+08:00）
+
+| 项目 | 已核对结果 |
+|---|---|
+| 共同初始基线 | `c4f24ab4147ae2ff7d8484ef91278e24ecc8ceae`，建立时 `master`/`origin/master`/`v0.1.5` 一致；创建前 fetch/prune，确认本机和 origin 无 0.1.6 三阶段分支 |
+| 三分支建立 | 从共同基线建立 req/feat/release 0.1.6，以非强制原子 push 推送，不覆盖已有分支 |
+| req/0.1.6 | 文档提交 `8b5c0704a7d192479c4c4c7a30c438888501e080`，远端同 SHA；仅新增三份 Draft 文档并更新文档索引 |
+| feat/0.1.6 | 显式合并 req 提交 `8f8b9e778bd7757ca36d6fc52b9c12581dcce964`，已非强制推送且远端一致；保留 req → feat 同步路径 |
+| release/0.1.6 | `c4f24ab4147ae2ff7d8484ef91278e24ecc8ceae`，远端同 SHA，保留初始基线，未晋级产品实现或版本元数据 |
+| 文档与状态 | `REQ-0.1.6-001` Accepted/Done；三文档保持 Draft，`ISSUE-0.1.6-001` 继续 Needs information，不安排产品实现或发布时间。活动 0.1.6/历史 0.1.5 索引保留在新版本 req/feat 文档 |
+| 检查 | 28 个本地链接/锚点及条目 ID、Draft/Needs information 检查通过，`git diff --cached --check` 通过；与基线相比仅 4 份文档变化，`src/`、`src-tauri/`、`crates/`、package 版本和工作流无差异 |
+| 产品边界 | 仅文档和分支准备，产品代码与版本元数据未改，仍为 0.1.5 |
+
+T04 的 Done 仅表示下一版本管理性计划入口完成；0.1.5 的公开 Release、下载版本/哈希核验独立归 T03，见正式交付证据。
+
+<a id="stable015-public-delivery"></a>
+
+### `REQ-0.1.5-013-T03` - 正式公开发布与独立下载核验（2026-11-04，UTC+08:00）
+
+| 项目 | 实际结果与证据 |
+|---|---|
+| 稳定源码与标签 | 验证后 release → master，`c4f24ab4147ae2ff7d8484ef91278e24ecc8ceae` 已推送；`v0.1.5` 指向同一提交。与已全绿 release `3180bf7` 相比仅文档变化，`src/`、`src-tauri/`、`crates/`、package 版本与工作流 diff 为空 |
+| 公开 Release | [Muller v0.1.5](https://github.com/C-Au-Atmos/Muller/releases/tag/v0.1.5)，`isDraft=false`、`isPrerelease=false`、`latest=v0.1.5`；中文发布说明已同步，包含安装包、便携包与 `SHA256SUMS.txt` |
+| 公开时间 | `2026-11-03T17:33:54Z`，即 UTC+08:00 的 `2026-11-04 01:33:54` |
+| 发布构建 | [41684175924](https://github.com/C-Au-Atmos/Muller/actions/runs/41684175924)，head `c4f24ab4147ae2ff7d8484ef91278e24ecc8ceae`，status=`completed`、conclusion=`success`；所有发布步骤及最终收尾完成 |
+| 独立下载核验 | `D:\Muller\release\0.1.5-qa\github-v0.1.5\verification.json`；`2026-11-03T17:34:41.6050928Z`，`checksumVerification=passed`。从 GitHub 重新下载两包和校验和，FileVersion/ProductVersion 均为 `0.1.5`，实际字节数/SHA256 与公开校验和及 asset digest 一致 |
+| 完成状态 | `REQ-0.1.5-013` / T01–T06 Done：修复、门禁、本机及列出的原生验证、公开稳定发布/下载核验、0.1.6 Draft 入口均完成。历史失败、候选和未覆盖边界保留 |
+
+| GitHub Actions 公开产物（源 `c4f24ab`） | 字节数 | SHA256 |
+|---|---:|---|
+| [Muller_0.1.5_x64-setup.exe](https://github.com/C-Au-Atmos/Muller/releases/download/v0.1.5/Muller_0.1.5_x64-setup.exe) | 5096063 | `33faa446181893fdd17bf53dc505fe38cf89921ba3086466d6e61499e2eeb403` |
+| [Muller_0.1.5_x64-portable.exe](https://github.com/C-Au-Atmos/Muller/releases/download/v0.1.5/Muller_0.1.5_x64-portable.exe) | 11979264 | `569aa6f3b2009dfe9da1caf9f3deb065497f9fa02fea35822712c13bcdb3c388` |
+
+本表只对应 GitHub Actions 公开产物，与源 `80c418` 的本机构建分别记录；不将两次独立构建的大小或哈希视为相同。下载核验未安装 NSIS，也未将本机 EXE 的原生 UI/Shell/MFT 探针直接说成对 GitHub 下载二进制重新运行的原生探针。
