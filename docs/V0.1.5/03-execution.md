@@ -29,16 +29,16 @@
 | 候选分支 | `release/0.1.5`（`0.1.5` 正式交付收尾中；保留 beta.8 及更早版本） |
 | 文档状态 | `In progress` |
 | 技术负责人 | `Codex` |
-| 最后更新 | `2026-11-03` |
+| 最后更新 | `2026-11-04`（UTC+08:00） |
 
 ## 执行索引
 
 | 条目 ID | 评审结论 | 实现负责人 | 状态 | 主要交付物 | 验证状态 |
 |---|---|---|---|---|---|
-| [`BUG-0.1.5-006`](#bug-0-1-5-006) | `Accepted` | `Codex` | `In progress` | 比较状态保留完成；快速切换焦点回归为发布阻断项 | `Initial local gates passed; CI focus regression fix/revalidation pending` |
+| [`BUG-0.1.5-006`](#bug-0-1-5-006) | `Accepted` | `Codex` | `Done` | 比较状态、隐藏隔离及快捷键焦点修复 | `0c044e3 targeted 13/13; local full Edge 140/140; remote compare/space/Ctrl+F passed` |
 | [`REQ-0.1.5-012`](#req-0-1-5-012) | `Accepted` | `Codex` | `Done` | 完整目录报告筛选、计数、分页及导航，有界缓存 | `Filter/strict/time/paging/stale response regressions passed` |
 | [`BUG-0.1.5-007`](#bug-0-1-5-007) | `Accepted` | `Codex` | `Done` | 操作成功路径失效空间历史、父级重扫及晚响应隔离 | `Child recycle/partial failure/cancel/refresh and large navigation passed` |
-| [`REQ-0.1.5-013`](#req-0-1-5-013) | `Accepted` | `Codex` | `In progress` | 正式 EXE/NSIS/稳定发布及 0.1.6 计划入口 | `Initial local evidence retained; CI focus blocker fix/new build/publish/next-version pending` |
+| [`REQ-0.1.5-013`](#req-0-1-5-013) | `Accepted` | `Codex` | `In progress` | 正式 EXE/NSIS/稳定发布及 0.1.6 计划入口 | `Local gates/build/native probes passed; accepted CI pixel-poll budget fix/revalidation and publish/next-version pending` |
 | [`BUG-0.1.5-004`](#bug-0-1-5-004) | `Accepted` | `Codex` | `Done / beta.8 delivered` | Space 回收元数据与缓存修复，严格外部修改保护 | `Frontend/Rust/Edge and final EXE recycle probe passed` |
 | [`REQ-0.1.5-011`](#req-0-1-5-011) | `Accepted` | `Codex` | `Done / beta.8 delivered` | Windows 系统回收站页面、还原、永久删除、确认及取消处理 | `7 Recycle Bin Edge cases and final EXE Shell probe passed` |
 | [`BUG-0.1.5-005`](#bug-0-1-5-005) | `Accepted` | `Codex` | `Done / beta.8 delivered` | 有界空间树/历史、索引内存与持久化优化、长期性能门禁 | `Large fixtures, process memory comparison and final MFT/USN probe passed` |
@@ -825,3 +825,39 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 - NSIS 已构建、未安装；真实硬件输入法和已安装版本登录/升级/卸载/注销、系统会话等历史人工验证边界继续保留。回收站同名冲突与缺失父目录原生弹窗不由受控 Edge 验证替代。
 - `compare-filter.png`、`space-before-child-delete.png`、`space-parent-after-child-delete.png` 为同源码 Edge 与受控 IPC 数据截图，不能标为原生 EXE 图像。历史 `BUG-0.1.5-001` 的扫描中连续原生图像缺口在最终核对前仍保留。
 - 原始 beta.8 便携包和安装包继续保留；本轮不修改用户原始 ZIP、已有回收站或系统 USN 日志。回滚使用普通修复/反向提交，不强推；只从验证后 release 晋级 master，长期分支按顺序非强制推送。
+
+<a id="stable015-shipping-evidence"></a>
+
+### 焦点阻断修复与新构建交付证据（2026-11-04，UTC+08:00）
+
+本节接续 2026-11-03 的迭代记录，更新当前已知状态。旧 `624c67d` 的构建、哈希与探针保留为历史，不作为本轮新构建来源；`local-artifacts.json` 现在对应下列 `c040518` 产物。本地完整 Edge 已通过；远端 CI 截图 poll 预算修复和复验、稳定发布及下一版本结果待实际完成后补录。
+
+| 条目 | 当前结果与证据 |
+|---|---|
+| `BUG-0.1.5-006-T04` 实现 | `0c044e324ca050c0f41226097d74bedbfc3a4e91`；当前比较入口首次渲染即挂载对应 owner，登记前后保持 key，搜索命令即时聚焦并选中目录搜索框。维持按需创建、最多 12 个实例及原缓存预算 |
+| 焦点专项门禁 | `compare-focus-targeted.log`：比较与 flow-border 同次 13/13 passed，包括原失败 `flow-border.spec.ts:420`；新增 6 倍 CPU 降速，2 个 owner 各 2 轮立即 `Ctrl+3`/`Ctrl+F`、切回浏览搜索、文本输入与 Escape 清除，布局稳定后继续断言焦点，pageerror 为空 |
+| 修复后前端门禁 | 155 项前端测试、lint、生产构建通过；不将专项 13 项计作完整 Edge 总数，不将旧 139/139 计作本构建最终结果 |
+| release 集成及构建源 | `c040518e67534251450e48330bac6a4e2f5d7804`，将 `0c044e3` 由 feat 集成到 release；本次 EXE/NSIS 均由此源构建，非稍后 GitHub Actions 产物 |
+| 新本机构建 | `native-build-shipping.log`：`npm run tauri -- build --bundles nsis` 成功，EXE 与 x64 NSIS 实际版本均为 `0.1.5`；`local-artifacts.json` 的大小、版本和 SHA256 已核对，见下表；未执行安装 |
+| 新 EXE 回收站探针 | `native-recycle-shipping.json` / `passed=true`：Windows Shell 文件/目录回收与还原、内容一致、Unicode、缺失 mtime 拒绝及未确认永久删除拒绝通过，仅永久删除本轮 fixture。初始 323 条→最终 323 条，`preExistingEntriesPreserved=true`，未清空已有回收站 |
+| 新 EXE MFT/USN 探针 | `native-index-shipping.json` / `passed=true`：207562 条、1 卷；初建含启动/授权 678ms、查询 15.9ms、变更验证 4472ms、磁盘快照恢复 297ms，restored 1 / rebuilt 0；覆盖 MFT 预存、USN 创建/文件改名/父改名后代路径/删除及停机变更校正。与旧探针数据量不同，不据此宣称性能改善 |
+| 本轮 Edge 首次环境中断 | `edge-shipping-full.log` 保留：并行启动本轮原生 GUI 时，仓库内 QA/WebView profile 的锁文件触发 Vite watcher `EBUSY` 崩溃，compare 后续 4 项因 `connection refused` 中断；新增即时快捷键首项已通过。该轮不记为完整通过，也不把服务拒绝连接表述为产品断言失败 |
+| 本轮完整 Edge 重跑 | 已关闭本次自行启动的原生 GUI，`edge-shipping-full-final.log` 单次完整重跑退出 0，13 份 spec 合计 140/140 passed。首次环境中断记录继续保留，不声称首轮即全绿 |
+| 远端 CI | [41671019045](https://github.com/C-Au-Atmos/Muller/actions/runs/41671019045) 失败于 `stage7.spec.ts:56` / line 110 的 `painted > 20` poll 默认 5000ms 超时；比较、空间与原 Ctrl+F 用例已通过。`feature-ci-3-failed.log` 及下载 trace/失败图保留；先前两次失败及已实施修复继续保留，不覆盖为通过 |
+| `REQ-0.1.5-013-T01/T02` | 产品阻断修复、本地完整门禁、新 EXE/NSIS 与哈希已完成；远端另需 T05 测试预算修复及复验，正式晋级仍受验证结果约束 |
+| `REQ-0.1.5-013-T03` | 新 EXE 两项原生探针通过；正式 master 晋级、v0.1.5 标签、稳定公开 Release 与下载核验待实际完成后补录。原生非零扫描中连续图像缺口继续保留，不以新安全探针替代 |
+| `REQ-0.1.5-013-T04` | 0.1.6 req/feat/release 分支及 Draft 计划入口待验证后 master 基线建立；本轮不提前宣称已创建/推送 |
+
+| 新本地产物（源 `c040518`） | 字节数 | SHA256 |
+|---|---:|---|
+| `Muller_0.1.5_x64-portable.exe` | 11595776 | `17f99037380f03cf4580ed14458d56f9d92ab06804a4d4c7d3cece38147663ab` |
+| `Muller_0.1.5_x64-setup.exe` | 5008982 | `09227318b175ab923b64a11a4b82e5ed783752879a81c7e8b9b58e6eef1cd56c` |
+
+证据目录仍为 `D:\Muller\release\0.1.5-qa`，本地产物目录为 `D:\Muller\release\0.1.5`。上述 SHA256 仅指本机 Windows 构建，GitHub Actions 的构建来源、字节数和哈希须独立记录；NSIS 安装及系统会话/真实硬件输入法/回收站冲突弹窗的历史验证边界保持。
+
+#### `REQ-0.1.5-013-T05` - 已接受的 CI 像素 poll 预算修复
+
+- `Accepted / Planned`；实现须在 req 同步到 feat 后进行。仅修改 `e2e/stage7.spec.ts` 中 `.color-bends` 像素 `expect.poll` 的显式超时为 30000ms，不修改产品/GPU 路径、全局超时或跳过用例。真实截图、PNG 像素采样、alpha 阈值和 `painted > 20` 断言全部保留。
+- 已核对证据：CI `41671019045` 首个截图 12947→18193ms（5246ms），默认 5 秒 poll 于 18024ms 已超时；返回后的像素阈值断言在 18978ms 实际通过。失败整页图有渐变，console 无 WebGL 错误；与历史 beta.8 同类失败一致，按测试操作预算不足处理，不以环境理由直接豁免门禁。
+- 证据位置：`feature-ci-3-failed.log`；`ci41671019045/test-results/stage7-Stage-7-V5-shell-Gr-21a2f-rs-and-views-are-integrated/trace.zip`、`test-failed-1.png`。实施提交、Stage 7 验证及修复后远端完整门禁结论待补。
+- 本机产品构建源继续为 `c040518e67534251450e48330bac6a4e2f5d7804`，字节数、SHA256 和安全探针沿用上表；测试专属修复的远端提交与 CI 结果分开记录，不把测试文件提交伪称为本机重构建来源。
