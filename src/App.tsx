@@ -1184,7 +1184,11 @@ export function App({ initialPath }: AppProps) {
           break;
         case "findInDirectory":
           if (activeTool === "duplicates") openDuplicateSearch();
-          else if (addressMode) explorerRef.current?.findInDirectory();
+          else if (addressMode) {
+            explorerRef.current?.findInDirectory();
+            directorySearchRef.current?.focus();
+            directorySearchRef.current?.select();
+          }
           break;
         case "selectAll":
           if (activeTool === "duplicates") selectAllDuplicateFiles();
@@ -2320,11 +2324,12 @@ export function App({ initialPath }: AppProps) {
           </section>
         ) : null}
 
-        {workspaceState.tabs.filter((tab) => tab.id in compareOwners).map((tab) => (
+        {workspaceState.tabs.filter((tab) => tab.id in compareOwners
+          || (tab.id === activeTab.id && activeTool === "compare")).map((tab) => (
           <CompareWorkspace
             key={tab.id}
             ref={tab.id === activeTab.id && activePage === "compare" ? compareRef : undefined}
-            initialRoot={compareOwners[tab.id]!}
+            initialRoot={compareOwners[tab.id] ?? tab.path}
             routeVisible={tab.id === activeTab.id && activePage === "compare"}
             onNavigationChange={handleCompareNavigation}
             onScrollVelocity={sendScrollVelocity}
