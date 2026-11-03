@@ -579,7 +579,8 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
     useEffect(() => {
       const handleTypeAhead = (event: KeyboardEvent) => {
         if (
-          isImeCompositionEvent(event)
+          !routeVisible
+          || isImeCompositionEvent(event)
           || event.ctrlKey
           || event.altKey
           || event.metaKey
@@ -609,7 +610,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
       };
       window.addEventListener("keydown", handleTypeAhead);
       return () => window.removeEventListener("keydown", handleTypeAhead);
-    }, [activePane, left, leftSelection, right, rightSelection, setPaneSelection]);
+    }, [activePane, left, leftSelection, right, rightSelection, routeVisible, setPaneSelection]);
 
     const handleSelect = useCallback((
       pane: PaneId,
@@ -739,7 +740,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
 
     useEffect(() => {
       const handlePaneTab = (event: KeyboardEvent) => {
-        if (!visibleSplit || event.key !== "Tab" || event.ctrlKey || event.altKey || event.metaKey) return;
+        if (!routeVisible || !visibleSplit || event.key !== "Tab" || event.ctrlKey || event.altKey || event.metaKey) return;
         const element = event.target instanceof HTMLElement ? event.target : null;
         if (!element?.closest(".directory-list-viewport, .directory-grid-viewport")) return;
         event.preventDefault();
@@ -747,7 +748,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
       };
       window.addEventListener("keydown", handlePaneTab);
       return () => window.removeEventListener("keydown", handlePaneTab);
-    }, [activatePaneWithFocus, activePane, visibleSplit]);
+    }, [activatePaneWithFocus, activePane, routeVisible, visibleSplit]);
 
     const changeGridTileWidth = useCallback((width: number) => {
       const next = clampGridTileWidth(width);
@@ -1483,6 +1484,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
     }, [busy]);
 
     useEffect(() => {
+      if (!routeVisible) return;
       const onDragOver = (event: DragEvent) => {
         cancelNativeDragTakeover();
         rememberDragPoint(event);
@@ -1530,7 +1532,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
         window.removeEventListener("dragend", fileDragEnd, true);
         window.removeEventListener("dragleave", beginNativeDragOutsideWindow, true);
       };
-    }, [beginNativeDragOutsideWindow, cancelNativeDragTakeover, clearDropState, fileDragEnd, isLegalInternalDrop, performSessionDrop, rememberDragPoint, resolveActiveDrag, showDropTarget]);
+    }, [beginNativeDragOutsideWindow, cancelNativeDragTakeover, clearDropState, fileDragEnd, isLegalInternalDrop, performSessionDrop, rememberDragPoint, resolveActiveDrag, routeVisible, showDropTarget]);
 
     useEffect(() => {
       const updateModifiers = (event: KeyboardEvent) => {
@@ -1550,7 +1552,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
     }, []);
 
     useEffect(() => {
-      if (!isTauri()) return;
+      if (!routeVisible || !isTauri()) return;
       let disposed = false;
       let unlisten: (() => void) | undefined;
       let externalPaths: string[] = [];
@@ -1599,7 +1601,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
         unlisten?.();
         clearDropState();
       };
-    }, [busy, clearDropState, performExternalDrop, showDropTarget]);
+    }, [busy, clearDropState, performExternalDrop, routeVisible, showDropTarget]);
 
     useImperativeHandle(ref, () => ({
       navigateActive(path) {
@@ -1751,7 +1753,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
     }, [finishPreviewResize]);
 
     return (
-      <section className={`browse-workspace${operationsCollapsed ? " is-actions-collapsed" : ""}`} aria-label={t("fileBrowser")} hidden={!routeVisible}>
+      <section className={`browse-workspace${operationsCollapsed ? " is-actions-collapsed" : ""}`} aria-label={t("fileBrowser")} hidden={!routeVisible} inert={!routeVisible}>
         {dropStatus ? (
           <div className={`file-drop-status is-${dropStatus}`} role="status" aria-live="polite">
             {dropStatus === "copy" ? <Copy size={15} /> : dropStatus === "move" ? <Scissors size={15} /> : <X size={15} />}
@@ -2045,7 +2047,7 @@ export const BrowseWorkspace = forwardRef<BrowseWorkspaceHandle, BrowseWorkspace
             }}
           />
         ) : null}
-        {previewOpen ? (
+        {routeVisible && previewOpen ? (
           <PreviewPanel
             entry={selectedEntry}
             pinned={previewPinned}
