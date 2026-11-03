@@ -12,14 +12,19 @@ Stage 资料已经归档，不再与活动版本混放。
 
 ## 活动版本
 
+- [V0.1.6](V0.1.6/01-original-input.md)（`Draft`）
+  - [原始输入](V0.1.6/01-original-input.md)
+  - [评审记录](V0.1.6/02-review.md)
+  - [执行计划](V0.1.6/03-execution.md)
+  - 计划入口已建立，三个阶段分支源于验证后 master `c4f24ab`；尚无已接受的新产品功能或发布日期。既有 Windows 原生/安装验证候选仍为 `Needs information`。
+
+## 历史版本
+
 - [V0.1.5](V0.1.5/01-original-input.md)
   - [原始输入](V0.1.5/01-original-input.md)
   - [评审记录](V0.1.5/02-review.md)
   - [执行计划](V0.1.5/03-execution.md)
-  - [beta.9 与正式版门禁证据](V0.1.5/03-execution.md#stable015-final2-evidence)：2026-11-04 最终本地门禁、新 EXE/NSIS、原生比较/切换保留与安全探针通过，feat/release 最终 CI 均全绿、各含完整 Edge 140/140；稳定发布与 0.1.6 入口进行中。
-
-## 历史版本
-
+  - [正式版验证证据](V0.1.5/03-execution.md#stable015-final2-evidence)：验证后的 release 已晋级 master `c4f24ab` 并标记 `v0.1.5`；GitHub Release 构建/公开交付结果按 0.1.5 实际记录接续。
 - [V0.1.4](V0.1.4/01-original-input.md)
   - [原始输入](V0.1.4/01-original-input.md)
   - [评审记录](V0.1.4/02-review.md)
