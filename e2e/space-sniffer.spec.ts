@@ -427,7 +427,11 @@ test("space file shortcuts copy, paste into the current directory, rename, recyc
     runtime.__TAURI_INTERNALS__.invoke = (command, payload) => {
       if (["transfer_entry", "rename_entry", "recycle_entry"].includes(command)) {
         runtime.__spaceOperations.push({ command, payload });
-        return Promise.resolve({});
+        if (command === "recycle_entry") return Promise.resolve("D:\\Muller\\Projects");
+        const request = (payload as { request: { source: string; destinationDirectory?: string; newName?: string; mode?: string } }).request;
+        const sourceParent = request.source.slice(0, request.source.lastIndexOf("\\"));
+        const destination = `${request.destinationDirectory ?? sourceParent}\\${request.newName ?? request.source.split("\\").at(-1)}`;
+        return Promise.resolve({ source: request.source, destination, outcome: request.mode === "copy" ? "copied" : "moved", replaced: false, warning: null, sourceRetained: request.mode === "copy" });
       }
       return original(command, payload);
     };
@@ -610,13 +614,15 @@ test("space menu surfaces native and clipboard failures and extracts into a chos
   }
   await viewport.click({ button: "right", position: { x: 50, y: 50 } });
   await region.getByRole("menuitem", { name: "Choose extraction folder…", exact: true }).click();
-  await expect.poll(() => spaceTaskCount(page)).toBe(2);
   const operations = await page.evaluate(() => (window as unknown as { __spaceOperations: { command: string; payload: unknown }[] }).__spaceOperations);
   expect(operations).toEqual([
     { command: "plugin:dialog|open", payload: { options: { directory: true, multiple: false, defaultPath: "D:\\Muller", title: "Choose extraction destination" } } },
     { command: "extract_zip", payload: { request: { taskId: expect.any(Number), archive: "D:\\Muller\\Bundle.zip", destinationDirectory: "D:\\Extracted", mode: "current" } } },
   ]);
   await expect(region.getByRole("alert")).toHaveCount(0);
+  // Extracting to an unrelated directory cannot change the current map.
+  expect(await spaceTaskCount(page)).toBe(1);
+  await expect(region.locator("canvas")).toHaveAttribute("data-area-bytes", "900000");
 });
 
 test("space cut uses the shared clipboard and clears it after a successful move", async ({ page }) => {
@@ -629,7 +635,11 @@ test("space cut uses the shared clipboard and clears it after a successful move"
     runtime.__spaceTransfers = [];
     const original = runtime.__TAURI_INTERNALS__.invoke;
     runtime.__TAURI_INTERNALS__.invoke = (command, payload) => {
-      if (command === "transfer_entry") { runtime.__spaceTransfers.push(payload); return Promise.resolve({}); }
+      if (command === "transfer_entry") {
+        runtime.__spaceTransfers.push(payload);
+        const request = (payload as { request: { source: string; destinationDirectory: string } }).request;
+        return Promise.resolve({ source: request.source, destination: `${request.destinationDirectory}\\${request.source.split("\\").at(-1)}`, outcome: "moved", replaced: false, warning: null, sourceRetained: false });
+      }
       return original(command, payload);
     };
   });
