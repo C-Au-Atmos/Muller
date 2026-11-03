@@ -20,7 +20,7 @@ test("manual animation components remain restartable across repeated interaction
 
   await page.getByRole("button", { name: "Option Wheel sidebar" }).click();
   const wheelItems = page.locator(".option-wheel__item");
-  await expect(wheelItems).toHaveCount(1);
+  await expect(wheelItems).toHaveCount(2); // This PC and the system Recycle Bin.
 
   // Strict Mode cancels the first scheduled frame while replaying effects. The
   // second setup must schedule a fresh frame and populate every visual value.
@@ -32,7 +32,7 @@ test("manual animation components remain restartable across repeated interaction
 
   await page.getByRole("button", { name: "Line Sidebar" }).click();
   const lineItems = page.locator(".line-sidebar__item");
-  await expect(lineItems).toHaveCount(1);
+  await expect(lineItems).toHaveCount(2);
 
   for (const index of [0]) {
     const item = lineItems.nth(index);

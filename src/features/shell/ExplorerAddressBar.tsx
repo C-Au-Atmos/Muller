@@ -1,20 +1,24 @@
 import { ArrowLeftRight, ChevronRight, Edit3 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import { useAppI18n } from "../../i18n/i18n";
+import { isImeCompositionEvent } from "../../input/imeInput";
 import { displayPath } from "../explorer/pathDisplay";
 import { completeDirectoryPath, shouldCompleteDirectoryPath } from "./windowsNavigationClient";
 
 interface ExplorerAddressBarProps {
   paneLabel: string;
   value: string;
+  /** Actual navigation path; value may contain an unsubmitted editing draft. */
+  committedValue: string;
   onChange: (value: string) => void;
   onNavigate: (path: string) => void;
   onNavigateThisPc: () => void;
   onPaneToggle: () => void;
+  showPaneToggle?: boolean;
 }
 
-export function ExplorerAddressBar({ paneLabel, value, onChange, onNavigate, onNavigateThisPc, onPaneToggle }: ExplorerAddressBarProps) {
+export function ExplorerAddressBar({ paneLabel, value, committedValue, onChange, onNavigate, onNavigateThisPc, onPaneToggle, showPaneToggle = true }: ExplorerAddressBarProps) {
   const { t } = useAppI18n();
   const requestRevision = useRef(0);
   const completionTimer = useRef<number | null>(null);
@@ -23,7 +27,8 @@ export function ExplorerAddressBar({ paneLabel, value, onChange, onNavigate, onN
   const [activeIndex, setActiveIndex] = useState(-1);
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const displayValue = displayPath(value);
+  const editingSessionRef = useRef(false);
+  const displayValue = displayPath(committedValue);
   const breadcrumbs = useMemo(() => {
     const root = { label: t("thisPc"), path: "this-pc", virtual: true as const };
     if (/^\\\\/.test(displayValue)) {
@@ -35,10 +40,51 @@ export function ExplorerAddressBar({ paneLabel, value, onChange, onNavigate, onN
     return [root, ...parts.map((label, index) => ({ label, path: `${parts.slice(0, index + 1).join("\\")}${index === 0 && /^[a-z]:$/i.test(label) ? "\\" : ""}`, virtual: false as const }))];
   }, [displayValue, t]);
 
-  const beginEditing = useCallback(() => {
-    setEditing(true);
-    window.requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.select(); });
+  const closeSuggestions = useCallback(() => {
+    requestRevision.current += 1;
+    if (completionTimer.current !== null) window.clearTimeout(completionTimer.current);
+    completionTimer.current = null;
+    setOpen(false);
+    setCandidates([]);
+    setActiveIndex(-1);
   }, []);
+
+  const beginEditing = useCallback(() => {
+    closeSuggestions();
+    onChange(committedValue);
+    editingSessionRef.current = true;
+    setEditing(true);
+    // Repeated Ctrl+L selects the mounted input; first entry focuses in its ref.
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, [closeSuggestions, committedValue, onChange]);
+
+  const attachInput = useCallback((input: HTMLInputElement | null) => {
+    inputRef.current = input;
+    if (input) { input.focus(); input.select(); }
+  }, []);
+
+  const cancelEditing = useCallback(() => {
+    if (!editingSessionRef.current) return;
+    editingSessionRef.current = false;
+    closeSuggestions();
+    onChange(committedValue);
+    setEditing(false);
+  }, [closeSuggestions, committedValue, onChange]);
+
+  const commitEditing = useCallback((path: string) => {
+    editingSessionRef.current = false;
+    closeSuggestions();
+    setEditing(false);
+    onNavigate(path);
+  }, [closeSuggestions, onNavigate]);
+
+  useLayoutEffect(() => {
+    // A real navigation or pane change invalidates the previous edit session.
+    editingSessionRef.current = false;
+    closeSuggestions();
+    setEditing(false);
+  }, [closeSuggestions, committedValue]);
 
   useEffect(() => {
     const handleEdit = () => beginEditing();
@@ -72,28 +118,23 @@ export function ExplorerAddressBar({ paneLabel, value, onChange, onNavigate, onN
   }, []);
 
   useEffect(() => () => {
+    requestRevision.current += 1;
     if (completionTimer.current !== null) window.clearTimeout(completionTimer.current);
   }, []);
 
   const scheduleCandidates = useCallback((input: string) => {
-    if (completionTimer.current !== null) {
-      window.clearTimeout(completionTimer.current);
-      completionTimer.current = null;
-    }
-    if (!shouldCompleteDirectoryPath(input)) {
-      requestRevision.current += 1;
-      setCandidates([]);
-      setActiveIndex(-1);
-      setOpen(false);
-      return;
-    }
+    // Invalidate in-flight responses immediately, before the new debounce starts.
+    closeSuggestions();
+    if (!shouldCompleteDirectoryPath(input)) return;
     completionTimer.current = window.setTimeout(() => {
       completionTimer.current = null;
       void loadCandidates(input);
     }, 220);
-  }, [loadCandidates]);
+  }, [closeSuggestions, loadCandidates]);
 
   const complete = useCallback(async (reverse: boolean) => {
+    if (completionTimer.current !== null) window.clearTimeout(completionTimer.current);
+    completionTimer.current = null;
     const available = candidates.length > 0 ? candidates : await loadCandidates(value);
     if (available.length === 0) return;
     const current = candidates.length > 0 ? activeIndex : -1;
@@ -106,6 +147,7 @@ export function ExplorerAddressBar({ paneLabel, value, onChange, onNavigate, onN
   }, [activeIndex, candidates, loadCandidates, onChange, value]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.defaultPrevented || isImeCompositionEvent(event.nativeEvent) || event.altKey || event.ctrlKey || event.metaKey) return;
     if (event.key === "Tab") {
       event.preventDefault();
       void complete(event.shiftKey);
@@ -113,42 +155,37 @@ export function ExplorerAddressBar({ paneLabel, value, onChange, onNavigate, onN
     }
     if (event.key === "Escape" && open) {
       event.preventDefault();
-      requestRevision.current += 1;
-      setOpen(false);
-      setCandidates([]);
-      setActiveIndex(-1);
+      event.stopPropagation();
+      closeSuggestions();
       return;
     }
     if (event.key === "Escape") {
       event.preventDefault();
-      setEditing(false);
+      event.stopPropagation();
+      cancelEditing();
       return;
     }
     if (event.key === "Enter") {
       event.preventDefault();
-      requestRevision.current += 1;
-      setOpen(false);
-      setCandidates([]);
-      setActiveIndex(-1);
-      onNavigate(value);
-      setEditing(false);
+      event.stopPropagation();
+      commitEditing(value);
     }
   };
 
   return editing ? (
     <div className="compare-address-field address-combobox is-editing">
-      <button className="address-pane-toggle" type="button" aria-label={t("switchPane")} title={`${t("switchPane")} (${paneLabel})`} onPointerDown={(event) => event.preventDefault()} onClick={onPaneToggle}>
+      {showPaneToggle ? <button className="address-pane-toggle" type="button" aria-label={t("switchPane")} title={`${t("switchPane")} (${paneLabel})`} onPointerDown={(event) => event.preventDefault()} onClick={onPaneToggle}>
         <ArrowLeftRight size={14} />
-      </button>
+      </button> : null}
       <input
-        ref={inputRef}
+        ref={attachInput}
         role="combobox"
         aria-label={t("currentDirectory")}
         aria-autocomplete="list"
         aria-expanded={open}
         aria-controls="address-completion-list"
         aria-activedescendant={activeIndex >= 0 ? `address-completion-${activeIndex}` : undefined}
-        value={displayValue}
+        value={displayPath(value)}
         spellCheck={false}
         onChange={(event) => {
           const next = event.target.value;
@@ -156,7 +193,7 @@ export function ExplorerAddressBar({ paneLabel, value, onChange, onNavigate, onN
           scheduleCandidates(next);
         }}
         onFocus={(event) => event.currentTarget.select()}
-        onBlur={() => window.setTimeout(() => { setOpen(false); setEditing(false); }, 100)}
+        onBlur={cancelEditing}
         onKeyDown={handleKeyDown}
       />
       {open ? (
@@ -171,8 +208,7 @@ export function ExplorerAddressBar({ paneLabel, value, onChange, onNavigate, onN
               onPointerDown={(event) => event.preventDefault()}
               onClick={() => {
                 onChange(candidate);
-                setOpen(false);
-                onNavigate(candidate);
+                commitEditing(candidate);
               }}
             >
               {displayPath(candidate)}
@@ -183,9 +219,9 @@ export function ExplorerAddressBar({ paneLabel, value, onChange, onNavigate, onN
     </div>
   ) : (
     <div className="compare-address-field breadcrumb-address" aria-label={paneLabel}>
-      <button className="address-pane-toggle" type="button" aria-label={t("switchPane")} title={`${t("switchPane")} (${paneLabel})`} onClick={onPaneToggle}>
+      {showPaneToggle ? <button className="address-pane-toggle" type="button" aria-label={t("switchPane")} title={`${t("switchPane")} (${paneLabel})`} onClick={onPaneToggle}>
         <ArrowLeftRight size={14} />
-      </button>
+      </button> : null}
       <div className="breadcrumb-address__segments">
         {breadcrumbs.map((crumb, index) => (
           <span className="breadcrumb-address__segment" key={crumb.path}>
@@ -194,6 +230,7 @@ export function ExplorerAddressBar({ paneLabel, value, onChange, onNavigate, onN
               type="button"
               title={crumb.virtual ? t("thisPc") : crumb.path}
               data-drop-directory={crumb.virtual ? undefined : crumb.path}
+              aria-current={index === breadcrumbs.length - 1 ? "page" : undefined}
               onClick={() => crumb.virtual ? onNavigateThisPc() : onNavigate(crumb.path)}
             >
               {crumb.label}

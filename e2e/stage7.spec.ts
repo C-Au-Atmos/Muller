@@ -100,6 +100,7 @@ test("Stage 7 V5 shell, GradientText, tabs, rails, filters, and views are integr
   await page.locator(".brand-lockup").click();
   await expect(page.locator(".color-bends")).toHaveAttribute("data-renderer", "three-webgl");
   await expect(page.locator(".color-bends")).toHaveClass(/is-home/);
+  // A single CI screenshot can exceed the default five-second poll budget.
   await expect.poll(async () => {
     const png = PNG.sync.read(await page.locator(".color-bends").screenshot({ omitBackground: true }));
     let painted = 0;
@@ -107,7 +108,7 @@ test("Stage 7 V5 shell, GradientText, tabs, rails, filters, and views are integr
       if ((png.data[index] ?? 0) > 8) painted += 1;
     }
     return painted;
-  }).toBeGreaterThan(20);
+  }, { timeout: 30_000 }).toBeGreaterThan(20);
   await page.getByRole("tab").first().click();
   await expect(page.locator(".color-bends")).toHaveCount(0);
   await page.screenshot({ path: path.join(artifactDirectory, "browse-option-wheel-v5.png"), fullPage: true });

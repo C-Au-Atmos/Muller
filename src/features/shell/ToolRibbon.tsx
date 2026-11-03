@@ -8,6 +8,7 @@ import {
   LayoutList,
   PanelTopOpen,
   SlidersHorizontal,
+  ScanSearch,
 } from "lucide-react";
 
 import { useAppI18n, type TranslationKey } from "../../i18n/i18n";
@@ -28,6 +29,7 @@ interface ToolRibbonProps {
 
 const MODES = [
   { id: "browse", label: "browse", icon: FolderOpen },
+  { id: "space", label: "spaceMap", icon: ScanSearch },
   { id: "duplicates", label: "duplicates", icon: CopyCheck },
   { id: "compare", label: "compare", icon: Columns2 },
   { id: "album", label: "album", icon: Images },

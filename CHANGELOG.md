@@ -2,6 +2,185 @@
 
 All notable changes to Muller are documented in this file.
 
+## [0.1.5] - 2026-11-03
+
+The stable 0.1.5 release includes the beta.1–beta.8 Space, native NTFS indexing,
+Recycle Bin and performance work, plus these final beta.9 corrections
+(BUG-0.1.5-006/007/008, REQ-0.1.5-012/013):
+
+- Preserve each open tab's comparison paths, running task, results, selection
+  and filter when switching tools, settings or tabs. Closing a tab releases its
+  task and session; hidden comparisons cannot handle another workspace's input.
+- Filter complete folder reports by all differences, content/type differences,
+  added (right only), deleted (left only), modification-time mismatch, same or
+  errors. Counts, paging and difference navigation share the filtered order;
+  changing filters does not rescan the directories.
+- Invalidate related Space history after successful file operations, including
+  partial success, so returning to a parent measures updated totals and contents.
+  Explicit refresh also invalidates related history after external changes.
+- Bound comparison page caches to eight pages per result type and retain Space
+  history's existing path/node budgets and stale-task rejection.
+- Keep pinned preview resizing active across periodic status updates, including
+  a held pointer drag through a parent render.
+- Publish Windows installer, portable executable and SHA-256 checksums as a
+  stable GitHub release; preserve earlier beta downloads and data compatibility.
+
+Verified 155 frontend tests, 206 Rust tests (2 opt-in tests ignored), all 140
+Edge scenarios, lint, production build, Rust formatting and clippy.
+
+Known verification boundaries: real hardware IME and installed-build Windows
+login/upgrade/uninstall/logoff flows remain manual checks. Native Recycle Bin
+conflict dialogs are not automated; these limits do not change file guards.
+
+## [0.1.5-beta.8] - 2026-09-21
+
+BUG-0.1.5-004/005 and REQ-0.1.5-011 fix recycling from Space, add a system
+Recycle Bin workspace, and reduce native index and navigation memory.
+
+- Carry measured modification times into recycle guards; compare directory
+  kind/time without mistaking recursive bytes for directory metadata length.
+  Real external changes still block the operation with a refresh/retry message.
+- Browse the current user's Windows Recycle Bin, search/sort/page/select items,
+  restore selected/all items and confirm permanent deletion or emptying. Shell
+  identities are revalidated and partial failures/cancellation remain visible.
+- Stream index snapshots without cloning the whole graph and store folded
+  filenames only when needed. A five-volume, 2.14-million-record comparison
+  reduced post-save private memory from 571 to 373 MiB and peak working set from
+  906 to 450 MiB; version 1 snapshots and USN correctness remain compatible.
+- Keep the current layer and two preview layers in Space display data while
+  fully measuring deeper files. Bound navigation history, release old scan
+  callbacks and trees, and validate new roots on the background worker.
+- Verified 152 frontend tests, 199 Rust tests and 130 Edge cases, lint, production
+  build, Rust formatting and clippy. Six 20,000-entry navigations responded to
+  three-level address jumps in 18-47 ms in the controlled Edge fixture.
+
+## [0.1.5-beta.7] - 2026-09-19
+
+REQ-0.1.5-008/009/010 improve the Space cleanup workflow and save the native
+NTFS index between portable sessions.
+
+- Keep context menus inside the map with independent scrolling and resize
+  constraints. Share copy/cut/paste, recycle, rename, select-all and refresh
+  commands with Browse; expose operation failures and reuse Properties.
+- Show read-only two-level thumbnails inside the largest 1/2/3 folder blocks.
+  Preferences persist, layouts are cached, and large child sets use bounded top-k.
+- Save versioned MFT/USN snapshots under the portable directory, with per-user
+  fallback. Restore once at startup after enabling; stopping disables resume.
+  The helper uses the ordinary GUI token for all cache writes.
+- Validate saved space measurements with bounded NTFS subtree stamps. Cached
+  previews accelerate repeat visits while a full ordinary scan verifies sizes;
+  cold scanning and final traversal counts are unchanged.
+- Verified 140 frontend tests, 184 Rust tests and 121 Edge cases, plus lint,
+  production build, Rust formatting and clippy. A real NTFS probe also verified
+  snapshot reload and offline USN changes; the admin-only unit test stays ignored.
+
+## [0.1.5-beta.6] - 2026-09-19
+
+BUG-0.1.5-003 fixes the smaller-items detail list in Space Sniffer.
+
+- Reserve space for the selected row marker so the first character stays visible;
+  keep the size column readable with a stable right inset and non-wrapping values.
+- A member click emits one selection sound. The shared pointer sound skips controls
+  that emit their own semantic event, while keyboard and canvas selection sounds remain.
+- Add a keyboard accessible “Back to smaller items” action that closes preview,
+  restores the aggregate selection and keeps the current directory and scan intact.
+- Verified 130 frontend tests, 166 Rust tests (one administrator-only NTFS test
+  ignored), 112 Edge tests, lint, production build, Rust fmt and clippy.
+
+## [0.1.5-beta.5] - 2026-09-17
+
+BUG-0.1.5-002 fixes numeric filename ordering: `1, 2, 10` now follows
+numeric order in directory views, search sessions and address completion.
+
+- Compare digit runs without integer parsing, overflow, per-comparison allocation
+  or filesystem reads. Embedded numbers and long numeric identifiers are supported.
+- Preserve folders first, case-folded text ordering and metadata sort priorities.
+  Equivalent numbers compare their suffixes before leading-zero tie breaks.
+- Sort complete sessions before paging and completion candidates before truncation;
+  same-name search results have a deterministic path tie break.
+- Verified 130 frontend tests, 166 Rust tests and all 109 Edge cases, plus lint,
+  production build, Rust formatting and clippy. One administrator-only NTFS test
+  remains ignored; the native indexing engine is unchanged.
+
+## [0.1.5-beta.4] - 2026-09-14
+
+REQ-0.1.5-006/007 unify Space navigation with the top address bar and add
+selection previews while keeping complete album columns beside a pinned preview.
+
+- Backspace opens the actual parent directory; Alt+Left/Right traverse history.
+  Top buttons, breadcrumbs, typed paths and sidebar navigation share that state.
+  Cancelled address drafts restore the current path, and rapid navigation keeps focus.
+- Space offers a Preview button and Space toggle for selected files and folders.
+  Focused smaller items preview their own content; stale requests cannot replace a new selection.
+- Shared previews use a dark content stage, compact file identity and collapsed properties.
+  Readers and media are replaced on selection changes; existing format support is preserved.
+- Pinned album previews stay in the grid. Available image width is divided into
+  complete equal-width columns when the preview or window is resized.
+- Includes the beta.3 follow-ups for Space context actions, smaller-item selection,
+  resizable details, recycle cleanup and white Target Cursor corners limited to blocks.
+- Verified 130 frontend tests and all 109 Edge cases, plus lint, production build
+  and Rust formatting/tests/clippy. One administrator-only NTFS test remains ignored;
+  the unchanged native index was not probed again in this UI release.
+
+## [0.1.5-beta.3] - 2026-09-13
+
+REQ-0.1.5-005 adds keyboard navigation and interaction polish to the Platinum
+space view.
+
+- Arrow keys select the nearest visible block; Enter opens folders and Escape returns.
+- Optional Target Cursor effect can lock onto controls and the current Canvas block.
+- Space blocks use richer deep-black, low-saturation graphite, blue-black, smoke-purple and warm-black tones.
+- Right-click offers open/enter, locate in browser and copy path for the selected item.
+- Choosing a folder from the left rail while in Space mode keeps the Space view active.
+- Verified lint, 103 frontend tests, production build and the full Edge E2E suite.
+
+## [0.1.5-beta.2] - 2026-09-13
+
+BUG-0.1.5-001 corrects the space map's thin, hard-to-click rectangles and the
+missing updates during scanning.
+
+- Uses squarified byte-proportional rectangles, aggregating small entries into
+  an accessible list. Individual blocks meet a 28px short edge and 1600px² area
+  threshold; an aggregate keeps its true area even when it is subpixel.
+- Restores Platinum gradients, fine white seams, orthogonal light accents and
+  selection corners. Folder contents become interactive tiles after opening.
+- Streams discovered directories and growing totals through coalesced immutable
+  snapshots, animates current geometry, and retains the last result on stop.
+- Keeps drill-down history and scan sessions isolated; respects reduced motion
+  and preserves distinct names in Windows case-sensitive directories.
+- Verified 102 frontend, 153 Rust and 96 Edge tests, with focused regressions for
+  live Canvas changes, cancellation, small-item access and folder navigation.
+
+The beta.1 native MFT/USN filename index remains available. Directory space is
+still measured separately; fast scans finish immediately without artificial delay.
+
+## [0.1.5-beta.1] - 2026-09-13
+
+Windows test build for REQ-0.1.5-002/004: Platinum Space Sniffer view and native
+NTFS filename indexing. Enable "NTFS fast index" in the address bar to launch
+the isolated indexer through UAC; the desktop GUI keeps normal privileges.
+
+- Enumerates MFT records with FSCTL_ENUM_USN_DATA, then replays USN changes for
+  creates, deletes, file renames and parent-directory renames. Invalid journal
+  checkpoints trigger a rebuild or an explicit fallback state.
+- Uses a local, user-restricted named pipe with process identity checks; the
+  helper only reads filesystem metadata and exits with its parent process.
+- Browse, Home and Compare searches share the native provider, bounded query
+  snapshots and paged metadata loading. Missing coverage falls back to the
+  portable walker. Portable snapshots are cached in memory for queries.
+- Includes the existing Canvas space map with selection, folder drill-down,
+  breadcrumbs, interface sounds and linear weighted-strip layout.
+- Space scans now emit file tiles in addition to folder totals; intermediate
+  breadcrumbs restore the correct directory and keep Escape navigation working.
+- Verified 148 Rust tests, 86 frontend tests and 93 Edge E2E tests, plus a real
+  NTFS helper probe covering initial enumeration and USN lifecycle changes.
+
+Beta limits: the native index lives in memory and rebuilds on activation;
+additional hard-link names are not fully enumerated. USN must already be
+enabled. Filename indexing does not compute recursive directory byte totals;
+the space view continues to scan logical sizes separately. Name queries scan
+cached names; this build does not claim parity with every Everything feature.
+
 ## [0.1.4] - 2026-09-03
 
 Keyword-based file organization and Windows-style directory navigation release.

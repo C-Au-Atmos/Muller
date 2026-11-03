@@ -136,6 +136,9 @@ export function useInterfaceAudio(options?: { enabled?: boolean; volume?: number
 
   useEffect(() => {
     const handlePointerDown = (event: PointerEvent) => {
+      // Some controls emit semantic selection/open sounds after activation.
+      // Do not also play the generic pointer sound before that activation.
+      if ((event.target as Element | null)?.closest('[data-interface-audio="manual"]')) return;
       const button = (event.target as Element | null)?.closest("button:not(:disabled)");
       const item = (event.target as Element | null)?.closest(
         '[data-selection-item="true"]:not(.is-placeholder)',

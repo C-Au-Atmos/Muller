@@ -8,12 +8,14 @@ import {
   Monitor,
   Music2,
   Star,
+  Trash2,
   Video,
   type LucideIcon,
 } from "lucide-react";
 
 export type LocationGlyphKind =
   | "this-pc"
+  | "recycle-bin"
   | "drive"
   | "profile"
   | "desktop"
@@ -27,6 +29,7 @@ export type LocationGlyphKind =
 
 const LOCATION_GLYPHS: Record<LocationGlyphKind, LucideIcon> = {
   "this-pc": Monitor,
+  "recycle-bin": Trash2,
   drive: HardDrive,
   profile: House,
   desktop: Monitor,

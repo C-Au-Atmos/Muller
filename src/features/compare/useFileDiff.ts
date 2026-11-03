@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { isPageLoaded, mergePage, pagesForRange } from "../paging/pagedData";
+import { isPageLoaded, pagesForRange } from "../paging/pagedData";
+import { retainComparePage } from "./comparePageCache";
 
 import {
   cancelDiff,
@@ -51,12 +52,13 @@ export function useFileDiff() {
   const generationRef = useRef(0);
   const taskRef = useRef<number | null>(null);
   const sessionRef = useRef<number | null>(null);
-  const loadingPagesRef = useRef(new Set<number>());
+  const loadingPagesRef = useRef(new Set<string>());
 
   const loadTextPage = useCallback(
     async (sessionId: number, page: number, generation: number) => {
-      if (loadingPagesRef.current.has(page)) return;
-      loadingPagesRef.current.add(page);
+      const key = `${generation}/${page}`;
+      if (loadingPagesRef.current.has(key)) return;
+      loadingPagesRef.current.add(key);
       try {
         const response = await readTextDiffPage(
           sessionId,
@@ -65,7 +67,7 @@ export function useFileDiff() {
         );
         if (generationRef.current !== generation || sessionRef.current !== sessionId) return;
         setState((current) => {
-          const rows = mergePage(current.rows, response.offset, response.rows);
+          const rows = retainComparePage(current.rows, response.offset, response.rows, TEXT_PAGE_SIZE);
           return { ...current, rows, totalRows: response.totalRows };
         });
       } catch (error) {
@@ -76,7 +78,7 @@ export function useFileDiff() {
           error: error instanceof Error ? error.message : "Unable to read text comparison",
         }));
       } finally {
-        loadingPagesRef.current.delete(page);
+        loadingPagesRef.current.delete(key);
       }
     },
     [],
@@ -110,8 +112,12 @@ export function useFileDiff() {
       let terminal = false;
       try {
         const task = await startFileDiff(leftPath, rightPath, (event) => {
-          if (generationRef.current !== generation) return;
+          if (generationRef.current !== generation) {
+            if (event.type === "ready") ignoreFailure(closeDiffSession(event.sessionId));
+            return;
+          }
           if (event.type === "started") {
+            taskRef.current = event.taskId;
             setState((current) => ({ ...current, taskId: event.taskId }));
           } else if (event.type === "ready") {
             terminal = true;
@@ -198,7 +204,9 @@ export function useFileDiff() {
   const findDifference = useCallback(async (from: number, direction: 1 | -1) => {
     const sessionId = sessionRef.current;
     if (sessionId === null || state.inspection?.kind !== "text") return null;
-    return findDiffPosition(sessionId, from, direction);
+    const generation = generationRef.current;
+    const position = await findDiffPosition(sessionId, from, direction);
+    return generationRef.current === generation ? position : null;
   }, [state.inspection?.kind]);
 
   useEffect(

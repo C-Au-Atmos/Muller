@@ -19,3 +19,7 @@ lto = "thin"
 opt-level = "s"
 panic = "abort"
 strip = true
+
+# Native MFT parsing and filename matching are CPU hot paths.
+[profile.release.package.muller]
+opt-level = 3

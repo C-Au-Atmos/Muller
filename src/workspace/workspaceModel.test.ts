@@ -10,6 +10,14 @@ import {
 } from "./workspaceModel";
 
 describe("Stage 7 workspace model", () => {
+  it("persists Recycle Bin as a virtual workspace without replacing the last directory", () => {
+    const tab = createWorkspaceTab("recycle", "D:\\Photos", "recycle-bin");
+    const state = workspaceReducer(createInitialWorkspaceState(), { type: "add-tab", tab });
+    const restored = activeWorkspaceTab(parseWorkspaceState(JSON.stringify(state)));
+    expect(restored.mode).toBe("recycle-bin");
+    expect(restored.virtualLocation).toBe("recycle-bin");
+    expect(restored.path).toBe("D:\\Photos");
+  });
   it("falls back cleanly for corrupt data and migrates schema v1", () => {
     const emptyFallback = activeWorkspaceTab(parseWorkspaceState("not-json"));
     expect(emptyFallback.mode).toBe("browse");

@@ -4,6 +4,7 @@ import type {
   BinaryDiffRange,
   FileDiffEvent,
   FolderDiffEvent,
+  FolderDiffFilter,
   FolderDiffPageResponse,
   TextDiffPageResponse,
 } from "./types";
@@ -60,8 +61,9 @@ export async function readFolderDiffPage(
   sessionId: number,
   offset: number,
   limit: number,
+  filter: FolderDiffFilter = "all",
 ): Promise<FolderDiffPageResponse> {
-  return invoke("read_folder_diff_page", { sessionId, offset, limit });
+  return invoke("read_folder_diff_page", { sessionId, offset, limit, filter });
 }
 
 export async function readTextDiffPage(
@@ -84,6 +86,7 @@ export async function findDiffPosition(
   sessionId: number,
   from: number,
   direction: 1 | -1,
+  filter?: FolderDiffFilter,
 ): Promise<number | null> {
-  return invoke("find_diff_position", { sessionId, from, direction });
+  return invoke("find_diff_position", { sessionId, from, direction, filter });
 }

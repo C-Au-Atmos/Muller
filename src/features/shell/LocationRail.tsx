@@ -11,6 +11,7 @@ import { LocationGlyph, type LocationGlyphKind } from "./LocationGlyph";
 
 export type QuickLocationTarget =
   | { kind: "this-pc" }
+  | { kind: "recycle-bin" }
   | { kind: "directory"; path: string; mode?: WorkspaceMode };
 
 export interface QuickLocation {
@@ -38,7 +39,7 @@ export function LocationRail({ mode, path, virtualLocation, locations, soundEnab
     <LocationGlyph key={location.id} kind={location.icon ?? "folder"} size={14} />
   )), [locations]);
   const selected = locations.findIndex((location) => {
-    if (location.target.kind === "this-pc") return virtualLocation === "this-pc";
+    if (location.target.kind !== "directory") return virtualLocation === location.target.kind;
     return virtualLocation === null && location.target.path.toLowerCase() === path.toLowerCase();
   });
   const change = (index: number, disposition: "current" | "newTab" = "current") => {

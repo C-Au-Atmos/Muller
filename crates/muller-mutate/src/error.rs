@@ -35,6 +35,9 @@ pub enum MutationError {
     #[error("file changed outside Muller since the edit session opened: {0}")]
     ExternalChange(PathBuf),
 
+    #[error("entry changed since it was displayed; refresh and try again: {0}")]
+    EntryChanged(PathBuf),
+
     #[error("refusing to recycle hard-linked file {path} ({links} links)")]
     HardLinkedFile { path: PathBuf, links: u64 },
 

@@ -60,7 +60,14 @@ export async function startDirectorySearch(
 
 export async function warmGlobalSearchIndex(roots: readonly string[]): Promise<void> {
   if (!isDesktopExplorerRuntime() || roots.length === 0) return;
-  await invoke("warm_global_search_index", { roots });
+  // Build the persistent snapshot once. Global search consumes it when
+  // available and falls back to the in-memory walker while it is warming or
+  // unavailable; starting both walkers here would duplicate full-disk I/O.
+  const channel = new Channel<unknown>(() => undefined);
+  await invoke("start_global_indexer", {
+    request: { roots },
+    onEvent: channel,
+  });
 }
 
 export async function cancelDirectoryQuery(taskId: number): Promise<void> {

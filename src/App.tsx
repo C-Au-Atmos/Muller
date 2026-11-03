@@ -50,6 +50,7 @@ import {
   type CommandPaletteItem,
 } from "./features/command/CommandPalette";
 import { SuccessBurst } from "./features/feedback/SuccessBurst";
+import { TargetCursor } from "./features/feedback/TargetCursor";
 import { useInterfaceAudio } from "./features/feedback/useInterfaceAudio";
 import {
   CompareWorkspace,
@@ -76,6 +77,7 @@ import type { DuplicateGroup, ScanPhase } from "./features/dedup/types";
 import { createInitialScanState } from "./features/dedup/scanState";
 import { useDedupScan } from "./features/dedup/useDedupScan";
 import { recycleDuplicates } from "./features/dedup/recycleClient";
+import { RecycleBinWorkspace } from "./features/recycle-bin/RecycleBinWorkspace";
 import { ALBUM_IMAGE_EXTENSIONS } from "./features/album/imageFormats";
 import {
   BrowseWorkspace,
@@ -83,15 +85,32 @@ import {
   type BrowseComparisonRequest,
   type BrowseWorkspaceHandle,
 } from "./features/explorer/BrowseWorkspace";
+import { EntryPropertiesDialog } from "./features/explorer/ExplorerOverlays";
 import { DirectorySearchBar } from "./features/explorer/DirectorySearchBar";
 import { ImeAwareSearchInput } from "./features/explorer/ImeAwareSearchInput";
+import { NativeIndexerControl } from "./features/explorer/NativeIndexerControl";
 import { listDirectoryExtensions, warmGlobalSearchIndex, type DirectoryExtensionCount } from "./features/explorer/explorerClient";
-import { openNativePath } from "./features/explorer/fileOperationsClient";
+import {
+  createEntry,
+  createZip,
+  extractZip,
+  openNativePath,
+  openTerminal,
+  recycleEntry,
+  RecycleEntryChangedError,
+  renameEntry,
+  transferEntry,
+} from "./features/explorer/fileOperationsClient";
 import { displayPath } from "./features/explorer/pathDisplay";
 import { ThisPcWorkspace } from "./features/explorer/ThisPcWorkspace";
 import type { DirectoryEntry, DirectoryQueryFilter, DirectorySearchMode, FileClipboardState } from "./features/explorer/types";
 import { WorkspaceFilterMenu } from "./features/filter/WorkspaceFilterMenu";
 import { HomeDashboard } from "./features/home/HomeDashboard";
+import { SpaceSniffer } from "./features/space/SpaceSniffer";
+import { spaceParentPath } from "./features/space/spaceNavigation";
+import { spacePathAffected } from "./features/space/spaceHistory";
+import { spaceSnifferClient } from "./features/space/spaceSnifferClient";
+import type { SpaceContextAction, SpaceNode, SpaceScanProgress, SpaceSnifferHandle, SpaceNavigationState } from "./features/space/types";
 import {
   FlowBorder,
   type FlowBorderHandle,
@@ -216,6 +235,9 @@ interface AppProps {
 export function App({ initialPath }: AppProps) {
   const { state: workspaceState, activeTab, dispatch: dispatchWorkspace } =
     useWorkspaceState(initialPath);
+  const updatePreviewWidth = useCallback((value: number) => {
+    dispatchWorkspace({ type: "set-preview-width", value });
+  }, [dispatchWorkspace]);
   const { preferences, updatePreferences, resetPreferences } = usePreferences();
   const { t, formatNumber, formatDate } = useI18n(preferences.locale);
   const [systemRoute, setSystemRoute] = useState<"workspace" | "home" | "settings">("workspace");
@@ -244,7 +266,7 @@ export function App({ initialPath }: AppProps) {
   });
   const [fileClipboard, setFileClipboard] = useState<FileClipboardState | null>(null);
   const activeTool = activeTab.mode;
-  const explorerTool = activeTool === "browse" || activeTool === "album";
+  const explorerTool = activeTool === "browse" || activeTool === "album" || activeTool === "space";
   const activePage = systemRoute === "workspace" ? activeTool : systemRoute;
   const flowRef = useRef<FlowBorderHandle>(null);
   const browseRef = useRef<BrowseWorkspaceHandle>(null);
@@ -254,6 +276,15 @@ export function App({ initialPath }: AppProps) {
   const duplicateListRef = useRef<VirtualDuplicateListHandle>(null);
   const duplicateSearchRef = useRef<HTMLInputElement>(null);
   const compareRef = useRef<CompareWorkspaceHandle>(null);
+  const [compareOwners, setCompareOwners] = useState<Record<string, string>>({});
+  useEffect(() => {
+    setCompareOwners((current) => {
+      const next = Object.fromEntries(Object.entries(current).filter(([id]) => workspaceState.tabs.some((tab) => tab.id === id)));
+      if (activeTool === "compare" && !(activeTab.id in next)) next[activeTab.id] = activeTab.path;
+      return Object.keys(next).length === Object.keys(current).length
+        && Object.keys(next).every((id) => next[id] === current[id]) ? current : next;
+    });
+  }, [activeTab.id, activeTab.path, activeTool, workspaceState.tabs]);
   const recycleCancelRef = useRef<HTMLButtonElement>(null);
   const pendingVelocity = useRef<number | null>(null);
   const velocityFrame = useRef<number | null>(null);
@@ -278,6 +309,25 @@ export function App({ initialPath }: AppProps) {
   const [shellLocations, setShellLocations] = useState<ShellLocation[]>([]);
   const [logicalDrives, setLogicalDrives] = useState<LogicalDrive[]>([]);
   const [extensionOptions, setExtensionOptions] = useState<DirectoryExtensionCount[]>([]);
+  const [spaceRoot, setSpaceRoot] = useState<SpaceNode | null>(null);
+  const [spaceRootTabId, setSpaceRootTabId] = useState<string | null>(null);
+  const [spaceRootRequestId, setSpaceRootRequestId] = useState(0);
+  const [spaceNavigation, setSpaceNavigation] = useState<SpaceNavigationState>({ path: initialPath, canBack: false, canForward: false, canUp: false });
+  const [spaceAddress, setSpaceAddress] = useState(initialPath);
+  const spaceNavigationOwner = useRef<{ tabId: string; path: string } | null>(null);
+  const lastSpaceRefresh = useRef(0);
+  const [spaceProgress, setSpaceProgress] = useState<SpaceScanProgress>({ scanned: 0, total: null, phase: "idle" });
+  const [spaceRefreshToken, setSpaceRefreshToken] = useState(0);
+  const spaceScanController = useRef<AbortController | null>(null);
+  const spaceRef = useRef<SpaceSnifferHandle>(null);
+  const [spaceScanError, setSpaceScanError] = useState<string | null>(null);
+  const [spaceOperationError, setSpaceOperationError] = useState<string | null>(null);
+  const spaceOperationBusy = useRef(false);
+  const [spacePropertiesTarget, setSpacePropertiesTarget] = useState<DirectoryEntry | null>(null);
+  const spacePropertiesRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (spacePropertiesTarget) spacePropertiesRef.current?.querySelector("button")?.focus({ preventScroll: true });
+  }, [spacePropertiesTarget]);
   const [extensionsLoading, setExtensionsLoading] = useState(false);
   const [compareNavigation, setCompareNavigation] = useState<CompareNavigationState>({
     activePane: "left",
@@ -385,9 +435,59 @@ export function App({ initialPath }: AppProps) {
     ? scanSessionState
     : EMPTY_SCAN_STATE;
   const previousScanStatus = useRef(scanSessionState.status);
-  const explorerMode = systemRoute === "workspace" && explorerTool;
+  const explorerMode = systemRoute === "workspace" && (activeTool === "browse" || activeTool === "album");
   const isThisPc = activeTab.virtualLocation === "this-pc";
   const addressMode = explorerMode || (systemRoute === "workspace" && activeTool === "compare");
+  const spaceMode = systemRoute === "workspace" && activeTool === "space";
+  const locationMode = addressMode || spaceMode;
+  const cancelSpaceScan = useCallback(() => {
+    spaceScanController.current?.abort();
+    spaceScanController.current = null;
+    setSpaceProgress((previous) => previous.phase === "scanning" ? { ...previous, phase: "idle" } : previous);
+  }, []);
+  useEffect(() => {
+    if (systemRoute !== "workspace" || activeTool !== "space" || isThisPc || !activeTab.path.trim()) {
+      setSpaceRoot(null);
+      setSpaceScanError(null);
+      setSpaceProgress({ scanned: 0, total: null, phase: "idle" });
+      return;
+    }
+    const refreshing = lastSpaceRefresh.current !== spaceRefreshToken;
+    lastSpaceRefresh.current = spaceRefreshToken;
+    // Internal map navigation already owns the scan. Updating the shared tab
+    // path must not launch another scan or discard its history.
+    if (!refreshing && spaceRef.current && spaceNavigationOwner.current?.tabId === activeTab.id && spaceNavigationOwner.current.path === activeTab.path) return;
+    const controller = new AbortController();
+    spaceScanController.current = controller;
+    setSpaceRootTabId(activeTab.id);
+    setSpaceRootRequestId((request) => request + 1);
+    // Keep the map mounted so sidebar navigation retains its back/forward history.
+    setSpaceRoot({ id: activeTab.path, path: activeTab.path, name: activeTab.path.split(/[\\/]/).filter(Boolean).at(-1) ?? activeTab.path, kind: "folder", scanning: true });
+    setSpaceScanError(null);
+    setSpaceProgress({ scanned: 0, total: null, phase: "scanning" });
+    void spaceSnifferClient.scan(activeTab.path, controller.signal, (root, progress) => {
+      if (controller.signal.aborted || spaceScanController.current !== controller) return;
+      setSpaceRoot(root);
+      setSpaceProgress(progress);
+    })
+      .then((root) => {
+        if (!controller.signal.aborted && spaceScanController.current === controller) setSpaceRoot(root);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted || spaceScanController.current !== controller) return;
+        if (error instanceof Error && error.name === "AbortError") {
+          setSpaceProgress((previous) => ({ ...previous, phase: "idle" }));
+          return;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        setSpaceScanError(message);
+        setSpaceProgress((previous) => ({ ...previous, phase: "error", message }));
+      });
+    return () => {
+      controller.abort();
+      if (spaceScanController.current === controller) spaceScanController.current = null;
+    };
+  }, [activeTab.id, activeTab.path, activeTool, isThisPc, systemRoute, spaceRefreshToken]);
   const filterCount = activeTab.filter.extensions.length + (activeTab.filter.date ? 1 : 0);
   const directoryFilter = useMemo<DirectoryQueryFilter>(() => {
     const date = activeTab.filter.date;
@@ -511,6 +611,18 @@ export function App({ initialPath }: AppProps) {
     });
   }, [dispatchWorkspace]);
 
+  const handleSpaceNavigation = useCallback((next: SpaceNavigationState) => {
+    spaceNavigationOwner.current = { tabId: activeTab.id, path: next.path };
+    // Internal navigation owns the current tree. Release the previous external
+    // scan result without changing its request identity or resetting map history.
+    setSpaceRoot((current) => current && current.path !== next.path && current.children
+      ? { id: current.id, path: current.path, name: current.name, kind: "folder", scanning: true }
+      : current);
+    setSpaceNavigation(next);
+    setSpaceAddress(next.path);
+    dispatchWorkspace({ type: "update-active", patch: { path: next.path, title: next.path, virtualLocation: null } });
+  }, [activeTab.id, dispatchWorkspace]);
+
   const activateTool = useCallback((tool: WorkspaceMode) => {
     setSystemRoute("workspace");
     const presentation: DirectoryPresentation = tool === "album"
@@ -518,8 +630,13 @@ export function App({ initialPath }: AppProps) {
       : activeTab.presentation === "album"
         ? "list"
         : activeTab.presentation;
-    dispatchWorkspace({ type: "update-active", patch: { mode: tool, presentation } });
-  }, [activeTab.presentation, dispatchWorkspace]);
+    dispatchWorkspace({ type: "update-active", patch: {
+      mode: tool, presentation,
+      virtualLocation: tool === "recycle-bin" ? "recycle-bin"
+        : activeTab.virtualLocation === "recycle-bin" ? (activeTab.path.trim() ? null : "this-pc")
+        : activeTab.virtualLocation,
+    } });
+  }, [activeTab.path, activeTab.presentation, activeTab.virtualLocation, dispatchWorkspace]);
 
   const launchBrowseComparison = useCallback((request: BrowseComparisonRequest) => {
     setCompareLaunchRequest({ ...request, token: Date.now() });
@@ -532,9 +649,9 @@ export function App({ initialPath }: AppProps) {
     setFilterOpen(false);
     dispatchWorkspace({
       type: "update-active",
-      patch: { mode: "browse", title: t("thisPc"), virtualLocation: "this-pc" },
+      patch: { mode: activeTool === "space" ? "space" : "browse", title: t("thisPc"), virtualLocation: "this-pc" },
     });
-  }, [dispatchWorkspace, t]);
+  }, [activeTool, dispatchWorkspace, t]);
 
   const openMullerHome = useCallback(() => {
     setSystemRoute("home");
@@ -854,7 +971,7 @@ export function App({ initialPath }: AppProps) {
         setSystemRoute("workspace");
         return;
       }
-      if (command === "editAddress" && addressMode && !isThisPc) {
+      if (command === "editAddress" && locationMode && !isThisPc) {
         event.preventDefault();
         window.dispatchEvent(new Event("muller:edit-address"));
         return;
@@ -880,6 +997,40 @@ export function App({ initialPath }: AppProps) {
       ) {
         return;
       }
+      if (
+        target instanceof HTMLElement &&
+        target.closest('[role="separator"]') &&
+        ["moveNext", "movePrevious", "moveLeft", "moveRight"].includes(command)
+      ) return;
+      if (
+        target instanceof HTMLElement && target.closest(".preview-panel") &&
+        ["togglePreview", "moveNext", "movePrevious", "moveLeft", "moveRight", "movePageNext", "movePagePrevious", "openSelection", "cancelScan"].includes(command)
+      ) return;
+      if (activeTool === "space" && systemRoute === "workspace") {
+        if (command === "goUp" || command === "goBack" || command === "goForward") {
+          if (event.metaKey || event.shiftKey) return;
+          event.preventDefault();
+          if (command === "goUp") spaceRef.current?.up();
+          else if (command === "goBack") spaceRef.current?.back();
+          else spaceRef.current?.forward();
+          return;
+        }
+        if (command === "togglePreview") {
+          if (target instanceof HTMLElement && target.closest("button, a, select, [role=button]")) return;
+          event.preventDefault(); spaceRef.current?.togglePreview(); return;
+        }
+        // The map and details controls own file commands as well as selection.
+        if (["copySelection", "cutSelection", "paste", "renameSelection", "recycleSelection", "refresh", "selectAll"].includes(command)) return;
+        // The map and details controls own ordinary selection keys.
+        if (["moveNext", "movePrevious", "moveLeft", "moveRight", "openSelection"].includes(command)) return;
+      }
+      // The Recycle Bin owns selection, search and file commands, including dialogs.
+      if (activeTool === "recycle-bin" && systemRoute === "workspace" && [
+        "moveNext", "movePrevious", "moveLeft", "moveRight", "movePageNext", "movePagePrevious",
+        "openSelection", "recycleSelection", "refresh", "selectAll", "findInDirectory",
+        "cancelScan", "togglePreview", "copySelection", "cutSelection", "paste",
+        "renameSelection", "goUp", "goBack", "goForward", "undo",
+      ].includes(command)) return;
       if (command === "cancelScan" && !scanActive) return;
       const fileCommand = new Set([
         "copySelection",
@@ -1036,7 +1187,11 @@ export function App({ initialPath }: AppProps) {
           break;
         case "findInDirectory":
           if (activeTool === "duplicates") openDuplicateSearch();
-          else if (addressMode) explorerRef.current?.findInDirectory();
+          else if (addressMode) {
+            explorerRef.current?.findInDirectory();
+            directorySearchRef.current?.focus();
+            directorySearchRef.current?.select();
+          }
           break;
         case "selectAll":
           if (activeTool === "duplicates") selectAllDuplicateFiles();
@@ -1053,6 +1208,8 @@ export function App({ initialPath }: AppProps) {
     activeTool,
     activateTool,
     addressMode,
+    locationMode,
+    systemRoute,
     cancelScan,
     dispatchWorkspace,
     explorerMode,
@@ -1218,6 +1375,9 @@ export function App({ initialPath }: AppProps) {
     activeTool === "compare" ? compareNavigation : browseNavigation;
   const explorerAddress = activeTool === "compare" ? compareAddress : browseAddress;
   const explorerRef = activeTool === "compare" ? compareRef : browseRef;
+  const locationNavigation = spaceMode ? spaceNavigation : explorerNavigation;
+  const locationRef = spaceMode ? spaceRef : explorerRef;
+  const locationAddress = spaceMode ? spaceAddress : explorerAddress;
   const globalSearchRoots = useMemo(
     () => logicalDrives
       .filter((drive) => ["fixed", "removable", "ramdisk"].includes(drive.driveType))
@@ -1231,6 +1391,7 @@ export function App({ initialPath }: AppProps) {
   }, [globalSearchRoots]);
   const quickLocations: readonly QuickLocation[] = useMemo(() => [
     { id: "this-pc", label: t("thisPc"), icon: "this-pc" as const, target: { kind: "this-pc" as const } },
+    { id: "recycle-bin", label: t("recycleBinTitle"), icon: "recycle-bin" as const, target: { kind: "recycle-bin" as const } },
     ...logicalDrives.map((drive) => ({
       id: `drive-${drive.path.toLowerCase()}`,
       label: `${drive.label || t("localDisk")} (${displayPath(drive.path).replace("\\", "")})`,
@@ -1272,14 +1433,18 @@ export function App({ initialPath }: AppProps) {
   };
   const navigateQuickLocation = (location: QuickLocation, disposition: "current" | "newTab" = "current") => {
     if (disposition === "newTab") {
-      const tab = createWorkspaceTab(`workspace-${crypto.randomUUID()}`, activeTab.path, "browse");
+      const tab = createWorkspaceTab(`workspace-${crypto.randomUUID()}`, activeTab.path, activeTool === "space" ? "space" : "browse");
       if (location.target.kind === "this-pc") {
         tab.title = t("thisPc");
         tab.virtualLocation = "this-pc";
+      } else if (location.target.kind === "recycle-bin") {
+        tab.title = t("recycleBinTitle");
+        tab.mode = "recycle-bin";
+        tab.virtualLocation = "recycle-bin";
       } else {
         tab.path = location.target.path;
         tab.title = location.target.path;
-        tab.mode = location.target.mode ?? "browse";
+        tab.mode = location.target.mode ?? (activeTool === "space" ? "space" : "browse");
         tab.presentation = tab.mode === "album" ? "album" : activeTab.presentation;
       }
       dispatchWorkspace({ type: "add-tab", tab });
@@ -1287,14 +1452,21 @@ export function App({ initialPath }: AppProps) {
       return;
     }
     setSystemRoute("workspace");
+    if (location.target.kind === "recycle-bin") {
+      setFilterOpen(false);
+      dispatchWorkspace({ type: "update-active", patch: {
+        mode: "recycle-bin", title: t("recycleBinTitle"), virtualLocation: "recycle-bin",
+      } });
+      return;
+    }
     if (location.target.kind === "this-pc") {
       dispatchWorkspace({
         type: "update-active",
-        patch: { mode: "browse", title: t("thisPc"), virtualLocation: "this-pc" },
+        patch: { mode: activeTool === "space" ? "space" : "browse", title: t("thisPc"), virtualLocation: "this-pc" },
       });
       return;
     }
-    const mode = location.target.mode ?? (activeTool === "album" ? "album" : "browse");
+    const mode = location.target.mode ?? (activeTool === "space" ? "space" : activeTool === "album" ? "album" : "browse");
     dispatchWorkspace({
       type: "update-active",
       patch: {
@@ -1307,6 +1479,133 @@ export function App({ initialPath }: AppProps) {
     });
     if (mode === "album" || mode === "browse") browseRef.current?.navigateActive(location.target.path);
   };
+  const handleSpaceContextAction = useCallback((action: SpaceContextAction, node: SpaceNode | null, selection: readonly SpaceNode[] = []) => {
+    const items: DirectoryEntry[] = (selection.length > 0 ? selection : node ? [node] : []).map((entry) => ({
+      path: entry.path,
+      name: entry.name,
+      kind: entry.kind === "folder" ? "directory" : "file",
+      extension: entry.extension ?? null,
+      size: entry.kind === "folder" ? 0 : entry.bytes ?? entry.size ?? 0,
+      modifiedUnixMs: entry.modifiedAt ?? null,
+      hidden: false,
+    }));
+    const parentOf = (path: string) => spaceParentPath(path) ?? path;
+    const target = node?.path ?? activeTab.path;
+    const destination = node ? node.kind === "folder" ? node.path : parentOf(target) : activeTab.path;
+    const failed = (error: unknown) => setSpaceOperationError(error instanceof Error ? error.message : String(error));
+    const perform = (operation: () => Promise<unknown>) => {
+      setSpaceOperationError(null);
+      void Promise.resolve().then(operation).catch(failed);
+    };
+    const refreshChangedPaths = (paths: readonly string[]) => {
+      const map = spaceRef.current;
+      if (!map || paths.length === 0) return;
+      const currentPath = spaceNavigationOwner.current?.path ?? activeTab.path;
+      map.invalidatePaths(paths);
+      if (spacePathAffected(currentPath, paths)) setSpaceRefreshToken((value) => value + 1);
+    };
+    const mutate = (operation: () => Promise<readonly string[]>) => {
+      if (spaceOperationBusy.current) return;
+      spaceOperationBusy.current = true;
+      setSpaceOperationError(null);
+      void operation().then(refreshChangedPaths).catch(failed).finally(() => { spaceOperationBusy.current = false; });
+    };
+    if (action === "refresh") { setSpaceOperationError(null); refreshChangedPaths([activeTab.path]); return; }
+    if (action === "copy-path" || action === "copy-name") {
+      if (node) perform(async () => {
+        if (!navigator.clipboard) throw new Error(t("unableClipboard"));
+        await navigator.clipboard.writeText(action === "copy-path" ? node.path : node.name);
+      });
+      return;
+    }
+    if (action === "open") { if (node) perform(() => openNativePath(node.path)); return; }
+    if (action === "open-with") { if (node) perform(() => openNativePath(node.path, true)); return; }
+    if (action === "locate") {
+      const parent = parentOf(target);
+      dispatchWorkspace({ type: "update-active", patch: { mode: "browse", path: parent, title: parent, virtualLocation: null } });
+      browseRef.current?.navigateActive(parent);
+      return;
+    }
+    if (action === "copy" || action === "cut") {
+      if (items.length > 0) setFileClipboard({ mode: action === "copy" ? "copy" : "move", entries: items });
+      return;
+    }
+    if (action === "paste") {
+      const clipboard = fileClipboard;
+      if (!clipboard) return;
+      mutate(async () => {
+        const failures: DirectoryEntry[] = [];
+        const errors: string[] = [];
+        const changedPaths: string[] = [];
+        for (const entry of clipboard.entries) {
+          try {
+            const report = await transferEntry(entry.path, destination, clipboard.mode, "fail");
+            if (report.outcome !== "skipped") {
+              changedPaths.push(report.destination);
+              if (clipboard.mode === "move") changedPaths.push(entry.path);
+            }
+          }
+          catch (error) { failures.push(entry); errors.push(error instanceof Error ? error.message : String(error)); }
+        }
+        if (clipboard.mode === "move") setFileClipboard((current) => current === clipboard ? failures.length ? { ...clipboard, entries: failures } : null : current);
+        if (errors.length) {
+          refreshChangedPaths(changedPaths);
+          throw new Error(errors.join("\n"));
+        }
+        return changedPaths;
+      });
+      return;
+    }
+    if (action === "open-terminal") { perform(() => openTerminal(destination)); return; }
+    if (action === "rename") {
+      if (!node || spaceOperationBusy.current) return;
+      const nextName = window.prompt(t("newName"), node.name)?.trim();
+      if (nextName && nextName !== node.name) mutate(async () => {
+        const report = await renameEntry(node.path, nextName, "fail");
+        return report.outcome === "skipped" ? [] : [node.path, report.destination];
+      });
+      return;
+    }
+    if (action === "recycle") {
+      if (spaceOperationBusy.current || items.length === 0 || !window.confirm(`${t("recycleSelected")} (${items.length})`)) return;
+      mutate(async () => {
+        const results = await Promise.allSettled(items.map((entry) => recycleEntry(entry)));
+        const errors = results.flatMap((result) => result.status === "rejected" ? [result.reason instanceof RecycleEntryChangedError
+          ? t("recycleEntryChanged", { path: displayPath(result.reason.path) })
+          : result.reason instanceof Error ? result.reason.message : String(result.reason)] : []);
+        const changedPaths = items.flatMap((entry, index) => results[index]?.status === "fulfilled" ? [entry.path] : []);
+        if (errors.length) {
+          refreshChangedPaths(changedPaths);
+          throw new Error(errors.join("\n"));
+        }
+        return changedPaths;
+      });
+      return;
+    }
+    if (action === "new-folder" || action === "new-text-document" || action === "new-empty-file") {
+      const kind = action === "new-folder" ? "directory" : action === "new-text-document" ? "text_file" : "empty_file";
+      mutate(async () => [await createEntry(destination, kind)]);
+      return;
+    }
+    if (action === "compress-zip") {
+      if (items.length > 0) mutate(async () => [await createZip(items.map((entry) => entry.path), activeTab.path)]);
+      return;
+    }
+    if (action === "extract-current" || action === "extract-named") {
+      if (node?.kind === "file") mutate(async () => [await extractZip(node.path, destination, action === "extract-current" ? "current" : "named")]);
+      return;
+    }
+    if (action === "extract-choose") {
+      if (node?.kind === "file" && !spaceOperationBusy.current) perform(async () => {
+        const chosenDestination = await open({ directory: true, multiple: false, defaultPath: activeTab.path, title: t("chooseExtractionDestination") });
+        if (typeof chosenDestination === "string") mutate(async () => [await extractZip(node.path, chosenDestination, "current")]);
+      });
+      return;
+    }
+    if (action === "properties") {
+      if (node) setSpacePropertiesTarget(items.find((entry) => entry.path === node.path) ?? null);
+    }
+  }, [activeTab.path, dispatchWorkspace, fileClipboard, setFileClipboard, t]);
   const openDrive = (path: string) => {
     dispatchWorkspace({
       type: "update-active",
@@ -1363,16 +1662,16 @@ export function App({ initialPath }: AppProps) {
       label: t("back"),
       detail: t("backDetail"),
       icon: <ArrowLeft size={16} />,
-      disabled: activeTool === "duplicates" || !explorerNavigation.canBack,
-      run: () => explorerRef.current?.back(),
+      disabled: !locationMode || !locationNavigation.canBack,
+      run: () => locationRef.current?.back(),
     },
     {
       id: "forward",
       label: t("forward"),
       detail: t("forwardDetail"),
       icon: <ArrowRight size={16} />,
-      disabled: activeTool === "duplicates" || !explorerNavigation.canForward,
-      run: () => explorerRef.current?.forward(),
+      disabled: !locationMode || !locationNavigation.canForward,
+      run: () => locationRef.current?.forward(),
     },
     {
       id: "up",
@@ -1380,8 +1679,8 @@ export function App({ initialPath }: AppProps) {
       detail: t("upDetail"),
       shortcut: "Backspace",
       icon: <ArrowUp size={16} />,
-      disabled: activeTool === "duplicates" || !explorerNavigation.canUp,
-      run: () => explorerRef.current?.up(),
+      disabled: !locationMode || !locationNavigation.canUp,
+      run: () => locationRef.current?.up(),
     },
     {
       id: "split",
@@ -1397,8 +1696,8 @@ export function App({ initialPath }: AppProps) {
       detail: t("previewDetail"),
       shortcut: "Space",
       icon: <Command size={16} />,
-      disabled: !explorerMode,
-      run: () => browseRef.current?.togglePreview(),
+      disabled: !explorerMode && !spaceMode,
+      run: () => spaceMode ? spaceRef.current?.togglePreview() : browseRef.current?.togglePreview(),
     },
     {
       id: "settings",
@@ -1483,6 +1782,7 @@ export function App({ initialPath }: AppProps) {
         <span>{stats.messagesPerSecond} msg/s</span>
       </output>
 
+      <TargetCursor enabled={preferences.cursorEffect === "target" && activeTool === "space"} reducedMotion={preferences.motion === "reduced"} />
       {systemRoute === "home" || preferences.glassBackground ? (
         <Suspense fallback={null}>
           <ColorBendsBackground intensity={systemRoute === "home" ? "home" : "workspace"} />
@@ -1525,33 +1825,36 @@ export function App({ initialPath }: AppProps) {
         </div>
         <div className="stage7-addressbar">
           <div className="nav-actions">
-            <SpecularButton compact title={t("back")} aria-label={t("back")} disabled={!addressMode || isThisPc || !explorerNavigation.canBack} onClick={() => { explorerRef.current?.back(); navigate("back"); }}><ArrowLeft size={16} /></SpecularButton>
-            <SpecularButton compact title={t("forward")} aria-label={t("forward")} disabled={!addressMode || isThisPc || !explorerNavigation.canForward} onClick={() => { explorerRef.current?.forward(); navigate("enter"); }}><ArrowRight size={16} /></SpecularButton>
+            <SpecularButton compact title={t("back")} aria-label={t("back")} disabled={!locationMode || isThisPc || !locationNavigation.canBack} onClick={() => { locationRef.current?.back(); navigate("back"); }}><ArrowLeft size={16} /></SpecularButton>
+            <SpecularButton compact title={t("forward")} aria-label={t("forward")} disabled={!locationMode || isThisPc || !locationNavigation.canForward} onClick={() => { locationRef.current?.forward(); navigate("enter"); }}><ArrowRight size={16} /></SpecularButton>
             <SpecularButton
               compact
               title={t("up")}
               aria-label={t("up")}
-              disabled={!addressMode || isThisPc || (!explorerNavigation.canUp && !(explorerTool && (isDriveRoot(explorerNavigation.path) || isNetworkHostRoot(explorerNavigation.path))))}
+              disabled={!locationMode || isThisPc || (!locationNavigation.canUp && !(explorerMode && (isDriveRoot(locationNavigation.path) || isNetworkHostRoot(locationNavigation.path))))}
               onClick={() => {
-                if (explorerTool && (isDriveRoot(explorerNavigation.path) || isNetworkHostRoot(explorerNavigation.path))) openThisPcHome();
-                else explorerRef.current?.up();
+                if (explorerMode && (isDriveRoot(locationNavigation.path) || isNetworkHostRoot(locationNavigation.path))) openThisPcHome();
+                else locationRef.current?.up();
                 navigate("back");
               }}
             >
               <ArrowUp size={16} />
             </SpecularButton>
           </div>
-          {addressMode && !isThisPc ? (
-            <div className="stage7-address-center">
+          {locationMode && !isThisPc ? (
+            <div className={`stage7-address-center${spaceMode ? " is-space" : ""}`}>
               <ExplorerAddressBar
-                paneLabel={explorerNavigation.activePane.toUpperCase()}
-                value={explorerAddress}
+                paneLabel={spaceMode ? "SPACE" : explorerNavigation.activePane.toUpperCase()}
+                showPaneToggle={!spaceMode}
+                value={locationAddress}
+                committedValue={locationNavigation.path}
                 onChange={(value) => {
-                  if (activeTool === "compare") setCompareAddress(value);
+                  if (spaceMode) setSpaceAddress(value);
+                  else if (activeTool === "compare") setCompareAddress(value);
                   else setBrowseAddress(value);
                 }}
                 onNavigate={(path) => {
-                  explorerRef.current?.navigateActive(path);
+                  locationRef.current?.navigateActive(path);
                   navigate("enter");
                 }}
                 onNavigateThisPc={openThisPcHome}
@@ -1655,10 +1958,13 @@ export function App({ initialPath }: AppProps) {
             <div className="stage7-context-path"><strong>Muller</strong></div>
           ) : systemRoute === "workspace" && isThisPc ? (
             <div className="stage7-context-path"><span>{t("browse").toUpperCase()}</span><strong>{t("thisPc")}</strong></div>
+          ) : systemRoute === "workspace" && activeTool === "recycle-bin" ? (
+            <div className="stage7-context-path"><Trash2 size={15} /><strong>{t("recycleBinTitle")}</strong></div>
           ) : (
             <div className="stage7-context-path"><span>{activePage.toUpperCase()}</span><strong>{activePage === "settings" ? t("preferences") : displayPath(activeTab.path)}</strong></div>
           )}
           <div className="address-actions">
+            <NativeIndexerControl roots={globalSearchRoots} onAction={() => play("action")} />
             {explorerMode && !isThisPc ? <SpecularButton compact className={activePathIsFavorite ? "is-active" : ""} title={activePathIsFavorite ? t("unpinSidebar") : t("pinSidebar")} aria-label={activePathIsFavorite ? t("unpinSidebar") : t("pinSidebar")} aria-pressed={activePathIsFavorite} onClick={toggleFavorite}>{activePathIsFavorite ? <PinOff size={16} /> : <Pin size={16} />}</SpecularButton> : null}
             <SpecularButton compact className={explorerNavigation.split && addressMode && !isThisPc ? "is-active" : ""} title={t("splitView")} aria-label={t("splitView")} disabled={!addressMode || isThisPc || activeTool === "album"} aria-pressed={addressMode && !isThisPc && explorerNavigation.split} onClick={() => explorerRef.current?.toggleSplit()}><Columns2 size={16} /></SpecularButton>
             <SpecularButton
@@ -1768,7 +2074,37 @@ export function App({ initialPath }: AppProps) {
           <SettingsPage preferences={preferences} onChange={updatePreferences} onReset={resetPreferences} />
         ) : null}
 
-        {explorerTool && !isThisPc ? (
+        {activeTool === "recycle-bin" ? (
+          systemRoute === "workspace" ? <RecycleBinWorkspace key={activeTab.id} onSoundEvent={(event) => play(event === "select" ? "action" : event === "error" ? "warning" : "success")} /> : null
+        ) : activeTool === "space" && systemRoute !== "workspace" ? null : activeTool === "space" && !isThisPc ? (
+          spaceRoot && spaceRootTabId === activeTab.id ? (
+            <SpaceSniffer
+              key={activeTab.id}
+              ref={spaceRef}
+              onNavigationChange={handleSpaceNavigation}
+              showBreadcrumbs={false}
+              mediaAutoplay={preferences.mediaAutoplay}
+              onMediaAutoplayChange={(mediaAutoplay) => updatePreferences({ mediaAutoplay })}
+              previewCount={preferences.spacePreviewCount}
+              onPreviewCountChange={(spacePreviewCount) => updatePreferences({ spacePreviewCount })}
+              root={spaceRoot}
+              rootRequestId={spaceRootRequestId}
+              progress={spaceProgress}
+              operationError={spaceOperationError}
+              canPaste={Boolean(fileClipboard)}
+              client={spaceSnifferClient}
+              onCancelScan={cancelSpaceScan}
+              onSoundEvent={(event) => play(event === "open" ? "navigate" : event === "select" ? "action" : "navigate")}
+              onContextAction={handleSpaceContextAction}
+            />
+          ) : (
+            <section className="result-pane" aria-live="polite">
+              <div className="scan-progress-row">
+                <span className="scan-status is-scanning">{spaceScanError ?? "Scanning space…"}</span>
+              </div>
+            </section>
+          )
+        ) : explorerTool && !isThisPc ? (
           <BrowseWorkspace
             key={activeTab.id}
             ref={browseRef}
@@ -1781,7 +2117,7 @@ export function App({ initialPath }: AppProps) {
             singlePane={activeTool === "album"}
             globalSearchRoots={globalSearchRoots}
             onPaneRatioChange={(value) => dispatchWorkspace({ type: "set-pane-ratio", value })}
-            onPreviewWidthChange={(value) => dispatchWorkspace({ type: "set-preview-width", value })}
+            onPreviewWidthChange={updatePreviewWidth}
             onNavigationChange={handleBrowseNavigation}
             onScrollVelocity={sendScrollVelocity}
             onSuccess={handleSuccess}
@@ -1989,11 +2325,15 @@ export function App({ initialPath }: AppProps) {
             </>
             )}
           </section>
-        ) : activeTool === "compare" ? (
+        ) : null}
+
+        {workspaceState.tabs.filter((tab) => tab.id in compareOwners
+          || (tab.id === activeTab.id && activeTool === "compare")).map((tab) => (
           <CompareWorkspace
-            key={activeTab.id}
-            ref={compareRef}
-            initialRoot={activeTab.path}
+            key={tab.id}
+            ref={tab.id === activeTab.id && activePage === "compare" ? compareRef : undefined}
+            initialRoot={compareOwners[tab.id] ?? tab.path}
+            routeVisible={tab.id === activeTab.id && activePage === "compare"}
             onNavigationChange={handleCompareNavigation}
             onScrollVelocity={sendScrollVelocity}
             onSuccess={handleSuccess}
@@ -2006,11 +2346,11 @@ export function App({ initialPath }: AppProps) {
             globalSearchRoots={globalSearchRoots}
             hoverDelayMs={preferences.hoverDelayMs}
             onPaneRatioChange={(value) => dispatchWorkspace({ type: "set-pane-ratio", value })}
-            onPreviewWidthChange={(value) => dispatchWorkspace({ type: "set-preview-width", value })}
-            launchRequest={compareLaunchRequest}
+            onPreviewWidthChange={updatePreviewWidth}
+            launchRequest={tab.id === activeTab.id && activePage === "compare" ? compareLaunchRequest : null}
             onLaunchConsumed={(token) => setCompareLaunchRequest((current) => current?.token === token ? null : current)}
           />
-        ) : null}
+        ))}
 
         {systemRoute === "workspace" && activeTool === "duplicates" ? (
         <>
@@ -2117,8 +2457,12 @@ export function App({ initialPath }: AppProps) {
         <span>
           {activePage === "duplicates"
             ? effectiveScanRoots.map(displayPath).join("; ")
+            : activePage === "recycle-bin"
+              ? t("recycleBinTitle")
             : activePage === "compare"
               ? displayPath(compareNavigation.path)
+              : activePage === "space"
+                ? displayPath(activeTab.path)
               : activePage === "home"
                 ? "Muller"
               : activePage === "settings"
@@ -2128,8 +2472,12 @@ export function App({ initialPath }: AppProps) {
         <span className="key-buffer">
           {activePage === "duplicates"
             ? t(scanStatusKey(scanState.status))
+            : activePage === "recycle-bin"
+              ? t("recycleBinTitle")
             : activePage === "compare"
               ? t("pane", { name: compareNavigation.activePane.toUpperCase() })
+              : activePage === "space"
+                ? (spaceScanError ?? "SPACE MAP")
               : activePage === "home"
                 ? t("homeDashboard")
               : activePage === "settings"
@@ -2139,10 +2487,14 @@ export function App({ initialPath }: AppProps) {
         <span className="status-selection">
           {activePage === "duplicates"
             ? `${selectedDuplicateOrdinal < 0 ? 0 : selectedDuplicateOrdinal + 1} / ${duplicateFilePositions.length}`
+            : activePage === "recycle-bin"
+              ? ""
             : activePage === "compare"
               ? compareNavigation.editing
                 ? t("editableMerge")
                 : t("readOnlyComparison")
+              : activePage === "space"
+                ? t("noSelection")
               : activePage === "settings"
                   ? t("settings")
                 : activePage === "home"
@@ -2157,6 +2509,10 @@ export function App({ initialPath }: AppProps) {
         onClose={() => setCommandOpen(false)}
       />
       <SuccessBurst token={successToken} message={successMessage} />
+
+      {activePage === "space" && spacePropertiesTarget ? <div ref={spacePropertiesRef} onKeyDown={(event) => {
+        if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setSpacePropertiesTarget(null); spaceRef.current?.focus(); }
+      }}><EntryPropertiesDialog entry={spacePropertiesTarget} onClose={() => { setSpacePropertiesTarget(null); spaceRef.current?.focus(); }} /></div> : null}
 
       {recyclePrompt ? (
         <div className="dialog-backdrop" role="presentation">

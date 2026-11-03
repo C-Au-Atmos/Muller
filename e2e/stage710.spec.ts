@@ -1125,7 +1125,7 @@ test("Option Wheel previews 100 wheel steps without navigation or tab creation",
   await installDesktopMock(page, "option");
   await page.goto("/");
   const wheel = page.getByRole("listbox", { name: "Quick locations" });
-  await expect(wheel.getByRole("option")).toHaveCount(5);
+  await expect(wheel.getByRole("option")).toHaveCount(6);
   const before = await mockState(page);
 
   await wheel.evaluate((element) => {
@@ -1145,9 +1145,9 @@ test("Line Sidebar visual markers track the real button rect and clicks open tha
   await installDesktopMock(page, "line");
   await page.goto("/");
   const items = page.locator(".line-sidebar__item");
-  await expect(items).toHaveCount(5);
+  await expect(items).toHaveCount(6);
 
-  for (let index = 0; index < 5; index += 1) {
+  for (let index = 0; index < 6; index += 1) {
     await items.nth(index).hover();
     const centerDelta = await items.nth(index).evaluate((button) => {
       const marker = button.querySelector<HTMLElement>(".line-sidebar__marker");

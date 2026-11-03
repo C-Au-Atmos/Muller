@@ -14,6 +14,9 @@ use pinyin::ToPinyin as _;
 use serde::{Deserialize, Serialize};
 use tauri::{State, ipc::Channel};
 
+use crate::indexer::search_persistent_index;
+use crate::natural_sort::natural_cmp;
+
 const MAX_DIRECTORY_PAGE_SIZE: usize = 512;
 const MAX_SEARCH_RESULTS: usize = 200_000;
 const MAX_SEARCH_INDEX_ENTRIES: usize = 2_000_000;
@@ -115,11 +118,38 @@ pub enum DirectoryEntryKind {
 pub struct DirectoryEntry {
     path: PathBuf,
     name: String,
+    /// Cached case-folded filename used by the hot search/sort paths.
+    ///
+    /// This stays out of the IPC payload because the UI only needs `name`,
+    /// while repeated `to_lowercase()` calls become significant on large
+    /// directory snapshots.
+    #[serde(skip)]
+    name_lower: String,
     kind: DirectoryEntryKind,
     extension: Option<String>,
     size: u64,
     modified_unix_ms: Option<u64>,
     hidden: bool,
+    #[serde(skip)]
+    metadata_pending: bool,
+}
+
+impl DirectoryEntry {
+    fn with_metadata(mut self) -> Self {
+        if self.metadata_pending {
+            if let Ok(metadata) = fs::symlink_metadata(&self.path) {
+                self.size = if metadata.is_file() {
+                    metadata.len()
+                } else {
+                    0
+                };
+                self.modified_unix_ms = modified_unix_ms(&metadata);
+                self.hidden = is_hidden(&self.name, &metadata);
+            }
+            self.metadata_pending = false;
+        }
+        self
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -203,6 +233,9 @@ struct IndexedDirectoryEntry {
     name_lower: String,
     kind: DirectoryEntryKind,
     extension: Option<String>,
+    size: u64,
+    modified_unix_ms: Option<u64>,
+    hidden: bool,
 }
 
 #[derive(Debug)]
@@ -353,7 +386,11 @@ impl ExplorerManager {
             session_id,
             offset: start,
             total_entries,
-            entries: session.entries[start..end].to_vec(),
+            entries: session.entries[start..end]
+                .iter()
+                .cloned()
+                .map(DirectoryEntry::with_metadata)
+                .collect(),
         })
     }
 
@@ -373,11 +410,11 @@ impl ExplorerManager {
         let mut total_entries = 0_usize;
         let mut entries = Vec::with_capacity(limit);
         for entry in &session.entries {
-            if !query.is_empty() && !entry.name.to_lowercase().contains(&query) {
+            if !query.is_empty() && !entry.name_lower.contains(&query) {
                 continue;
             }
             if total_entries >= offset && entries.len() < limit {
-                entries.push(entry.clone());
+                entries.push(entry.clone().with_metadata());
             }
             total_entries = total_entries.saturating_add(1);
         }
@@ -407,11 +444,11 @@ impl ExplorerManager {
         let mut visible_position = 0_usize;
         let mut entries = Vec::with_capacity(requested.len());
         for entry in &session.entries {
-            if !query.is_empty() && !entry.name.to_lowercase().contains(&query) {
+            if !query.is_empty() && !entry.name_lower.contains(&query) {
                 continue;
             }
             if requested.contains(&visible_position) {
-                entries.push(entry.clone());
+                entries.push(entry.clone().with_metadata());
             }
             visible_position = visible_position.saturating_add(1);
         }
@@ -452,7 +489,7 @@ impl ExplorerManager {
         let visible = session
             .entries
             .iter()
-            .filter(|entry| query.is_empty() || entry.name.to_lowercase().contains(&query))
+            .filter(|entry| query.is_empty() || entry.name_lower.contains(&query))
             .enumerate()
             .collect::<Vec<_>>();
         if visible.is_empty() {
@@ -461,10 +498,9 @@ impl ExplorerManager {
         let mut direct = Vec::new();
         let mut phonetic = Vec::new();
         for (position, entry) in visible {
-            let name = entry.name.to_lowercase();
-            if name.starts_with(&prefix) {
+            if entry.name_lower.starts_with(&prefix) {
                 direct.push((position, entry));
-            } else if pinyin_initials(&name).starts_with(&prefix) {
+            } else if pinyin_initials(&entry.name_lower).starts_with(&prefix) {
                 phonetic.push((position, entry));
             }
         }
@@ -532,10 +568,12 @@ pub fn start_directory_query(
 #[tauri::command]
 pub fn start_directory_search(
     manager: State<'_, ExplorerManager>,
+    indexer: State<'_, crate::indexer::IndexerManager>,
     request: StartDirectorySearchRequest,
     on_event: Channel<DirectoryEvent>,
 ) -> StartDirectoryResponse {
     let manager = manager.inner().clone();
+    let indexer = indexer.inner().clone();
     let (task_id, cancellation) = manager.begin();
     let root_count = request.roots.len();
     let query_length = request.query.chars().count();
@@ -550,8 +588,26 @@ pub fn start_directory_search(
         if on_event.send(DirectoryEvent::Started { task_id }).is_err() {
             cancellation.cancel();
         }
-        let result = if request.indexed {
-            manager.build_indexed_search_session(&request, &cancellation)
+        let result = if request.indexed || request.recursive {
+            match build_native_indexed_search_session(&request, &cancellation) {
+                Ok(session) => Ok(session),
+                Err(DirectoryBuildError::Cancelled) => Err(DirectoryBuildError::Cancelled),
+                Err(_) if request.indexed => {
+                    match build_persistent_indexed_search_session(&indexer, &request, &cancellation)
+                    {
+                        Ok(session) => Ok(session),
+                        Err(DirectoryBuildError::Cancelled) => Err(DirectoryBuildError::Cancelled),
+                        Err(_) => manager.build_indexed_search_session(&request, &cancellation),
+                    }
+                }
+                Err(_) => {
+                    log::debug!(
+                        target: "muller::search",
+                        "event=search.native_index_unavailable provider=portable-walker"
+                    );
+                    build_search_session(&request, &cancellation)
+                }
+            }
         } else {
             build_search_session(&request, &cancellation)
         };
@@ -647,32 +703,41 @@ pub fn cancel_directory_query(
 }
 
 #[tauri::command]
-pub fn read_directory_page(
+pub async fn read_directory_page(
     manager: State<'_, ExplorerManager>,
     session_id: u64,
     offset: usize,
     limit: usize,
 ) -> Result<DirectoryPageResponse, String> {
-    manager.page(session_id, offset, limit)
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.page(session_id, offset, limit))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn search_directory_page(
+pub async fn search_directory_page(
     manager: State<'_, ExplorerManager>,
     session_id: u64,
     query: String,
     offset: usize,
     limit: usize,
 ) -> Result<DirectorySearchPageResponse, String> {
-    manager.search(session_id, &query, offset, limit)
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.search(session_id, &query, offset, limit))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn resolve_directory_entries(
+pub async fn resolve_directory_entries(
     manager: State<'_, ExplorerManager>,
     request: ResolveDirectoryEntriesRequest,
 ) -> Result<Vec<DirectoryEntry>, String> {
-    manager.resolve_entries(&request)
+    let manager = manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || manager.resolve_entries(&request))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -795,6 +860,7 @@ fn build_directory_session(
             DirectoryEntryKind::Other
         };
         let name = entry.file_name().to_string_lossy().into_owned();
+        let name_lower = name.to_lowercase();
         let extension = entry_path
             .extension()
             .map(|value| value.to_string_lossy().to_lowercase());
@@ -811,7 +877,9 @@ fn build_directory_session(
             },
             modified_unix_ms: modified,
             hidden: is_hidden(&name, &metadata),
+            metadata_pending: false,
             path: path_for_user(&entry_path),
+            name_lower,
             name,
             kind,
         });
@@ -895,7 +963,8 @@ fn build_search_session(
                     pending.push(entry_path.clone());
                 }
                 let name = entry.file_name().to_string_lossy().into_owned();
-                if !name.to_lowercase().contains(&query) {
+                let name_lower = name.to_lowercase();
+                if !name_lower.contains(&query) {
                     continue;
                 }
                 let metadata = fs::symlink_metadata(&entry_path).ok();
@@ -922,7 +991,9 @@ fn build_search_session(
                     hidden: metadata
                         .as_ref()
                         .is_some_and(|metadata| is_hidden(&name, metadata)),
+                    metadata_pending: false,
                     path: path_for_user(&entry_path),
+                    name_lower,
                     name,
                     kind,
                 });
@@ -942,6 +1013,179 @@ fn build_search_session(
         return Err(DirectoryBuildError::Message(
             first_error.unwrap_or_else(|| "none of the search roots can be read".into()),
         ));
+    }
+    sort_directory_entries(&mut entries, request.filter.as_ref());
+    Ok(DirectorySession {
+        path: path_for_user(&request.roots[0]),
+        entries,
+    })
+}
+
+/// Native file-name records carry no file length. For the normal name query,
+/// only visible pages fetch that metadata. Explicit size/time sorting or time
+/// filters request metadata for matched candidates before sorting.
+fn build_native_indexed_search_session(
+    request: &StartDirectorySearchRequest,
+    cancellation: &CancellationToken,
+) -> Result<DirectorySession, DirectoryBuildError> {
+    if request.roots.is_empty() || request.query.trim().is_empty() {
+        return Err(DirectoryBuildError::Message(
+            "search requires roots and a query".into(),
+        ));
+    }
+    for _ in 0..3 {
+        let mut entries = Vec::new();
+        let mut offset = 0;
+        let mut revision = None;
+        loop {
+            if cancellation.is_cancelled() {
+                return Err(DirectoryBuildError::Cancelled);
+            }
+            let page = crate::native_broker::search_native_index_cancellable(
+                &request.roots,
+                &request.query,
+                offset,
+                2000,
+                cancellation,
+            )
+            .map_err(DirectoryBuildError::Message)?;
+            if revision.is_some_and(|expected| expected != page.revision) {
+                break;
+            }
+            revision = Some(page.revision);
+            offset += page.hits.len();
+            for hit in page.hits {
+                if cancellation.is_cancelled() {
+                    return Err(DirectoryBuildError::Cancelled);
+                }
+                let kind = if hit.attributes & 0x400 != 0 {
+                    DirectoryEntryKind::Symlink
+                } else if hit.is_directory {
+                    DirectoryEntryKind::Directory
+                } else {
+                    DirectoryEntryKind::File
+                };
+                let extension = hit
+                    .path
+                    .extension()
+                    .map(|value| value.to_string_lossy().to_lowercase());
+                if let Some(filter) = &request.filter {
+                    if filter.files_only && kind != DirectoryEntryKind::File {
+                        continue;
+                    }
+                    if kind == DirectoryEntryKind::File
+                        && !filter.extensions.is_empty()
+                        && !filter.extensions.iter().any(|value| {
+                            extension
+                                .as_deref()
+                                .is_some_and(|ext| ext.eq_ignore_ascii_case(value))
+                        })
+                    {
+                        continue;
+                    }
+                }
+                let needs_metadata = request.filter.as_ref().is_some_and(|filter| {
+                    filter.modified_before_unix_ms.is_some()
+                        || filter.modified_after_unix_ms.is_some()
+                        || matches!(
+                            filter.sort_by,
+                            DirectorySortField::Size | DirectorySortField::Modified
+                        )
+                });
+                let mut entry = DirectoryEntry {
+                    path: path_for_user(&hit.path),
+                    name_lower: hit.name.to_lowercase(),
+                    name: hit.name,
+                    kind,
+                    extension,
+                    size: 0,
+                    modified_unix_ms: None,
+                    hidden: hit.attributes & 2 != 0,
+                    metadata_pending: true,
+                };
+                if needs_metadata {
+                    entry = entry.with_metadata();
+                }
+                if !matches_directory_filter(
+                    entry.kind,
+                    entry.extension.as_deref(),
+                    entry.modified_unix_ms,
+                    request.filter.as_ref(),
+                ) {
+                    continue;
+                }
+                entries.push(entry);
+                if entries.len() >= MAX_SEARCH_RESULTS {
+                    break;
+                }
+            }
+            if !page.has_more || entries.len() >= MAX_SEARCH_RESULTS {
+                sort_directory_entries(&mut entries, request.filter.as_ref());
+                return Ok(DirectorySession {
+                    path: path_for_user(&request.roots[0]),
+                    entries,
+                });
+            }
+        }
+    }
+    Err(DirectoryBuildError::Message(
+        "native index changed repeatedly while paging; retry search".into(),
+    ))
+}
+
+fn build_persistent_indexed_search_session(
+    indexer: &crate::indexer::IndexerManager,
+    request: &StartDirectorySearchRequest,
+    cancellation: &CancellationToken,
+) -> Result<DirectorySession, DirectoryBuildError> {
+    if cancellation.is_cancelled() {
+        return Err(DirectoryBuildError::Cancelled);
+    }
+    let indexed = search_persistent_index(
+        indexer,
+        &request.roots,
+        &request.query,
+        MAX_SEARCH_INDEX_ENTRIES,
+    )
+    .map_err(DirectoryBuildError::Message)?;
+    let mut entries = Vec::with_capacity(indexed.len());
+    for entry in indexed {
+        if cancellation.is_cancelled() {
+            return Err(DirectoryBuildError::Cancelled);
+        }
+        let hidden = entry.hidden;
+        let path = entry.path;
+        let kind = if entry.is_directory {
+            DirectoryEntryKind::Directory
+        } else {
+            DirectoryEntryKind::File
+        };
+        let extension = path
+            .extension()
+            .map(|value| value.to_string_lossy().to_lowercase());
+        if !matches_directory_filter(
+            kind,
+            extension.as_deref(),
+            entry.modified_unix_ms,
+            request.filter.as_ref(),
+        ) {
+            continue;
+        }
+        let name_lower = entry.name.to_lowercase();
+        entries.push(DirectoryEntry {
+            path: path_for_user(&path),
+            name: entry.name,
+            name_lower,
+            kind,
+            extension,
+            size: entry.size,
+            modified_unix_ms: entry.modified_unix_ms,
+            hidden,
+            metadata_pending: false,
+        });
+        if entries.len() >= MAX_SEARCH_RESULTS {
+            break;
+        }
     }
     sort_directory_entries(&mut entries, request.filter.as_ref());
     Ok(DirectorySession {
@@ -1014,6 +1258,10 @@ fn build_search_index(
                     pending.push(path.clone());
                 }
                 let name = entry.file_name().to_string_lossy().into_owned();
+                let metadata = fs::symlink_metadata(&path).ok();
+                let hidden = metadata
+                    .as_ref()
+                    .is_some_and(|metadata| is_hidden(&name, metadata));
                 entries.push(IndexedDirectoryEntry {
                     extension: path
                         .extension()
@@ -1022,6 +1270,13 @@ fn build_search_index(
                     name_lower: name.to_lowercase(),
                     name,
                     kind,
+                    size: if kind == DirectoryEntryKind::File {
+                        metadata.as_ref().map_or(0, fs::Metadata::len)
+                    } else {
+                        0
+                    },
+                    modified_unix_ms: metadata.as_ref().and_then(modified_unix_ms),
+                    hidden,
                 });
                 if entries.len() >= MAX_SEARCH_INDEX_ENTRIES {
                     break;
@@ -1065,12 +1320,10 @@ fn filter_search_index(
         if !indexed.name_lower.contains(&query) {
             continue;
         }
-        let metadata = fs::symlink_metadata(&indexed.path).ok();
-        let modified = metadata.as_ref().and_then(modified_unix_ms);
         if !matches_directory_filter(
             indexed.kind,
             indexed.extension.as_deref(),
-            modified,
+            indexed.modified_unix_ms,
             request.filter.as_ref(),
         ) {
             continue;
@@ -1078,17 +1331,13 @@ fn filter_search_index(
         entries.push(DirectoryEntry {
             path: path_for_user(&indexed.path),
             name: indexed.name.clone(),
+            name_lower: indexed.name_lower.clone(),
             kind: indexed.kind,
             extension: indexed.extension.clone(),
-            size: if indexed.kind == DirectoryEntryKind::File {
-                metadata.as_ref().map_or(0, fs::Metadata::len)
-            } else {
-                0
-            },
-            modified_unix_ms: modified,
-            hidden: metadata
-                .as_ref()
-                .is_some_and(|metadata| is_hidden(&indexed.name, metadata)),
+            size: indexed.size,
+            modified_unix_ms: indexed.modified_unix_ms,
+            hidden: indexed.hidden,
+            metadata_pending: false,
         });
         if entries.len() >= MAX_SEARCH_RESULTS {
             break;
@@ -1123,8 +1372,13 @@ fn sort_directory_entries(entries: &mut [DirectoryEntry], filter: Option<&Direct
         if !kind_order.is_eq() {
             return kind_order;
         }
+        let name_order = || {
+            natural_cmp(&left.name_lower, &right.name_lower)
+                .then_with(|| left.name.cmp(&right.name))
+                .then_with(|| left.path.cmp(&right.path))
+        };
         let field_order = match sort_by {
-            DirectorySortField::Name => left.name.to_lowercase().cmp(&right.name.to_lowercase()),
+            DirectorySortField::Name => name_order(),
             DirectorySortField::Type => left
                 .extension
                 .as_deref()
@@ -1138,9 +1392,7 @@ fn sort_directory_entries(entries: &mut [DirectoryEntry], filter: Option<&Direct
         } else {
             field_order
         };
-        directed
-            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
-            .then_with(|| left.name.cmp(&right.name))
+        directed.then_with(name_order)
     });
 }
 
@@ -1164,14 +1416,17 @@ fn build_unc_server_session(
             || path.to_string_lossy().into_owned(),
             |value| value.to_string_lossy().into_owned(),
         );
+        let name_lower = name.to_lowercase();
         entries.push(DirectoryEntry {
             path,
             name,
+            name_lower,
             kind: DirectoryEntryKind::Directory,
             extension: None,
             size: 0,
             modified_unix_ms: None,
             hidden: false,
+            metadata_pending: false,
         });
     }
     sort_directory_entries(&mut entries, filter);
@@ -1316,6 +1571,31 @@ mod tests {
         DirectoryEntryKind, DirectoryQueryFilter, ExplorerManager, StartDirectorySearchRequest,
         build_directory_session, build_search_session,
     };
+
+    #[test]
+    fn native_record_metadata_is_read_only_for_requested_pages() {
+        let fixture = tempdir().unwrap();
+        let first = fixture.path().join("a.txt");
+        let second = fixture.path().join("b.txt");
+        fs::write(&first, "old").unwrap();
+        fs::write(&second, "old").unwrap();
+        let mut session =
+            build_directory_session(fixture.path(), None, &Default::default()).unwrap();
+        for entry in &mut session.entries {
+            entry.size = 0;
+            entry.metadata_pending = true;
+        }
+        let manager = ExplorerManager::default();
+        manager.store(77, session);
+        fs::write(first, "first updated").unwrap();
+        let page = manager.page(77, 0, 1).unwrap();
+        assert_eq!(page.entries[0].size, 13);
+        fs::write(second, "second updated after first page").unwrap();
+        let next = manager.page(77, 1, 1).unwrap();
+        assert_eq!(next.entries[0].size, 31);
+        assert_eq!(next.total_entries, 2);
+        assert!(next.entries[0].modified_unix_ms.is_some());
+    }
 
     #[test]
     fn directory_snapshot_sorts_directories_first_and_pages_results() {
@@ -1513,6 +1793,238 @@ mod tests {
             .expect("sorted session");
         assert_eq!(session.entries[0].name, "large.txt");
         assert_eq!(session.entries[1].name, "small.txt");
+    }
+
+    #[test]
+    fn numeric_names_sort_naturally_in_both_directions_with_folders_first() {
+        let fixture = tempdir().unwrap();
+        for name in ["10", "02", "1", "2"] {
+            fs::create_dir(fixture.path().join(name)).unwrap();
+        }
+        let files = [
+            "1.txt",
+            "2.txt",
+            "02.txt",
+            "002.txt",
+            "10.txt",
+            "20.txt",
+            "image2.jpg",
+            "Image10.jpg",
+            "第2章-3页.txt",
+            "第2章-10页.txt",
+        ];
+        for name in files.iter().rev() {
+            fs::write(fixture.path().join(name), "same size").unwrap();
+        }
+        for direction in [
+            super::DirectorySortDirection::Ascending,
+            super::DirectorySortDirection::Descending,
+        ] {
+            let filter = DirectoryQueryFilter {
+                sort_direction: direction,
+                ..Default::default()
+            };
+            let session =
+                build_directory_session(fixture.path(), Some(&filter), &Default::default())
+                    .unwrap();
+            let mut folders = vec!["1", "2", "02", "10"];
+            let mut expected_files = files.to_vec();
+            if direction == super::DirectorySortDirection::Descending {
+                folders.reverse();
+                expected_files.reverse();
+            }
+            let expected = [folders, expected_files].concat();
+            assert_eq!(
+                session
+                    .entries
+                    .iter()
+                    .map(|entry| entry.name.as_str())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert!(
+                session.entries[..4]
+                    .iter()
+                    .all(|entry| entry.kind == DirectoryEntryKind::Directory)
+            );
+        }
+    }
+
+    #[test]
+    fn numeric_order_is_applied_before_paging_search_and_position_resolution() {
+        let fixture = tempdir().unwrap();
+        for number in (1..=600).rev() {
+            fs::write(fixture.path().join(format!("{number}.txt")), "data").unwrap();
+        }
+        let manager = ExplorerManager::default();
+        let session = build_directory_session(fixture.path(), None, &Default::default()).unwrap();
+        manager.store(81, session);
+        let first = manager.page(81, 0, 512).unwrap();
+        let second = manager.page(81, 512, 512).unwrap();
+        assert_eq!(first.entries.first().unwrap().name, "1.txt");
+        assert_eq!(first.entries.last().unwrap().name, "512.txt");
+        assert_eq!(second.entries.first().unwrap().name, "513.txt");
+        assert_eq!(second.entries.last().unwrap().name, "600.txt");
+        assert_eq!(second.total_entries, 600);
+        let matches = manager.search(81, "2", 0, 512).unwrap();
+        let expected = (1..=600)
+            .map(|number| format!("{number}.txt"))
+            .filter(|name| name.contains('2'))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            matches
+                .entries
+                .iter()
+                .map(|entry| &entry.name)
+                .collect::<Vec<_>>(),
+            expected.iter().collect::<Vec<_>>()
+        );
+        let located = manager.locate(81, "12", None, "").unwrap().unwrap();
+        assert_eq!(located.position, 11);
+        assert_eq!(located.path.file_name().unwrap(), "12.txt");
+        for (query, positions, expected) in [
+            ("2", vec![0, 1, 2], vec!["2.txt", "12.txt", "20.txt"]),
+            ("", vec![511, 512], vec!["512.txt", "513.txt"]),
+        ] {
+            let resolved = manager
+                .resolve_entries(&super::ResolveDirectoryEntriesRequest {
+                    session_id: 81,
+                    query: query.into(),
+                    positions,
+                })
+                .unwrap();
+            assert_eq!(
+                resolved
+                    .iter()
+                    .map(|entry| entry.name.as_str())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn recursive_and_cached_index_search_share_numeric_name_order() {
+        let fixture = tempdir().unwrap();
+        for directory in ["a", "b"] {
+            fs::create_dir(fixture.path().join(directory)).unwrap();
+            for number in [10, 2, 1] {
+                fs::write(
+                    fixture
+                        .path()
+                        .join(directory)
+                        .join(format!("{number}-match.txt")),
+                    "match",
+                )
+                .unwrap();
+            }
+        }
+        let manager = ExplorerManager::default();
+        for direction in [
+            super::DirectorySortDirection::Ascending,
+            super::DirectorySortDirection::Descending,
+        ] {
+            let request = StartDirectorySearchRequest {
+                roots: vec![fixture.path().to_owned()],
+                query: "match".into(),
+                recursive: true,
+                indexed: false,
+                filter: Some(DirectoryQueryFilter {
+                    sort_direction: direction,
+                    ..Default::default()
+                }),
+            };
+            let scanned = build_search_session(&request, &Default::default()).unwrap();
+            let indexed = manager
+                .build_indexed_search_session(&request, &Default::default())
+                .unwrap();
+            let mut expected = vec![
+                "1-match.txt",
+                "1-match.txt",
+                "2-match.txt",
+                "2-match.txt",
+                "10-match.txt",
+                "10-match.txt",
+            ];
+            if direction == super::DirectorySortDirection::Descending {
+                expected.reverse();
+            }
+            assert_eq!(
+                scanned
+                    .entries
+                    .iter()
+                    .map(|entry| entry.name.as_str())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert_eq!(
+                indexed
+                    .entries
+                    .iter()
+                    .map(|entry| &entry.path)
+                    .collect::<Vec<_>>(),
+                scanned
+                    .entries
+                    .iter()
+                    .map(|entry| &entry.path)
+                    .collect::<Vec<_>>()
+            );
+            let mut reversed_input = scanned.entries.clone();
+            reversed_input.reverse();
+            super::sort_directory_entries(&mut reversed_input, request.filter.as_ref());
+            assert_eq!(
+                reversed_input
+                    .iter()
+                    .map(|entry| &entry.path)
+                    .collect::<Vec<_>>(),
+                scanned
+                    .entries
+                    .iter()
+                    .map(|entry| &entry.path)
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn equal_metadata_uses_natural_names_without_reading_lazy_native_entries() {
+        let mut entries = ["10.txt", "2.txt", "1.txt"].map(|name| super::DirectoryEntry {
+            path: std::path::PathBuf::from("missing-native-record").join(name),
+            name: name.into(),
+            name_lower: name.into(),
+            kind: DirectoryEntryKind::File,
+            extension: Some("txt".into()),
+            size: 0,
+            modified_unix_ms: None,
+            hidden: false,
+            metadata_pending: true,
+        });
+        for field in [
+            super::DirectorySortField::Type,
+            super::DirectorySortField::Size,
+            super::DirectorySortField::Modified,
+        ] {
+            for direction in [
+                super::DirectorySortDirection::Ascending,
+                super::DirectorySortDirection::Descending,
+            ] {
+                entries.reverse();
+                let filter = DirectoryQueryFilter {
+                    sort_by: field,
+                    sort_direction: direction,
+                    ..Default::default()
+                };
+                super::sort_directory_entries(&mut entries, Some(&filter));
+                assert_eq!(
+                    entries
+                        .iter()
+                        .map(|entry| entry.name.as_str())
+                        .collect::<Vec<_>>(),
+                    ["1.txt", "2.txt", "10.txt"]
+                );
+                assert!(entries.iter().all(|entry| entry.metadata_pending));
+            }
+        }
     }
 
     #[cfg(windows)]

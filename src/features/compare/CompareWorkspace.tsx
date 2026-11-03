@@ -41,7 +41,7 @@ import {
 import { createPortal } from "react-dom";
 
 import { formatBytes } from "../dedup/duplicateListModel";
-import { useAppI18n } from "../../i18n/i18n";
+import { useAppI18n, type TranslationKey } from "../../i18n/i18n";
 import { DirectorySearchBar } from "../explorer/DirectorySearchBar";
 import {
   BrowseWorkspace,
@@ -54,6 +54,7 @@ import {
   openNativePath,
   openTerminal,
   recycleEntry,
+  RecycleEntryChangedError,
   renameEntry,
   transferEntry,
 } from "../explorer/fileOperationsClient";
@@ -73,7 +74,7 @@ import {
   VirtualTextDiff,
   type VirtualTextDiffHandle,
 } from "./VirtualTextDiff";
-import type { BinaryDiffRange, FolderDiffEntry } from "./types";
+import type { BinaryDiffRange, FolderDiffEntry, FolderDiffFilter } from "./types";
 import { useFileDiff, BINARY_PAGE_SIZE } from "./useFileDiff";
 import { useEditSession } from "./useEditSession";
 import { useFolderDiff } from "./useFolderDiff";
@@ -83,6 +84,16 @@ type CompareView = "browse" | "folder" | "file";
 const NATIVE_DRAG_ICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAANElEQVRYR+3OMQ0AAAjEMMC/5yFjRxMFfXpm5g5gACN2gAE7wIAdYMAOMGAHGLADfKwBfgGShwM9EKgB0QAAAABJRU5ErkJggg==";
 
 const EditableMergeView = lazy(() => import("./EditableMergeView"));
+const FOLDER_FILTERS: readonly { value: FolderDiffFilter; label: TranslationKey }[] = [
+  { value: "all", label: "comparisonFilterAll" },
+  { value: "differences", label: "comparisonFilterDifferences" },
+  { value: "different", label: "comparisonFilterDifferent" },
+  { value: "added", label: "comparisonFilterAdded" },
+  { value: "deleted", label: "comparisonFilterDeleted" },
+  { value: "time", label: "comparisonFilterTime" },
+  { value: "same", label: "comparisonFilterSame" },
+  { value: "error", label: "comparisonFilterErrors" },
+];
 
 export interface CompareNavigationState {
   activePane: PaneId;
@@ -127,6 +138,7 @@ export interface CompareWorkspaceHandle {
 
 interface CompareWorkspaceProps {
   initialRoot: string;
+  routeVisible?: boolean;
   onNavigationChange: (state: CompareNavigationState) => void;
   onScrollVelocity: (velocity: number) => void;
   onSuccess: (message: string) => void;
@@ -245,6 +257,7 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
   function CompareWorkspace(
     {
       initialRoot,
+      routeVisible = true,
       onNavigationChange,
       onScrollVelocity,
       onSuccess,
@@ -359,7 +372,7 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
 
     useEffect(() => {
       const switchPaneWithTab = (event: KeyboardEvent) => {
-        if (event.key !== "Tab" || event.ctrlKey || event.altKey || view !== "browse" || !split) return;
+        if (!routeVisible || event.key !== "Tab" || event.ctrlKey || event.altKey || view !== "browse" || !split) return;
         const target = event.target;
         if (target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable='true']")) return;
         if (!(target instanceof HTMLElement) || !target.closest(".compare-browser-legacy")) return;
@@ -370,9 +383,10 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
       };
       window.addEventListener("keydown", switchPaneWithTab);
       return () => window.removeEventListener("keydown", switchPaneWithTab);
-    }, [activePane, activatePaneWithFocus, split, view]);
+    }, [activePane, activatePaneWithFocus, routeVisible, split, view]);
 
     useEffect(() => {
+      if (!routeVisible) return;
       onNavigationChange({
         activePane: browserNavigation.activePane,
         path: browserNavigation.path,
@@ -392,6 +406,7 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
       browserNavigation,
       editState.phase,
       onNavigationChange,
+      routeVisible,
     ]);
 
     const openDirectoryEntry = useCallback(
@@ -498,7 +513,9 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
         refreshBoth();
         onSuccess(t("recycledItems", { count: 1 }));
       } catch (error) {
-        setOperationError(errorMessage(error, t("unableRecycleEntry")));
+        setOperationError(error instanceof RecycleEntryChangedError
+          ? t("recycleEntryChanged", { path: displayPath(error.path) })
+          : errorMessage(error, t("unableRecycleEntry")));
       } finally {
         setBusy(false);
       }
@@ -799,7 +816,7 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
     const renderLegacyBrowser: boolean = false;
 
     return (
-      <section className="compare-workspace" aria-label={t("compareWorkspace")}>
+      <section className="compare-workspace" aria-label={t("compareWorkspace")} hidden={!routeVisible} inert={!routeVisible}>
         <div className="compare-toolbar">
           <div className="compare-view-tabs" role="tablist" aria-label={t("compareViews")}>
             <button
@@ -887,7 +904,7 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
           <BrowseWorkspace
             ref={browserRef}
             initialRoot={initialRoot}
-            routeVisible={view === "browse"}
+            routeVisible={routeVisible && view === "browse"}
             presentation="list"
             paneRatio={paneRatio}
             previewWidth={previewWidth}
@@ -1017,7 +1034,7 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
             <div className="folder-diff-summary">
               <FolderGit2 size={15} />
               <span>{folderDiff.state.status === "loading" ? t("statusComparing") : folderDiff.state.status === "ready" ? t("statusReady") : folderDiff.state.status === "error" ? t("statusFailed") : folderDiff.state.status === "cancelled" ? t("statusCancelled") : t("statusReady")}</span>
-              <span>{t("entryCount", { count: formatNumber(folderDiff.state.totalEntries) })}</span>
+              <span>{t("comparisonVisibleCount", { visible: formatNumber(folderDiff.state.totalEntries), total: formatNumber(folderDiff.state.stats?.total_entries ?? 0) })}</span>
               <span>{t("changedCount", { count: formatNumber(folderDiff.state.stats?.different ?? 0) })}</span>
               <span
                 title={t("verificationReadHint")}
@@ -1033,11 +1050,21 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
               ) : null}
               {folderDiff.state.error ? <strong>{folderDiff.state.error}</strong> : null}
             </div>
+            <div className="folder-diff-filters" role="group" aria-label={t("comparisonFilters")}>
+              {FOLDER_FILTERS.map(({ value, label }) => (
+                <button key={value} type="button" className={folderDiff.state.filter === value ? "command-button is-active" : "command-button"}
+                  aria-pressed={folderDiff.state.filter === value}
+                  onClick={() => { folderDiff.setFilter(value); setSelectedFolderRow(0); }}>
+                  {t(label)}
+                </button>
+              ))}
+            </div>
             <div className="folder-diff-headings"><span>{t("left")}</span><span>{t("status")}</span><span>{t("right")}</span></div>
             <VirtualFolderDiffList
+              key={`${folderDiff.state.sessionId}/${folderDiff.state.filter}`}
               ref={folderListRef}
               totalEntries={folderDiff.state.totalEntries}
-              status={folderDiff.state.status}
+              status={folderDiff.state.pageLoading ? "loading" : folderDiff.state.status}
               error={folderDiff.state.error}
               selectedPosition={selectedFolderRow}
               entryAt={folderDiff.entryAt}
@@ -1125,7 +1152,7 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
           </div>
         ) : null}
 
-        {contextMenu ? createPortal((
+        {routeVisible && contextMenu ? createPortal((
           <div className="explorer-context-menu" role="menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={(event) => event.stopPropagation()}>
             {contextEntry ? <MenuButton icon={<ExternalLink size={14} />} onClick={() => { openDirectoryEntry(contextMenu.pane, contextEntry); setContextMenu(null); }}>{t("open")}</MenuButton> : null}
             {contextEntry?.kind === "file" ? <MenuButton icon={<ExternalLink size={14} />} onClick={() => {
@@ -1156,7 +1183,7 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
           </div>
         ), document.body) : null}
 
-        {renameTarget ? (
+        {routeVisible && renameTarget ? (
           <DialogShell title={t("renameDialog")} icon={<FilePenLine size={17} />} onClose={() => setRenameTarget(null)}>
             <form className="rename-form" onSubmit={(event) => { event.preventDefault(); void performRename(); }}>
               <input autoFocus aria-label={t("newName")} value={renameValue} onChange={(event) => setRenameValue(event.target.value)} />
@@ -1169,7 +1196,7 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
           </DialogShell>
         ) : null}
 
-        {recycleTarget ? (
+        {routeVisible && recycleTarget ? (
           <DialogShell title={t("recycleDialog")} icon={<Trash2 size={17} />} onClose={() => setRecycleTarget(null)}>
             <p className="dialog-path">{displayPath(recycleTarget.path)}</p>
             {operationError ? <div className="dialog-error" role="alert">{operationError}</div> : null}
@@ -1180,7 +1207,7 @@ export const CompareWorkspace = forwardRef<CompareWorkspaceHandle, CompareWorksp
           </DialogShell>
         ) : null}
 
-        {propertiesTarget ? <EntryPropertiesDialog entry={propertiesTarget} onClose={() => setPropertiesTarget(null)} /> : null}
+        {routeVisible && propertiesTarget ? <EntryPropertiesDialog entry={propertiesTarget} onClose={() => setPropertiesTarget(null)} /> : null}
       </section>
     );
   },

@@ -2,10 +2,20 @@ mod diagnostics;
 mod diff;
 mod explorer;
 mod file_operations;
+mod indexer;
 mod lifecycle;
 mod mutation;
+mod native_broker;
+mod native_index;
+mod native_probe;
+mod natural_sort;
+mod ntfs;
 mod preview;
+mod recycle_bin;
+mod recycle_bin_probe;
 mod scan;
+mod space_cache;
+mod space_sniffer;
 mod startup_gate;
 mod thumbnail;
 mod windows_navigation;
@@ -34,6 +44,10 @@ use file_operations::{
     extract_zip, open_native_path, open_terminal, organize_by_keyword, recycle_entry, rename_entry,
     transfer_directory_entries, transfer_entry, undo_organize_by_keyword,
 };
+use indexer::{
+    IndexerManager, cancel_global_indexer, get_indexer_capabilities, get_indexer_status,
+    search_global_index, start_global_indexer,
+};
 use lifecycle::{
     CloseBehavior, LifecycleState, get_autostart_status, get_close_behavior, is_autostart_args,
     refresh_enabled_autostart_registration, set_autostart_enabled, set_close_behavior,
@@ -42,8 +56,13 @@ use mutation::{
     MutationManager, close_edit_session, open_edit_session, recycle_duplicates, rollback_edit_side,
     save_edit_side,
 };
+use native_index::{enable_native_indexer, get_native_indexer_status, stop_native_indexer};
 use preview::{PreviewManager, cancel_file_preview, start_file_preview};
+use recycle_bin::{
+    RecycleBinManager, delete_recycle_bin_items, list_recycle_bin, restore_recycle_bin_items,
+};
 use scan::{ScanManager, cancel_scan, start_scan};
+use space_sniffer::{SpaceSnifferManager, cancel_space_scan, start_space_scan};
 use startup_gate::StartupGate;
 use thumbnail::{
     ShellVisualManager, cancel_image_thumbnail, cancel_shell_visual, start_image_thumbnail,
@@ -90,6 +109,15 @@ fn request_show_main_window(app: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if native_broker::native_helper_entry() {
+        return;
+    }
+    if native_probe::entry() {
+        return;
+    }
+    if recycle_bin_probe::entry() {
+        return;
+    }
     let launch_args = std::env::args().collect::<Vec<_>>();
     let launch_is_autostart = is_autostart_args(&launch_args);
     let mut context = tauri::generate_context!();
@@ -140,6 +168,14 @@ pub fn run() {
             }
 
             refresh_enabled_autostart_registration();
+            let indexer = app.state::<IndexerManager>().inner().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                match native_broker::restore_native_indexer() {
+                    Ok(true) => indexer.cancel_all(),
+                    Ok(false) => {}
+                    Err(error) => log::warn!(target: "muller::indexer", "event=native.restore_failed error={error}"),
+                }
+            });
             let show_item =
                 MenuItem::with_id(app, "show", "Show Muller", true, Some("Ctrl+Shift+Space"))?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit Muller", true, None::<&str>)?;
@@ -228,18 +264,31 @@ pub fn run() {
         .manage(DiagnosticsState::default())
         .manage(LifecycleState::new(launch_is_autostart))
         .manage(ScanManager::default())
+        .manage(SpaceSnifferManager::default())
         .manage(ExplorerManager::default())
+        .manage(IndexerManager::default())
         .manage(DiffManager::default())
         .manage(MutationManager::default())
         .manage(FileOperationManager::default())
+        .manage(RecycleBinManager::default())
         .manage(PreviewManager::default())
         .manage(ShellVisualManager::default())
         .invoke_handler(tauri::generate_handler![
             start_scan,
             cancel_scan,
+            start_space_scan,
+            cancel_space_scan,
             start_directory_query,
             start_directory_search,
             warm_global_search_index,
+            get_indexer_capabilities,
+            start_global_indexer,
+            cancel_global_indexer,
+            search_global_index,
+            get_indexer_status,
+            enable_native_indexer,
+            get_native_indexer_status,
+            stop_native_indexer,
             cancel_directory_query,
             read_directory_page,
             search_directory_page,
@@ -254,6 +303,9 @@ pub fn run() {
             cancel_file_operation,
             rename_entry,
             recycle_entry,
+            list_recycle_bin,
+            restore_recycle_bin_items,
+            delete_recycle_bin_items,
             open_native_path,
             create_entry,
             directory_statistics,
