@@ -1,4 +1,4 @@
-name: Publish Windows prerelease
+name: Publish Windows release
 
 on:
   push:
@@ -44,16 +44,16 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "Muller ${{ github.ref_name }}"
           releaseBody: |
-            Muller ${{ github.ref_name }} is a public Windows preview.
+            Muller ${{ github.ref_name }} is a Windows ${{ contains(github.ref_name, '-') && 'preview' || 'stable release' }}.
 
             **Downloads**
             - `*-setup.exe` - recommended Windows installer
             - `*-portable.exe` - standalone portable executable
             - `SHA256SUMS.txt` - SHA-256 checksums for both executables
 
-            This preview is unsigned, so Windows SmartScreen may show an unknown-publisher warning. See [CHANGELOG.md](https://github.com/AuAtmos/Muller/blob/${{ github.ref_name }}/CHANGELOG.md) and the [documentation index](https://github.com/AuAtmos/Muller/blob/${{ github.ref_name }}/docs/README.md) for features and known limits.
+            This build is unsigned, so Windows SmartScreen may show an unknown-publisher warning. See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/CHANGELOG.md) and the [documentation index](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/README.md) for features and known limits.
           releaseDraft: true
-          prerelease: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
           args: --bundles nsis
       - name: Upload portable executable and checksums
         shell: pwsh
@@ -76,9 +76,14 @@ jobs:
           $checksums | Set-Content -LiteralPath "SHA256SUMS.txt" -Encoding ascii
 
           gh release upload "${{ github.ref_name }}" $portable "SHA256SUMS.txt" --clobber
-      - name: Publish prerelease
+      - name: Publish release
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release edit "${{ github.ref_name }}" --draft=false --prerelease
+          if ($env:GITHUB_REF_NAME.Contains("-")) {
+            gh release edit "$env:GITHUB_REF_NAME" --draft=false --prerelease=true
+          } else {
+            gh release edit "$env:GITHUB_REF_NAME" --draft=false --prerelease=false --latest
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Failed to publish release" }
