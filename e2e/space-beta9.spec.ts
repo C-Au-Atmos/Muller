@@ -23,7 +23,7 @@ async function openMutationSpace(page: Page, options: { liveChild?: boolean } = 
       tasks: [], cancelled: [], recycled: [], deleted: [], failRecycles: false, partialRecycle: false,
       liveChild: Boolean(liveChild),
       publish(index, done = true, oldBytes) {
-        const task = state.tasks[index]!;
+        const task = state.tasks[index];
         const isParent = task.root === "D:\\Muller";
         const deletedBytes = state.deleted.includes("Deleted.txt") ? 0 : 900;
         const keptBytes = state.deleted.includes("Keep.txt") ? 0 : 100;
@@ -187,7 +187,7 @@ test("successful mutation cancels a live child scan and rejects its late complet
   await expect(region.locator("canvas")).toHaveAttribute("data-area-bytes", "100");
   await expect.poll(() => page.evaluate(() => {
     const state = (globalThis as typeof globalThis & { __spaceMutation: MutationRuntime }).__spaceMutation;
-    return state.cancelled.includes(state.tasks[1]!.id);
+    return state.cancelled.includes(state.tasks[1].id);
   })).toBe(true);
   await viewport.press("Backspace");
   await expect.poll(() => countTasks(page)).toBe(4);
