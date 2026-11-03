@@ -26,7 +26,7 @@
 |---|---|
 | 目标版本 | `V0.1.5` |
 | 实现分支 | `feat/0.1.5` |
-| 候选分支 | `release/0.1.5`（`0.1.5-beta.8` 已交付，保留 `0.1.5-beta.7` 及更早版本） |
+| 候选分支 | `release/0.1.5`（`0.1.5` 正式交付收尾中；保留 beta.8 及更早版本） |
 | 文档状态 | `In progress` |
 | 技术负责人 | `Codex` |
 | 最后更新 | `2026-11-03` |
@@ -35,6 +35,10 @@
 
 | 条目 ID | 评审结论 | 实现负责人 | 状态 | 主要交付物 | 验证状态 |
 |---|---|---|---|---|---|
+| [`BUG-0.1.5-006`](#bug-0-1-5-006) | `Accepted` | `Codex` | `In progress` | 比较状态保留完成；快速切换焦点回归为发布阻断项 | `Initial local gates passed; CI focus regression fix/revalidation pending` |
+| [`REQ-0.1.5-012`](#req-0-1-5-012) | `Accepted` | `Codex` | `Done` | 完整目录报告筛选、计数、分页及导航，有界缓存 | `Filter/strict/time/paging/stale response regressions passed` |
+| [`BUG-0.1.5-007`](#bug-0-1-5-007) | `Accepted` | `Codex` | `Done` | 操作成功路径失效空间历史、父级重扫及晚响应隔离 | `Child recycle/partial failure/cancel/refresh and large navigation passed` |
+| [`REQ-0.1.5-013`](#req-0-1-5-013) | `Accepted` | `Codex` | `In progress` | 正式 EXE/NSIS/稳定发布及 0.1.6 计划入口 | `Initial local evidence retained; CI focus blocker fix/new build/publish/next-version pending` |
 | [`BUG-0.1.5-004`](#bug-0-1-5-004) | `Accepted` | `Codex` | `Done / beta.8 delivered` | Space 回收元数据与缓存修复，严格外部修改保护 | `Frontend/Rust/Edge and final EXE recycle probe passed` |
 | [`REQ-0.1.5-011`](#req-0-1-5-011) | `Accepted` | `Codex` | `Done / beta.8 delivered` | Windows 系统回收站页面、还原、永久删除、确认及取消处理 | `7 Recycle Bin Edge cases and final EXE Shell probe passed` |
 | [`BUG-0.1.5-005`](#bug-0-1-5-005) | `Accepted` | `Codex` | `Done / beta.8 delivered` | 有界空间树/历史、索引内存与持久化优化、长期性能门禁 | `Large fixtures, process memory comparison and final MFT/USN probe passed` |
@@ -736,16 +740,17 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 
 ### `BUG-0.1.5-006` - 比较状态保留
 
-- `Accepted / Planned`；实现分支 feat/0.1.5。
+- `Accepted / In progress / release blocker`；初次实现分支 feat/0.1.5；`7aaeceb`，后端取消发布保护在 `83dcb3f`；CI 焦点回归修复及复验待补。
 - T01：按打开标签保留比较实例并隔离隐藏路由事件/回调；关闭标签取消任务与释放结果。
 - T02：目录/文本结果分页缓存限制，任务和筛选 generation 拒绝过期结果。
 - T03：Edge 验证进行中切走、后台完成、设置和标签切换、关闭后释放、路径与结果恢复。
+- T04（In progress / Accepted）：CI `41666318937` 的 `flow-border.spec.ts:420` 第 6.1 阶段失败；快速 `Ctrl+3` → `Ctrl+F` 时 `Search current directory` 为 inactive，根因为按需挂载比较 owner 与焦点/输入交接的时序。先通过 req 同步已接受阻断范围至 feat，再修复当前可见页的即时焦点和取消处理；保留按需挂载及最多 12 个实例，禁止隐藏页抢焦点。加入慢渲染下连续快捷键切换回归，相关测试及修复后完整门禁结果待补。
 
 <a id="req-0-1-5-012"></a>
 
 ### `REQ-0.1.5-012` - DIFF 筛选
 
-- `Accepted / Planned`；Rust 过滤分页/差异导航，React 筛选按钮、中英文文案和计数。
+- `Accepted / Done`；`83dcb3f` 后端与 `7aaeceb` 前端；Rust 过滤分页/差异导航，React 筛选按钮、中英文文案和计数。
 - T01：定义共享筛选枚举，按实际 mtime 判断时间不一致，保留原比较及文件安全语义。
 - T02：完整报告筛选索引、精确计数和过滤后位置；有界页缓存和快速切换失效处理。
 - T03：Rust 分类/跨页/严格时间测试，前端与 Edge 筛选/空态/方向/晚页/导航回归。
@@ -754,7 +759,7 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 
 ### `BUG-0.1.5-007` - 空间历史失效
 
-- `Accepted / Planned`；App 操作成功回调与 SpaceSniffer handle/history helper。
+- `Accepted / Done`；`1ea1471`、`165bd0a`、`26caebb`、`7aaeceb`；App 操作成功回调与 SpaceSniffer handle/history helper。
 - T01：提供 invalidatePaths，相关历史退化为扫描中的路径，不复制深树；源与目标均参与判断。
 - T02：接入成功和部分成功的空间文件操作及手动刷新；旧任务取消与晚响应隔离。
 - T03：边界路径和缓存预算单测、Edge 子目录回收再上级/历史返回，代表性大数据重复导航，记录规模/时延/保留上限。
@@ -763,9 +768,60 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 
 ### `REQ-0.1.5-013` - 正式交付
 
-- `Accepted / Planned`。
-- T01：完成上述三项并审查差异；全部质量门禁通过才提升 feat → release。
-- T02：release 对齐 package/lock/Cargo/tauri 0.1.5 元数据，更新 changelog 与稳定发布工作流，构建 EXE/NSIS，记录源码与 SHA256；元数据回合 feat。
-- T03：原生最终 EXE 安全探针和空间截图；同步 req 交付证据 → feat → release。只从验证后的 release 合入 master，非强制推送并发布 v0.1.5。
-- T04：在验证后 master 上建立 req/feat/release 0.1.6，同步 Draft 三文档和文档索引，推送分支。
+- `Accepted / In progress`；首轮本地质量门禁与构建证据保留，CI 焦点阻断修复后的完整复验、新构建、最终发布和下一版本证据待补。
+- T01（In progress）：上述三项首轮实现与审查完成；首轮本地完整门禁通过，`caa7607` 按 feat → release 晋级。后续 CI 暴露 `BUG-0.1.5-006` 快速快捷键焦点回归，正式发布前须完成修复和完整复验。
+- T02（In progress）：`29a78b1` 对齐五处版本文件为 0.1.5、更新 changelog/README/稳定发布工作流；`624c67d` 修复 Rust 1.89 clippy 门禁，已回流 feat。源 `624c67d` 的首轮 EXE/NSIS 构建成功，版本与 SHA256 作为迭代证据保留下表；焦点修复后的新构建和哈希待补。
+- T03（In progress）：源 `624c67d` 的 EXE 原生安全探针、空间完成态及本地哈希已核对；非零扫描中截图未捕获。同步 req 交付证据 → feat → release；只从验证后的 release 合入 master，非强制推送并发布 v0.1.5。远端 CI `41666318937` 已定位为快速 `Ctrl+3` → `Ctrl+F` 焦点回归；修复后 CI 及稳定发布结果待实际完成补录。
+- T04（Pending）：在验证后 master 上建立 req/feat/release 0.1.6，同步 Draft 三文档和文档索引，推送分支；基线与远端结果待实际完成补录。
 - 回滚：保留 beta.8 产物与历史标签，使用正常修复提交；不强推、不改用户文件或已有回收站。
+
+<a id="stable015-delivery-evidence"></a>
+
+### beta.9 实现与 0.1.5 正式版交付证据（2026-11-03）
+
+本节为本轮增补记录；不改写 beta.1–beta.8 的历史结果或将缺少的原生图像标为通过。
+
+| 项目 | 已核对结果与证据 |
+|---|---|
+| 接受的需求基线 | `d092ffa`、`35878f1`；通过 `5ade9b8` 合入 feat 后实施 |
+| 实现提交 | 空间历史 `1ea1471`（测试细化 `165bd0a`、`26caebb`）；Rust 筛选 `83dcb3f`；比较保留与筛选、App 操作接入 `7aaeceb60b71d8df04ac1f41d1435838ac9e66dc` |
+| release 晋级 | `caa7607`：本地门禁通过后，feat → release |
+| 正式版元数据 | `29a78b1`；package.json、package-lock.json、src-tauri/Cargo.toml、Cargo.lock、tauri.conf.json 均为 `0.1.5`；README 下载名与 NSIS/portable 对齐 |
+| 首轮本机构建源 | `624c67d2e82731fc32c4e443f336b60f2f1a2355`；保留为焦点发布阻断修复前的迭代证据，修复后新构建来源和哈希待补 |
+| 前端门禁 | lint、29 文件/155 项 Vitest、生产构建通过；`frontend-tests.log`、`lint-final.log`、`frontend-build-final.log`；既有 Vite >500kB chunk 提示保留 |
+| Rust 门禁 | fmt、全 workspace 206 passed / 2 ignored、全 targets/features clippy `-D warnings` 通过；`rust-tests.log`、`rust-clippy.log` |
+| Rust 1.89 门禁修复 | 首次远端 CI `41664496380` 在 clippy 的 `nonminimal_bool` 失败；`624c67d` 仅将等价逻辑改写为 `is_none_or(cancelled)`，已回流 feat。本地 `cargo +1.89.0 fmt --all -- --check` 与全 workspace/all-targets/all-features clippy 通过；`rust189-clippy.log` |
+| 本地 Edge 完整门禁 | 一次完整 `npm run test:e2e`，13 份 spec 合计 139/139 passed；`edge-full.log`。不是将多次局部结果拼为完整单次全绿 |
+| 专项比较验证 | 4 个 beta.9 比较用例：运行中切换工具/设置/标签与恢复、完整分页筛选及旧页拒绝、关闭运行任务与晚 Ready 释放、隐藏页面输入/预览隔离；300 行混合状态受控 IPC fixture，后端真实筛选由 Rust 测试独立验证 |
+| 专项空间验证 | 5 个 beta.9 用例：子级回收后 Backspace/Alt 返回、部分成功与拒绝/取消、活跃扫描取消及晚完成隔离、手动刷新；`space-beta9-targeted.log`，均通过 |
+| 稳定工作流核对 | js-yaml 解析及 3 段 PowerShell 语法检查通过；`release-workflow-syntax.json`。v0.1.5 无 `-`，采用非预发布并设置 latest；先草稿上传便携包/安装包校验和，再公开 |
+| 首轮构建 | `npm run tauri -- build --bundles nsis` 完成，`native-build-final.log`；源 `624c67d` 的本地 EXE/NSIS 实测版本均 `0.1.5`，大小与 SHA256 见下表；未执行安装 |
+| 远端 CI 发布阻断 | `41666318937` 的 `flow-border.spec.ts:420` 第 6.1 阶段失败；快速 `Ctrl+3` → `Ctrl+F` 后目录搜索框未聚焦，已定位比较 owner 按需挂载的焦点交接时序，归入已接受的 `BUG-0.1.5-006` T04。后续修复、慢渲染回归及完整复验待补，当前不标记通过 |
+| 首轮回收站探针 | 源 `624c67d` 对应 `native-recycle-bin-probe.json` / `passed=true`；文件与目录回收/还原、还原内容一致、缺失 mtime 保护、未确认永久删除拒绝、仅永久删除 fixture。原有 323 条→最终 323 条，`preExistingEntriesPreserved=true`；未清空已有回收站。`recycle-bin-probe-final.json` 属于较早源码探针，不作为本构建证据 |
+| 首轮 MFT/USN 探针 | `native-index-probe-final.json` / `passed=true`；207171 条、1 卷，初建含启动/授权 787ms、查询 16.558ms、变更验证 4479ms；磁盘快照恢复 302ms，restored 1 / rebuilt 0，覆盖 MFT、USN 创建/改名/父目录改名/删除及停机变更校正 |
+| 原生空间完成态 | 49152 个文件、96 目录，完成态 `50331648` 字节（48MiB）、96 个可见项；`large-native-fixture.json`、`native-space-frames.json`、`native-space-final.png`。非零扫描中截图未捕获，不将完成态或零字节 Scanning 画面视作该证据 |
+| 稳定发布与 0.1.6 | master 晋级、v0.1.5 标签/公开稳定 Release、下一版本分支基线及推送结果待实际完成后补录 |
+
+证据目录：`D:\Muller\release\0.1.5-qa`；本轮本地产物目录：`D:\Muller\release\0.1.5`。`local-artifacts.json` 已核对来源为 `624c67d` 的实际文件，下表保留为焦点发布阻断修复前的迭代证据；新构建来源、哈希及验证待补。本地构建与稍后 GitHub Actions 构建来源分别记录，不冒充哈希相同。
+
+| 修复前本地产物（源 `624c67d`） | 字节数 | SHA256 |
+|---|---:|---|
+| `Muller_0.1.5_x64-portable.exe` | 11595776 | `9c25c4883f34fb55eb4ff731a617c3297c245bc30b84032e7de847fb2f2763fa` |
+| `Muller_0.1.5_x64-setup.exe` | 5009670 | `d8a7da892d56fe099e9f5f0145a2f76046969c87104cbc3834176c2f60dac9dd` |
+
+#### 性能、缓存与语义边界
+
+- 比较实例按打开标签保留，上限 12。每个目录比较最多 8×128=1024 条前端缓存，每个文本比较最多 8×256=2048 行；关闭标签、重比和过期 Ready 释放会话。缓存测试连续加载 200 页，保留条目仍不超过上限。
+- 后端保留一份规范报告和当前筛选索引，最多与报告条目数相同，不按筛选累计索引，不复制全报告。页面最多 256 条；过滤与查找放到后台任务，注册表锁在扫描/文件 I/O 前释放。同一筛选分页复用索引，上一/下一差异遇首个匹配即返回。
+- Rust debug 合成 100000 条、50000 项匹配样本：首次索引 1777µs，随后 15×128 项分页合计 568µs，位置索引容量 524288 字节，切换全部时派生索引为 0 字节。这是内存报告查询成本，不是目录扫描、磁盘性能或 release 全应用内存。
+- 时间筛选根据两侧均存在且可读的实际时间判定，与严格时间开关独立，可与内容差异重叠。严格模式显示保留已有 Different 语义，内容/类型筛选仍排除仅时间改变。目录保持核心 Equal 语义，可同时出现在“一致”和“时间不一致”；时间筛选导航访问全部匹配时间项。
+- 本轮 Edge 大数据导航重验：6 次各 20000 项受控扫描，5 次跨三级地址跳转路径响应 43/42/18/41/42ms，保留历史根节点数 0→5；强制 GC 后后续 JS heap 约 22–23MiB（`space-navigation-performance.json`）。不是完整磁盘扫描耗时、WebView 总内存或全应用私有内存，不据此宣称相对 beta.8 的速度提升。
+- 空间历史各方向最多 64 路径、5000 节点；失效只比较历史根路径，旧树整体释放，不遍历深树。成功与部分成功使用实际返回路径，源/目标及祖先/后代均相关；相似前缀、驱动器和 UNC 边界有单测。失效取消相关扫描，晚结果不能恢复已失效条目。
+- 外部 Explorer 的实时递归监控不属于本项；显式刷新可使相关历史失效并重新统计。原生索引/USN 正确性与文件操作并发修改保护保持。
+
+#### 保留的验证边界与回滚
+
+- 2 个 ignored：需要提权且已有 USN 的真实 NTFS 单测、需要 `MULLER_MEMORY_SNAPSHOT_DIR` 的可选快照内存诊断。ignored 不计为通过；源 `624c67d` 的 EXE 原生探针独立通过，数据见上表，不将其当作本轮大规模索引内存对比。
+- NSIS 已构建、未安装；真实硬件输入法和已安装版本登录/升级/卸载/注销、系统会话等历史人工验证边界继续保留。回收站同名冲突与缺失父目录原生弹窗不由受控 Edge 验证替代。
+- `compare-filter.png`、`space-before-child-delete.png`、`space-parent-after-child-delete.png` 为同源码 Edge 与受控 IPC 数据截图，不能标为原生 EXE 图像。历史 `BUG-0.1.5-001` 的扫描中连续原生图像缺口在最终核对前仍保留。
+- 原始 beta.8 便携包和安装包继续保留；本轮不修改用户原始 ZIP、已有回收站或系统 USN 日志。回滚使用普通修复/反向提交，不强推；只从验证后 release 晋级 master，长期分支按顺序非强制推送。
