@@ -15,7 +15,7 @@
 - [BUG-0.1.5-006](#bug-0-1-5-006)：Accepted / P1 / Done，本地完整 Edge 与远端比较/焦点回归通过。
 - [REQ-0.1.5-012](#req-0-1-5-012)：Accepted / P1 / 实现与自动化验收 Done。
 - [BUG-0.1.5-007](#bug-0-1-5-007)：Accepted / P1 / 实现与自动化验收 Done。
-- [BUG-0.1.5-008](#bug-0-1-5-008)：Accepted / P1 / 预览拖拽提前结束发布阻断，待实施。
+- [BUG-0.1.5-008](#bug-0-1-5-008)：Accepted / P1 / Done，稳定 callback 与跨 Worker stats 更新拖拽回归通过。
 - [REQ-0.1.5-013](#req-0-1-5-013)：Accepted / P1 / 正式交付收尾中。
 
 - [BUG-0.1.5-004](#bug-0-1-5-004)：Accepted / P1 / beta.8。
@@ -533,3 +533,18 @@
 - 证据：`ci41675167370/timing-analysis.json` 统计 43 个 expect 全部完成且 `errors=0`，导航 11426ms、owner0 循环 31143ms、owner 切换 3763ms、owner1 循环 42245ms；最终 count 与 pageerror 空数组断言在 trace 93632/93634ms 完成（含启动），测试主体约 91 秒。没有卡住动作或功能断言失败，不据此直接豁免门禁。
 - 接受范围：仅将该慢 CPU 用例 `test.setTimeout(90_000)` 调整为 `180_000`，并以 `try/finally` 将 CPU throttling rate 恢复为 1；保留 6 倍降速、两个 owner、每个两轮、全部 43 项功能断言和即时焦点/Escape 语义，不修改产品或全局超时。
 - 验收：核对最小 diff，运行慢 CPU 专项和完整 Edge，取得修复后远端完整门禁结论；与 BUG-0.1.5-008 的产品修复分开记录，不将新产品构建沿用为旧候选来源。
+
+### 拖拽阻断及测试预算修复验收（2026-11-04，UTC+08:00）
+
+- `BUG-0.1.5-008`：`Done`，实施 `e5128c350d668874e6dd1110340bcfab9eac55b0`。差异仅将 App 两处预览宽度更新统一为稳定 `useCallback`，没有更改宽度预算或 Browse 的指针结束/卸载清理语义。回归使用真实 Worker stats 消息确认父更新已经发生，按住 1.2 秒及双帧后仍有 pointer capture，继续拖动后的 `>480` 断言与既有完整列/窗口尺寸序列通过。
+- `REQ-0.1.5-013-T06` 同提交完成；该用例 180 秒、`finally` CPU rate=1 的最小调整已核对，6 倍降速、owner/循环数及全部焦点/输入/取消断言保留。T05 `58a391a` 的 30 秒像素 poll 及 `painted > 20` 保持。两项测试修复本地回归已完成，最终远端质量门禁仍由 REQ013 追踪。
+- 最终本地门禁通过：155 项前端，206 项 Rust passed / 2 ignored，lint/build/fmt/clippy；`edge-final2-full.log` 为一次完整 13 份 spec/140 passed/退出 0，含 compare 5/5、masonry-preview 1/1、Stage 7 10/10。前两次最终候选 CI 的真实失败继续保留；正式交付和 T04 保持 In progress，等待最终 CI、新 EXE/NSIS 来源与哈希、原生复验及发布结果。
+- 新 EXE/NSIS 本机构建已通过：来源 release `80c418daa2767d38dadd4839d68c1d2bde7b590a`，两包 0.1.5 的大小/哈希见[最终构建证据](03-execution.md#stable015-final2-evidence)。`native-recycle-final2.json` 为 passed、323→323 且原条目保留；`native-index-final2.json` 为 passed、210403 条/1 卷、restored 1/rebuilt 0。`80c418..3180bf7` 仅 CHANGELOG，产品输入一致；最终 CI、最终 EXE UI 与公开发布待补，不将旧原生 UI 探针移作新二进制证据。
+- 最终 EXE UI 已验收：`native-ui-final2.json` 绑定 `80c418` / SHA256 `69d5f24bda2c40303c3f104d559b2c4e4170bf9c6ad9abe1a4b090d8e92790a3`。真实 Tauri WebView2 + computer-use sky 操作 5 个 union 条目，时间筛选仅 `time.txt`（1/5），Browse→Compare 保留筛选、结果、目录；三张 `native-final2-compare-{all,time,restored}.png` 已目视核对，独立 GUI 已关闭。该结论限于已操作场景，不声称全部筛选按钮或原生长按预览拖动已验证，长按拖动由本轮真实 Edge pointer-capture 回归覆盖；最终 CI、正式发布与 T04 仍待补。
+- feat 最终远端验收已通过：[41679151449](https://github.com/C-Au-Atmos/Muller/actions/runs/41679151449)，head `e5128c350d668874e6dd1110340bcfab9eac55b0`，completed/success。`feature-ci-final2-full.log` 记录 lint、155 前端、生产构建、Rust fmt/206 passed+2 ignored/clippy 及完整 Edge 13 份 spec/140 passed，含 BUG008 与 T05/T06 回归。release [41680031582](https://github.com/C-Au-Atmos/Muller/actions/runs/41680031582) 的 Edge 尚待完成，因此只确认 feat 与本地验收通过，正式发布/T04 仍 In progress。
+
+### 最终双分支门禁验收（2026-11-04，UTC+08:00）
+
+- release [41680031582](https://github.com/C-Au-Atmos/Muller/actions/runs/41680031582) 已 completed/success，head `3180bf7f7f37c905d7337c83f1685668c0131424`；`release-ci-final2-full.log`、`release-ci-final2-evidence.json` 记录 lint、155 前端、生产 build、Rust fmt/206 passed+2 ignored/clippy 全绿，完整 Edge 13 份 spec/140 passed，含 Ctrl+F、masonry 拖拽与 Stage 7。feat `41679151449` 同样全绿，两次 CI 的通过结论各自对应其源码，不互相替代。
+- `BUG-0.1.5-008` 验证 Done；`REQ-0.1.5-013-T01/T02/T05/T06` Done：产品/测试最小修复、完整本地及双分支远端门禁、最终本机 EXE/NSIS 元数据与哈希、列出的原生安全及 UI 场景均已核对。所有旧候选构建、真实失败、中断和取消记录保留，当前结果不改写历史。
+- `REQ-0.1.5-013` 整体仍 In progress，T03 稳定晋级/标签/公开 Release/下载核验与 T04 的 0.1.6 三阶段分支和 Draft 入口须按实际结果接续记录。既有未覆盖边界继续保留，不因 CI 通过扩大原生场景或安装/系统会话验证结论。
