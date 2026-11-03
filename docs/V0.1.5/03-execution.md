@@ -38,8 +38,8 @@
 | [`BUG-0.1.5-006`](#bug-0-1-5-006) | `Accepted` | `Codex` | `Done` | 比较状态、隐藏隔离及快捷键焦点修复 | `0c044e3 targeted 13/13; local full Edge 140/140; remote compare/space/Ctrl+F passed` |
 | [`REQ-0.1.5-012`](#req-0-1-5-012) | `Accepted` | `Codex` | `Done` | 完整目录报告筛选、计数、分页及导航，有界缓存 | `Filter/strict/time/paging/stale response regressions passed` |
 | [`BUG-0.1.5-007`](#bug-0-1-5-007) | `Accepted` | `Codex` | `Done` | 操作成功路径失效空间历史、父级重扫及晚响应隔离 | `Child recycle/partial failure/cancel/refresh and large navigation passed` |
-| [`BUG-0.1.5-008`](#bug-0-1-5-008) | `Accepted` | `Codex` | `Planned / release blocker` | 稳定预览宽度 callback，避免父 render 提前结束拖拽 | `CI width 335; held-drag reproduction 3/3 at 343; fix/regression pending` |
-| [`REQ-0.1.5-013`](#req-0-1-5-013) | `Accepted` | `Codex` | `In progress` | 正式 EXE/NSIS/稳定发布及 0.1.6 计划入口 | `Prior local gates/native evidence retained; preview blocker + slow-CPU test budget fixes, new build/CI/publish/next-version pending` |
+| [`BUG-0.1.5-008`](#bug-0-1-5-008) | `Accepted` | `Codex` | `Done` | 稳定预览宽度 callback，保留跨父 render 指针拖拽 | `e5128c3; real worker-stats hold/capture and >480 regression passed; local full Edge 140/140` |
+| [`REQ-0.1.5-013`](#req-0-1-5-013) | `Accepted` | `Codex` | `In progress` | 正式 EXE/NSIS/稳定发布及 0.1.6 计划入口 | `T01/T02/T05/T06 Done; local + feat/release final CI 140 Edge each and 80c418 build/native evidence passed; T03/T04 in progress` |
 | [`BUG-0.1.5-004`](#bug-0-1-5-004) | `Accepted` | `Codex` | `Done / beta.8 delivered` | Space 回收元数据与缓存修复，严格外部修改保护 | `Frontend/Rust/Edge and final EXE recycle probe passed` |
 | [`REQ-0.1.5-011`](#req-0-1-5-011) | `Accepted` | `Codex` | `Done / beta.8 delivered` | Windows 系统回收站页面、还原、永久删除、确认及取消处理 | `7 Recycle Bin Edge cases and final EXE Shell probe passed` |
 | [`BUG-0.1.5-005`](#bug-0-1-5-005) | `Accepted` | `Codex` | `Done / beta.8 delivered` | 有界空间树/历史、索引内存与持久化优化、长期性能门禁 | `Large fixtures, process memory comparison and final MFT/USN probe passed` |
@@ -741,11 +741,11 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 
 ### `BUG-0.1.5-006` - 比较状态保留
 
-- `Accepted / In progress / release blocker`；初次实现分支 feat/0.1.5；`7aaeceb`，后端取消发布保护在 `83dcb3f`；CI 焦点回归修复及复验待补。
+- `Accepted / Done`；初次实现分支 feat/0.1.5；`7aaeceb`，后端取消发布保护在 `83dcb3f`；焦点修复 `0c044e3` 及本地、feat/release 最终完整门禁通过，见[最终证据](#stable015-final2-evidence)。
 - T01：按打开标签保留比较实例并隔离隐藏路由事件/回调；关闭标签取消任务与释放结果。
 - T02：目录/文本结果分页缓存限制，任务和筛选 generation 拒绝过期结果。
 - T03：Edge 验证进行中切走、后台完成、设置和标签切换、关闭后释放、路径与结果恢复。
-- T04（In progress / Accepted）：CI `41666318937` 的 `flow-border.spec.ts:420` 第 6.1 阶段失败；快速 `Ctrl+3` → `Ctrl+F` 时 `Search current directory` 为 inactive，根因为按需挂载比较 owner 与焦点/输入交接的时序。先通过 req 同步已接受阻断范围至 feat，再修复当前可见页的即时焦点和取消处理；保留按需挂载及最多 12 个实例，禁止隐藏页抢焦点。加入慢渲染下连续快捷键切换回归，相关测试及修复后完整门禁结果待补。
+- T04（Done）：CI `41666318937` 的快速 `Ctrl+3` → `Ctrl+F` 焦点失败按已接受范围修复为 `0c044e3`；保留按需挂载/最多 12 个实例，禁止隐藏页抢焦点。慢 CPU 连续快捷键切换与后续 T06 预算回归通过，最终双分支 CI 均成功，历史失败记录保留。
 
 <a id="req-0-1-5-012"></a>
 
@@ -769,11 +769,13 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 
 ### `REQ-0.1.5-013` - 正式交付
 
-- `Accepted / In progress`；首轮本地质量门禁与构建证据保留，CI 焦点阻断修复后的完整复验、新构建、最终发布和下一版本证据待补。
-- T01（In progress）：上述三项首轮实现与审查完成；首轮本地完整门禁通过，`caa7607` 按 feat → release 晋级。后续 CI 暴露 `BUG-0.1.5-006` 快速快捷键焦点回归，正式发布前须完成修复和完整复验。
-- T02（In progress）：`29a78b1` 对齐五处版本文件为 0.1.5、更新 changelog/README/稳定发布工作流；`624c67d` 修复 Rust 1.89 clippy 门禁，已回流 feat。源 `624c67d` 的首轮 EXE/NSIS 构建成功，版本与 SHA256 作为迭代证据保留下表；焦点修复后的新构建和哈希待补。
-- T03（In progress）：源 `624c67d` 的 EXE 原生安全探针、空间完成态及本地哈希已核对；非零扫描中截图未捕获。同步 req 交付证据 → feat → release；只从验证后的 release 合入 master，非强制推送并发布 v0.1.5。远端 CI `41666318937` 已定位为快速 `Ctrl+3` → `Ctrl+F` 焦点回归；修复后 CI 及稳定发布结果待实际完成补录。
-- T04（Pending）：在验证后 master 上建立 req/feat/release 0.1.6，同步 Draft 三文档和文档索引，推送分支；基线与远端结果待实际完成补录。
+- `Accepted / In progress`；产品修复、完整本地及 feat/release 最终门禁、新本机 EXE/NSIS/哈希与列出的原生验证完成；稳定发布及下一版本入口尚待实际完成，历史迭代证据保留。
+- T01（Done）：三项用户收尾与后续 BUG006/BUG008 发布阻断修复、审查和完整门禁完成；最终 feat `41679151449` 与 release `41680031582` 均 completed/success，各含完整 Edge 140/140。
+- T02（Done）：五处版本元数据 0.1.5、changelog/README/稳定工作流已对齐；最终本机构建源 `80c418`，EXE/NSIS 实测版本、大小与 SHA256 已核对。`80c418..3180bf7` 仅 CHANGELOG 变化；旧 `624c67d`/`c040518` 候选产物保留为迭代历史，详见最终证据。
+- T03（In progress）：最终 `80c418` EXE 的原生回收站/MFT-USN 探针及列出的比较/切换保留 UI 场景通过；历史非零扫描中图像缺口保留。req 证据须经 feat → release 同步，只从验证后的 release 合入 master，非强制推送；v0.1.5 标签、公开稳定 Release 与下载核验结果待实际完成补录。
+- T04（In progress）：0.1.6 Draft 三文档已准备，待在验证后 master 上建立 req/feat/release 0.1.6、同步文档索引及推送；准确基线与远端结果待实际完成补录。
+- T05（Done）：`58a391a` 仅该像素 poll 显式 30000ms，真实截图/采样/`painted > 20` 保留；本地 Stage 7 10/10 与最终双分支完整 CI 通过。
+- T06（Done）：`e5128c3` 仅该慢 CPU 用例 180 秒总预算与 finally 复位 CPU=1，6 倍降速/循环数/全部功能断言保留；本地及最终双分支完整 CI 通过。
 - 回滚：保留 beta.8 产物与历史标签，使用正常修复提交；不强推、不改用户文件或已有回收站。
 
 <a id="stable015-delivery-evidence"></a>
@@ -803,7 +805,7 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 | 原生空间完成态 | 49152 个文件、96 目录，完成态 `50331648` 字节（48MiB）、96 个可见项；`large-native-fixture.json`、`native-space-frames.json`、`native-space-final.png`。非零扫描中截图未捕获，不将完成态或零字节 Scanning 画面视作该证据 |
 | 稳定发布与 0.1.6 | master 晋级、v0.1.5 标签/公开稳定 Release、下一版本分支基线及推送结果待实际完成后补录 |
 
-证据目录：`D:\Muller\release\0.1.5-qa`；本轮本地产物目录：`D:\Muller\release\0.1.5`。`local-artifacts.json` 已核对来源为 `624c67d` 的实际文件，下表保留为焦点发布阻断修复前的迭代证据；新构建来源、哈希及验证待补。本地构建与稍后 GitHub Actions 构建来源分别记录，不冒充哈希相同。
+证据目录：`D:\Muller\release\0.1.5-qa`；当轮 `local-artifacts.json` 已核对来源为 `624c67d` 的实际文件，现连同产物存档于 `iteration-624c67d/`。下表保留为焦点发布阻断修复前的迭代证据，后续新构建来源、哈希及验证接续记录。本地构建与稍后 GitHub Actions 构建来源分别记录，不冒充哈希相同。
 
 | 修复前本地产物（源 `624c67d`） | 字节数 | SHA256 |
 |---|---:|---|
@@ -831,7 +833,7 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 
 ### 焦点阻断修复与新构建交付证据（2026-11-04，UTC+08:00）
 
-本节接续 2026-11-03 的迭代记录，更新当前已知状态。旧 `624c67d` 的构建、哈希与探针保留为历史；`local-artifacts.json` 对应下列 `c040518` 候选产物。本地完整 Edge 及截图 poll 预算修复专项已通过，后续双分支 CI 分别暴露预览拖拽产品缺陷与慢 CPU 用例预算不足，须先完成下列已接受修复；新构建、远端复验、稳定发布及下一版本结果待实际完成后补录。
+本节接续 2026-11-03 的迭代记录。旧 `624c67d` 的构建、哈希与探针保留为历史；本节 `c040518` 候选产物及当轮 `local-artifacts.json` 现存档于 `iteration-c040518/`。本地完整 Edge 及截图 poll 预算修复专项通过后，双分支 CI 分别暴露预览拖拽产品缺陷与慢 CPU 用例预算不足，按下列已接受条目修复；最终新构建/验证状态以[后续记录](#stable015-final2-evidence)为准。
 
 | 条目 | 当前结果与证据 |
 |---|---|
@@ -859,9 +861,9 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 
 #### `REQ-0.1.5-013-T05` - 已接受的 CI 像素 poll 预算修复
 
-- `Accepted / In progress`；req 已按 `81f4729` 同步后实施。`58a391ad77eaa9d5d2507ec778741dfd1ae30468` 仅修改 `e2e/stage7.spec.ts` 中 `.color-bends` 像素 `expect.poll` 的显式超时为 30000ms 并添加说明注释，不修改产品/GPU 路径、全局超时或跳过用例。真实截图、PNG 像素采样、alpha 阈值和 `painted > 20` 断言全部保留。
+- `Accepted / Done`；req 已按 `81f4729` 同步后实施。`58a391ad77eaa9d5d2507ec778741dfd1ae30468` 仅修改 `e2e/stage7.spec.ts` 中 `.color-bends` 像素 `expect.poll` 的显式超时为 30000ms 并添加说明注释，不修改产品/GPU 路径、全局超时或跳过用例。真实截图、PNG 像素采样、alpha 阈值和 `painted > 20` 断言全部保留；最终本地/双分支完整 CI 通过。
 - 已核对证据：CI `41671019045` 首个截图 12947→18193ms（5246ms），默认 5 秒 poll 于 18024ms 已超时；返回后的像素阈值断言在 18978ms 实际通过。失败整页图有渐变，console 无 WebGL 错误；与历史 beta.8 同类失败一致，按测试操作预算不足处理，不以环境理由直接豁免门禁。
-- 证据位置：`feature-ci-3-failed.log`；`ci41671019045/test-results/stage7-Stage-7-V5-shell-Gr-21a2f-rs-and-views-are-integrated/trace.zip`、`test-failed-1.png`。修复后 `stage7-poll-budget-targeted.log` 为 10/10 passed；最终远端完整门禁结论待补。
+- 证据位置：`feature-ci-3-failed.log`；`ci41671019045/test-results/stage7-Stage-7-V5-shell-Gr-21a2f-rs-and-views-are-integrated/trace.zip`、`test-failed-1.png`。修复后 `stage7-poll-budget-targeted.log` 为 10/10 passed；最终远端完整门禁亦通过，记录见最终表。
 - 本机产品构建源继续为 `c040518e67534251450e48330bac6a4e2f5d7804`，字节数、SHA256 和安全探针沿用上表；测试专属修复的远端提交与 CI 结果分开记录，不把测试文件提交伪称为本机重构建来源。
 
 #### 最终双分支门禁与发布准备（2026-11-04，UTC+08:00）
@@ -881,14 +883,47 @@ beta.3 直接 EXE 与安装包的原有哈希保留。构建来源固定为上�
 
 ### `BUG-0.1.5-008` - 预览拖拽跨父 render 提前结束（2026-11-04，UTC+08:00）
 
-- `Accepted / Planned / release blocker`；req 同步至 feat 后实施，仅稳定 App 两处共享的 `onPreviewWidthChange` callback。
+- `Accepted / Done`；req `7ef36a3` 同步至 feat 后，以 `e5128c350d668874e6dd1110340bcfab9eac55b0` 实施，仅稳定 App 两处共享的 `onPreviewWidthChange` callback。本地及双分支最终完整门禁、新构建与列出的原生复验通过；公开发布由 REQ013 接续。
 - T01（Done / diagnosis）：release CI 宽度 335、预期 `>480`；`masonry-drag-probe.json` 只读探针 3/3 按住 1.2 秒后宽度 343。`releasePointerCapture` 栈确认来自 Browse effect cleanup；App inline callback 随 FlowBorder 每秒 `setStats` 的父 render 改身份，带动 `finishPreviewResize` 依赖变化并提前清拖拽。
-- T02（Planned）：App 定义稳定 `useCallback` 封装 set-preview-width dispatch，两处复用；保持宽度预算、持久化、真实指针释放/取消/卸载清理语义，避免无关重构。
-- T03（Planned）：保留现有 `>480` 断言，增加持有指针至少 1.2 秒跨父 render 后继续移动的回归，确认父 render 期间不提前结束拖拽；继续验证完整列与既有窗口尺寸序列。
-- T04（Pending）：相关前端/lint/build、完整 Edge 和远端门禁；产品修复后新 EXE/NSIS 来源/哈希及必要原生复验另补。`c040518` 的候选构建/比较 UI/Shell/MFT 证据保留为修复前历史，不声称其已包含本次产品修复。
+- T02（Done）：App 定义稳定 `useCallback` 封装 set-preview-width dispatch，两处复用；保持宽度预算、持久化、真实指针释放/取消/卸载清理语义，避免无关重构。
+- T03（Done）：保留现有 `>480` 断言，持有指针 1.2 秒并观察真实 FlowBorder Worker stats 更新，双帧后确认 pointer capture 仍在，再继续移动与释放；完整列与既有窗口尺寸序列通过。
+- T04（Done / verification）：相关前端/lint/build、Rust、本地及双分支远端完整门禁均通过，各含 Edge 140/140；新 `80c418` EXE/NSIS 及原生安全探针、比较/切换保留场景通过，证据见下节；公开发布仍待 REQ013-T03。`c040518` 的候选构建/比较 UI/Shell/MFT 证据保留为修复前历史，不声称其已包含本次产品修复。
 
 ### `REQ-0.1.5-013-T06` - 慢 CPU 快捷键测试总预算（2026-11-04，UTC+08:00）
 
-- `Accepted / Planned`；仅调整 `compare-beta9.spec.ts:111` 该用例 90000→180000ms，并用 `try/finally` 将 CPU rate 复位 1，保留 6 倍降速、两个 owner/各两轮、全部功能断言与焦点/Escape 语义，不修改全局超时或产品。
+- `Accepted / Done`；`e5128c3` 仅调整 `compare-beta9.spec.ts:111` 该用例 90000→180000ms，并用 `try/finally` 将 CPU rate 复位 1，保留 6 倍降速、两个 owner/各两轮、全部功能断言与焦点/Escape 语义，不修改全局超时或产品；最终本地及双分支完整 CI 均通过。
 - 诊断已完成：`ci41675167370/timing-analysis.json` 为 43 个 expect、0 错误；导航 11426ms、owner0 循环 31143ms、owner 切换 3763ms、owner1 循环 42245ms，最终 count/pageerror 断言 trace 93632/93634ms（含启动），测试主体约 91 秒，耗尽 90 秒总预算。CI 保持失败事实，不将已完成断言替代完整门禁通过。
-- 实施提交、最小 diff 核对、慢 CPU 专项/完整 Edge 及修复后远端结果待补；发布与 `REQ-0.1.5-013-T04` 下一版本计划入口仍待实际完成。
+- 实施提交及最小 diff 已核对，最终本地、feat 与 release 完整 Edge 均含 compare 5/5、全套 140/140 通过。发布与 `REQ-0.1.5-013-T04` 下一版本计划入口保持 In progress，等待实际完成。
+
+<a id="stable015-final2-evidence"></a>
+
+### 拖拽阻断修复后的最终验证门禁（2026-11-04，UTC+08:00）
+
+本节为当前验证状态：本地、feat 与 release 的最终完整门禁通过。此前 `624c67d`、`c040518` 的构建/探针与所有 CI 失败、中断、取消记录保留为各轮迭代历史；正式发布及 T04 尚未完成，不将验证全绿写成公开交付已完成。
+
+| 项目 | 已核对结果与证据 |
+|---|---|
+| 实现源 | `e5128c350d668874e6dd1110340bcfab9eac55b0`；BUG008 稳定 callback 与真实跨 stats 拖拽回归，T06 的专属 180 秒预算及 CPU finally 复位 |
+| BUG008 | `Done`；App 两处共享稳定 `updatePreviewWidth`，持有指针 1.2 秒跨真实 Worker stats 更新后继续拖动，pointer capture 及原 `>480` 断言通过 |
+| T05 | `Done`；`58a391a` 的显式 30 秒像素 poll、真实截图/PNG 采样与 `painted > 20` 保留；本地和双分支完整运行 Stage 7 各 10/10 passed |
+| T06 | `Done`；`e5128c3` 最小 diff 已核对，6 倍降速、两个 owner/各两轮及全部功能断言保留；本地和双分支 compare 各 5/5 passed，finally 复位 CPU rate=1 |
+| 前端与构建门禁 | 155 项前端 passed；lint 与生产 build passed |
+| Rust 门禁 | 全 workspace 206 passed / 2 ignored；fmt、全 targets/features clippy passed，ignored 边界沿前述记录，未计入通过数 |
+| 最终本地完整 Edge | `edge-final2-full.log`：一次完整运行、13 份 spec，140/140 passed、退出 0；含 compare 5/5、masonry-preview 1/1（真实跨父更新拖拽）、Stage 7 10/10。不是合并多次专项统计 |
+| feat 最终 CI | [41679151449](https://github.com/C-Au-Atmos/Muller/actions/runs/41679151449)，head `e5128c350d668874e6dd1110340bcfab9eac55b0`，completed/success；`feature-ci-final2-full.log`。lint、155 前端、生产 build、Rust fmt/206 passed+2 ignored/clippy 全绿；完整 Edge 13 spec 的 passed 数为 4,1,5,1,8,1,5,7,5,30,10,57,6，合计 140，含 Ctrl+F、masonry 与 Stage 7 回归 |
+| release 最终 CI | [41680031582](https://github.com/C-Au-Atmos/Muller/actions/runs/41680031582)，head `3180bf7f7f37c905d7337c83f1685668c0131424`，completed/success；`release-ci-final2-full.log`、`release-ci-final2-evidence.json`。lint、155 前端、生产 build、Rust fmt/206 passed+2 ignored/clippy 全绿；完整 Edge 13 spec 的 passed 数为 4,1,5,1,8,1,5,7,5,30,10,57,6，合计 140，含 Ctrl+F、masonry 与 Stage 7 回归。此前两分支失败事实继续保留 |
+| 新构建源 | release `80c418daa2767d38dadd4839d68c1d2bde7b590a`，将已验证 feat 晋级；`80c418..3180bf7f7f37c905d7337c83f1685668c0131424` 仅 `CHANGELOG.md` 变化，产品构建输入一致 |
+| 新 EXE/NSIS 构建 | `native-build-final2.log` 构建成功/退出 0；两包 FileVersion/ProductVersion 均为 `0.1.5`，`local-artifacts.json` 已更新为 `80c418` 本机产物，大小和 SHA256 见下表；未执行安装 |
+| 最终 EXE 回收站探针 | `native-recycle-final2.json` / `passed=true`：Windows Shell 文件/目录回收与还原、还原内容、Unicode、mtime 缺失拒绝及未确认永久删除拒绝通过；仅永久删除 fixture。初始 323→最终 323，`preExistingEntriesPreserved=true`，未清空已有回收站 |
+| 最终 EXE MFT/USN 探针 | `native-index-final2.json` / `passed=true`：210403 条/1 卷，初建含授权 666ms、查询 16.262ms、变更验证 4496ms、快照恢复 313ms，restored 1/rebuilt 0；覆盖 MFT、USN 创建/文件及父目录改名/删除、磁盘重载与停机变更校正。与旧样本规模不同，不据此声称性能改善 |
+| 最终 EXE UI | `native-ui-final2.json` / `result=passed`，绑定 `80c418` / 下表 portable SHA256。真实 Tauri WebView2 + computer-use sky 操作独立 fixture/profile：5 个 union 条目（新增/删除/内容不同/一致/仅时间不同各 1），时间筛选只显示 `time.txt`（1/5），Browse→Compare 保留时间筛选、结果及目录。`native-final2-compare-all.png`、`native-final2-compare-time.png`、`native-final2-compare-restored.png` 已目视核对；GUI 已关闭 |
+| 正式发布 / T04 | `In progress`；验证后 release → master、稳定标签/公开 Release/下载核验、0.1.6 三阶段分支与 Draft 入口待实际完成 |
+
+| 最终本地产物（源 `80c418`） | 字节数 | SHA256 |
+|---|---:|---|
+| `Muller_0.1.5_x64-portable.exe` | 11595776 | `69d5f24bda2c40303c3f104d559b2c4e4170bf9c6ad9abe1a4b090d8e92790a3` |
+| `Muller_0.1.5_x64-setup.exe` | 5010263 | `72dd50069c02037587b80f8545835bf553a1a504ea4966f1c6f75b0890c36a80` |
+
+上述为本机 Windows 构建，产物位于 `D:\Muller\release\0.1.5`；后续 GitHub Actions 发布二进制的来源、版本、大小与 SHA256 须独立核对记录。此前 `iteration-624c67d/`、`iteration-c040518/` 候选归档继续保留。
+
+最终原生 UI 结论仅覆盖报告列出的真实比较、时间筛选与切换保留场景；没有逐项验证全部筛选按钮，也未进行原生 EXE 的长按预览拖动。长按拖动由真实 Edge Worker stats/pointer-capture 回归覆盖；历史非零扫描中连续原生图像缺口及既有安装/系统会话等边界继续保留。本节列出的本地、feat/release 最终门禁和原生场景均已通过，REQ013-T01/T02/T05/T06 与 BUG008 验证 Done；稳定发布 T03 和下一版本 T04 仍 In progress。

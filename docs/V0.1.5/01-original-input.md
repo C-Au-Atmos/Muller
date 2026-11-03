@@ -422,3 +422,13 @@
 
 - 来源：feat CI `41675167370` 的慢 CPU compare 用例超过 90000ms 总预算；`ci41675167370/timing-analysis.json` 显示 43 个 expect 全部完成且无断言错误，测试主体约 91 秒，最终断言 trace 时间 93634ms（含启动）。
 - 期望：仅将该用例总预算 90→180 秒，并在 `finally` 复位 CPU 降速；保持 6 倍 CPU 降速、owner/循环次数及全部功能断言不变。该门禁修复与 BUG-0.1.5-008 分开追踪，修复后完整远端门禁与正式发布仍待结果。
+
+### 拖拽阻断修复与最终本地验收记录（2026-11-04，UTC+08:00）
+
+- `BUG-0.1.5-008` 已由 `e5128c350d668874e6dd1110340bcfab9eac55b0` 完成：App 两处复用稳定 `updatePreviewWidth` callback；回归按住指针 1.2 秒并确认真实 FlowBorder Worker stats 更新、布局稳定后仍持有 pointer capture，再继续拖动，原 `>480` 宽度断言保留且通过。
+- `REQ-0.1.5-013-T06` 同提交仅调整该测试 180 秒预算并在 `finally` 将 CPU rate 复位 1，6 倍降速、两个 owner/各两轮与全部断言保持。T05 的 30 秒像素 poll 与真实图像断言也保留；最终一次完整 Edge 的比较 5/5、拖拽 1/1、Stage 7 10/10 均通过。
+- 最终本地门禁为 155 前端、206 Rust（另 2 ignored）、lint/build/fmt/clippy 通过；`edge-final2-full.log` 单次完整运行 13 份 spec 合计 140/140、退出 0。前次 CI 失败记录不覆盖；最终远端门禁、新产品构建来源/哈希与原生复验、正式发布和 0.1.6 入口仍待实际补录于[最终本地证据](03-execution.md#stable015-final2-evidence)。
+- 新最终本机构建已由 release `80c418daa2767d38dadd4839d68c1d2bde7b590a` 完成，EXE/NSIS 版本均为 0.1.5、最新大小和 SHA256 已核对；新 EXE 原生回收站 323→323、MFT/USN 210403 条/1 卷及快照恢复通过。`80c418→3180bf7` 只有 CHANGELOG 变化，产品构建输入一致；最终 CI、原生 UI 验证和正式发布仍待完成。
+- 最终 EXE 原生 UI 已补齐：`native-ui-final2.json` 绑定 `80c418` / portable SHA256 `69d5f24bda2c40303c3f104d559b2c4e4170bf9c6ad9abe1a4b090d8e92790a3`，真实 Tauri WebView2 比较 5 个 union 条目、时间筛选仅 `time.txt`（1/5）、Browse→Compare 保留筛选/结果/目录均通过，三张 `native-final2-compare-{all,time,restored}.png` 已核对，GUI 已关闭。只记录这些原生场景，原生长按预览拖动与全部筛选按钮未逐项验证；长按拖动由真实 Edge pointer-capture 回归覆盖。当前仅最终 CI、正式发布与下一版本入口待补。
+- feat 最终 CI [41679151449](https://github.com/C-Au-Atmos/Muller/actions/runs/41679151449) 已完成并成功，源码 `e5128c350d668874e6dd1110340bcfab9eac55b0`；lint、155 前端、生产 build、Rust fmt/tests/clippy 及完整 Edge 13 份 spec/140 项全绿，含即时 Ctrl+F、跨父 render 预览拖拽及 Stage 7 像素检查。release `41680031582` 的 Edge 尚待完成，不能以 feat 结果替代 release 绿灯；正式发布与 T04 继续等待实际结果。
+- 最终验证收口：release CI [41680031582](https://github.com/C-Au-Atmos/Muller/actions/runs/41680031582) 现已 completed/success，head `3180bf7f7f37c905d7337c83f1685668c0131424`，全部质量门禁全绿、完整 Edge 13 份 spec/140 passed。`BUG-0.1.5-008` 与 `REQ-0.1.5-013` 的 T01/T02/T05/T06 验证均 Done；本地最终构建/原生证据及双分支 CI 通过，T03 稳定发布与 T04 下一版本入口仍 In progress，未先记公开发布成功。以上逐轮状态按时序保留，当前状态以本段及[最终验证证据](03-execution.md#stable015-final2-evidence)为准。
