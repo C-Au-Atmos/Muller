@@ -335,4 +335,3 @@ First public Windows preview.
   extended real-media testing remains open.
 - Stage 8's optional privileged MFT/USN index service is not included; global
   search uses the existing traversal index with fallback behavior.
-
